@@ -1,0 +1,36 @@
+# 核心框架
+streamlit>=1.29.0
+fastapi>=0.104.1
+uvicorn>=0.24.0
+
+# 数据获取
+ccxt>=4.1.77
+yfinance>=0.2.28
+fredapi>=0.5.1
+requests>=2.31.0
+feedparser>=6.0.0
+
+# 数据处理
+pandas>=2.1.4
+numpy>=1.26.2
+sqlalchemy>=2.0.23
+dune-client>=1.7.7
+
+# 可视化
+plotly>=5.17.0
+matplotlib>=3.8.2
+
+# 定时任务
+apscheduler>=3.10.4
+croniter>=2.0.1
+
+# 工具库
+python-dotenv>=1.0.0
+loguru>=0.7.2
+
+# 仪表板增强
+streamlit-autorefresh>=1.0.0
+
+# 额外依赖
+setuptools>=68.0.0
+wheel>=0.41.0
