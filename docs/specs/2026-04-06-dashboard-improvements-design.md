@@ -19,7 +19,7 @@
 
 **层 2 — tag 搜索 + 严格过滤（补充发现）**
 在 `polymarket_source.py` 的 `_search_markets()` 返回后新增过滤：
-1. `volume_num > 10000`（过滤低流动性）
+1. `float(market.get("volume", 0)) > 10000`（过滤低流动性，Gamma API 返回 `"volume"` 字段为字符串）
 2. 关键词黑名单：过滤 question 中包含球队、球员、城市气温、esports 等词的市场
 
 **预存在 bug 需同步修复**：`fetch()` 中 slug 循环将 `market_id` 加入 `seen_ids`，tag 循环将 `market_id:outcome` 加入 `seen_ids`，两者 key 格式不一致导致跨循环去重失效。实现时统一改为 `market_id:outcome` 格式。
