@@ -169,18 +169,29 @@ POLYMARKET = {
     "enabled": True,
     "api_url": "https://clob.polymarket.com",
     "gamma_url": "https://gamma-api.polymarket.com",
-    # 跟踪的市场标签（用于搜索相关市场）
+    # 跟踪的市场标签（用于搜索相关市场，配合 _is_noise_market 过滤）
     "tracked_tags": [
         "fed", "fomc", "interest-rate",
-        "geopolitics", "iran", "russia", "china", "war",
-        "gdp", "cpi", "inflation", "unemployment", "jobs",
-        "election", "trump", "president",
         "tariff", "trade",
         "crypto", "bitcoin", "sec", "etf",
-        "recession",
+        "recession", "inflation", "cpi",
+        "geopolitics",
     ],
-    # 手动指定的市场 slug（优先跟踪）
-    "tracked_slugs": [],
+    # 手动指定的市场 slug（优先跟踪，无效 slug 会被静默忽略）
+    # 验证方法: https://gamma-api.polymarket.com/markets?slug=<slug>
+    "tracked_slugs": [
+        # Fed / 利率
+        "will-the-fed-cut-interest-rates-in-2025",
+        "fed-cut-25-basis-points-june-2025",
+        # 关税 / 贸易
+        "will-us-tariffs-on-china-exceed-100-in-2025",
+        # 加密
+        "will-bitcoin-hit-100k-in-2025",
+        "will-ethereum-etf-be-approved-in-2024",
+        # 宏观经济
+        "us-recession-in-2025",
+        "will-cpi-be-above-3-percent-in-2025",
+    ],
 }
 
 # ============================================================

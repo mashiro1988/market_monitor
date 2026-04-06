@@ -21,6 +21,41 @@ class PolymarketSource(BaseSource):
         self.tracked_slugs = config.POLYMARKET.get("tracked_slugs", [])
         self.proxy = config.PROXY
 
+    _NOISE_KEYWORDS = [
+        # 足球/体育联赛
+        " fc", "fc ", " sc ", "orlando city", "los angeles fc",
+        "over/under", "o/u", "total kills", "total goals",
+        "finish in the top", "make the cut",
+        "uefa", "champions league", "qualify for the league",
+        "serie a", "premier league", "bundesliga", "la liga", "ligue 1",
+        "nba", "nfl", "mlb", "nhl", "mls",
+        "world cup", "euro 2024", "euro 2025", "euro 2026",
+        # 电竞
+        "baron nashor", "game 1", "game 2", "kills in",
+        # 天气
+        "temperature", "degrees", "fahrenheit", "celsius",
+        "highest temp", "lowest temp",
+        # 娱乐/名人
+        "grammy", "oscar", "box office",
+        # 低质量赛事押注
+        "who will win the match", "which team will win",
+    ]
+
+    _MIN_VOLUME = 10_000  # USD
+
+    def _is_noise_market(self, market: dict) -> bool:
+        """Return True if this market should be filtered out."""
+        try:
+            volume = float(market.get("volume", 0) or 0)
+        except (ValueError, TypeError):
+            volume = 0.0
+
+        if volume < self._MIN_VOLUME:
+            return True
+
+        question = (market.get("question", "") or "").lower()
+        return any(kw in question for kw in self._NOISE_KEYWORDS)
+
     def _get_proxies(self):
         return {"http": self.proxy, "https": self.proxy} if self.proxy else {}
 
@@ -59,24 +94,24 @@ class PolymarketSource(BaseSource):
     def fetch(self) -> list[PredictionRecord]:
         """获取所有跟踪的预测市场最新赔率"""
         records = []
-        seen_ids = set()
+        seen_ids: set[str] = set()  # key: "market_id:outcome"
 
-        # 1. 获取手动指定的市场
+        # 1. 手动指定 slug（核心，不受过滤）
         for slug in self.tracked_slugs:
             market = self._get_market_by_slug(slug)
             if market:
-                market_records = self._parse_market(market)
-                for r in market_records:
-                    if r.market_id not in seen_ids:
+                for r in self._parse_market(market):
+                    key = f"{r.market_id}:{r.outcome}"
+                    if key not in seen_ids:
                         records.append(r)
-                        seen_ids.add(r.market_id)
+                        seen_ids.add(key)
 
-        # 2. 通过标签搜索宏观相关市场
+        # 2. tag 搜索（补充，严格过滤）
         for tag in self.tracked_tags:
-            markets = self._search_markets(tag, limit=5)
-            for market in markets:
-                market_records = self._parse_market(market)
-                for r in market_records:
+            for market in self._search_markets(tag, limit=5):
+                if self._is_noise_market(market):
+                    continue
+                for r in self._parse_market(market):
                     key = f"{r.market_id}:{r.outcome}"
                     if key not in seen_ids:
                         records.append(r)
