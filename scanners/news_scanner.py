@@ -11,6 +11,7 @@ from scanners.base import BaseSource, NewsRecord
 from scanners.sources.wallstreetcn_source import WallStreetCNSource
 from scanners.sources.jin10_source import Jin10Source
 from scanners.sources.rss_source import create_rss_sources
+from scanners.scorer import NewsScorer
 import config
 
 
@@ -28,6 +29,8 @@ class NewsScanner:
 
         # 添加 RSS 源
         self.sources.extend(create_rss_sources())
+
+        self.scorer = NewsScorer()
 
     @staticmethod
     def compute_content_hash(title: str) -> str:
@@ -49,6 +52,13 @@ class NewsScanner:
                 logger.info(f"[NewsScanner] {source.name} 返回 {len(records)} 条新闻")
             except Exception as e:
                 logger.error(f"[NewsScanner] {source.name} 采集失败: {e}")
+
+        # LLM 打分（在 DB session 开启前完成）
+        if self.scorer.enabled and all_records:
+            scores = self.scorer.score_batch(all_records)
+            for record, score in zip(all_records, scores):
+                if score is not None:
+                    record.importance = score
 
         # 去重并写入数据库
         saved_count = self._save_records(all_records, scan_time)
