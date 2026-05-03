@@ -1,9 +1,11 @@
 """
-CoinGecko 数据源 - 加密货币价格备选方案
+CoinGecko 数据源 - 加密货币实时价格备选方案
 
-当 Binance 因地区限制不可用时，使用 CoinGecko 公开 API 获取加密货币价格。
+当 OKX 合约/现货 K 线不可用时，使用 CoinGecko 公开 API 获取实时价格。
 无需 API key，支持中国直连。
 """
+from datetime import datetime, timezone
+
 import requests
 from loguru import logger
 from scanners.base import BaseSource, PriceRecord
@@ -36,9 +38,9 @@ SYMBOL_TO_COINGECKO = {
 
 
 class CoinGeckoPriceSource(BaseSource):
-    """CoinGecko 公开 API 加密货币价格源"""
+    """CoinGecko 公开 API 加密货币实时价格源"""
 
-    name = "coingecko"
+    name = "coingecko_realtime"
 
     def __init__(self):
         self.base_url = "https://api.coingecko.com/api/v3"
@@ -49,13 +51,13 @@ class CoinGeckoPriceSource(BaseSource):
     def _get_proxies(self):
         return {"http": self.proxy, "https": self.proxy} if self.proxy else {}
 
-    def fetch(self) -> list[PriceRecord]:
-        """批量获取所有加密货币价格"""
+    def fetch_symbols(self, symbols: list[str]) -> list[PriceRecord]:
+        """批量获取指定加密货币实时价格；timestamp 为本次采集时点。"""
         records = []
 
         # 构建 CoinGecko IDs 列表
         ids_map = {}  # coingecko_id -> symbol
-        for symbol in self.symbols:
+        for symbol in symbols:
             cg_id = SYMBOL_TO_COINGECKO.get(symbol)
             if cg_id:
                 ids_map[cg_id] = symbol
@@ -88,6 +90,7 @@ class CoinGeckoPriceSource(BaseSource):
 
             r.raise_for_status()
             data = r.json()
+            collected_at = datetime.now(timezone.utc).replace(tzinfo=None)
         except Exception as e:
             logger.error(f"[CoinGecko] 请求失败: {e}")
             return records
@@ -118,10 +121,15 @@ class CoinGeckoPriceSource(BaseSource):
                 change_pct=float(change_pct) if change_pct is not None else None,
                 volume=float(volume) if volume else None,
                 source=self.name,
+                timestamp=collected_at,
             ))
 
-        logger.info(f"[CoinGecko] 获取 {len(records)} 个加密货币价格")
+        logger.info(f"[CoinGecko] 获取 {len(records)} 个加密货币实时价格，timestamp={collected_at}")
         return records
+
+    def fetch(self) -> list[PriceRecord]:
+        """批量获取所有加密货币实时价格"""
+        return self.fetch_symbols(self.symbols)
 
     def health_check(self) -> bool:
         try:

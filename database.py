@@ -4,7 +4,7 @@
 模型定义已迁移到 models/ 包中。
 为保持向后兼容，从 models 包中重新导出旧模型。
 """
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import config
@@ -28,6 +28,35 @@ def create_tables():
     # 导入所有模型以确保它们注册到 Base.metadata
     import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _ensure_sqlite_schema()
+
+
+def _ensure_sqlite_schema():
+    """SQLite 轻量迁移：补齐 create_all 不会添加的旧表新列。"""
+    if not config.DATABASE_URL.startswith("sqlite"):
+        return
+
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "news_items" not in table_names:
+        return
+
+    existing_columns = {col["name"] for col in inspector.get_columns("news_items")}
+    required_columns = {
+        "llm_importance": "INTEGER",
+        "llm_importance_reason": "TEXT",
+        "llm_model": "VARCHAR(80)",
+        "llm_scored_at": "DATETIME",
+    }
+
+    with engine.begin() as conn:
+        for column_name, column_type in required_columns.items():
+            if column_name not in existing_columns:
+                conn.execute(text(f"ALTER TABLE news_items ADD COLUMN {column_name} {column_type}"))
+        conn.execute(text("DROP INDEX IF EXISTS ix_news_content_hash"))
+        if "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:
+            conn.execute(text("DROP INDEX IF EXISTS ix_news_source_id"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_source_id ON news_items (source, source_id)"))
 
 
 def get_session():

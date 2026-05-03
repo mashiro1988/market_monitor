@@ -6,7 +6,7 @@ from loguru import logger
 from database import get_session
 from models.prediction import PredictionMarket
 from scanners.base import PredictionRecord
-from scanners.sources.polymarket_source import PolymarketSource
+from scanners.sources.polymarket.source import PolymarketSource
 import config
 
 

@@ -3,6 +3,7 @@
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 
@@ -17,6 +18,9 @@ class PriceRecord:
     change_pct: Optional[float] = None
     volume: Optional[float] = None
     source: str = ""
+    # 价格对应时间（UTC naive）。5m K 线源使用最近已收盘 bar 的结束时刻；
+    # CoinGecko 实时价使用采集时点；FRED 等源端若无法提供则为 None，入库时回退到 scan_time。
+    timestamp: Optional[datetime] = None
 
 
 @dataclass
@@ -27,9 +31,14 @@ class NewsRecord:
     title: str
     content: Optional[str] = None
     url: Optional[str] = None
-    importance: Optional[int] = None   # 0-10
+    importance: Optional[int] = None   # 源端重要标志；Jin10 important 映射为 1/0
+    llm_importance: Optional[int] = None
+    llm_importance_reason: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_scored_at: Optional[datetime] = None
     language: str = "zh"
     categories: Optional[str] = None
+    published_at: Optional[datetime] = None  # 原始发布时间
 
 
 @dataclass

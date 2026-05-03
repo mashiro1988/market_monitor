@@ -60,6 +60,9 @@ class WallStreetCNSource(BaseSource):
                 if ts == 0:
                     continue
 
+                # 源端 display_time 是 Unix 秒时间戳（UTC）
+                published_at = datetime.utcfromtimestamp(ts)
+
                 raw_title = (it.get("title") or "").strip()
                 if not raw_title:
                     continue
@@ -85,6 +88,7 @@ class WallStreetCNSource(BaseSource):
                     importance=importance,
                     language="zh",
                     categories=str(channel) if channel else "global",
+                    published_at=published_at,
                 ))
             except Exception:
                 continue

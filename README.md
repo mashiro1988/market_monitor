@@ -1,174 +1,149 @@
-# 📊 市场监控仪表板
+# Market Monitor
 
-基于Streamlit的自动化市场数据监控系统，可以实时跟踪股票指数、加密货币、债券利率等金融数据。
+本地单人使用的宏观市场监控交易台。Python 负责扫描器、告警、数据库和 Dune 封装；FastAPI 提供唯一 REST 数据入口；React/Vite/TypeScript 提供 `http://localhost:8000` 的现代前端界面。
 
-## ✨ 功能特性
+## 功能
 
-- 📈 **股票指数监控**: 道琼斯、纳斯达克、标普500实时数据
-- ₿ **加密货币监控**: BTC、ETH等主流币种价格跟踪
-- 🏦 **债券利率监控**: 美国10年期、2年期国债收益率
-- 📊 **数据可视化**: 交互式图表展示趋势
-- 🔄 **自动化更新**: 定时获取最新数据
-- 💾 **数据存储**: SQLite数据库持久化存储
+- 市场概览：资产卡片、5m/1h/24h 涨跌幅、跨资产走势、明细表和 CSV。
+- 新闻快讯：Jin10/Bloomberg 双栏信息流，支持来源、LLM 分数、重要标志、关键词和时间窗口筛选。
+- 预测市场：Polymarket 宏观主题 family 图和单市场明细。
+- 告警设置：查看规则、发送企业微信测试消息、查看告警日志。
+- 新闻标注：用价格告警窗口选择候选新闻并保存人工标注。
+- 链上数据：保留 ETH Dune API，前端暂为占位页。
 
-## 🚀 快速开始
-
-### 1. 安装依赖
+## 快速开始
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. 配置API密钥（可选）
-
-复制 `.env.example` 为 `.env` 文件，并填入您的API密钥：
-
-```bash
-# 经济数据API（可选，免费申请）
-FRED_API_KEY=your_fred_api_key_here
-```
-
-> **注意**: FRED API密钥是可选的，主要用于获取CPI、失业率等经济数据。
-> 申请地址: https://fred.stlouisfed.org/docs/api/api_key.html
-
-### 3. 初始化数据库
-
-```bash
 python run.py setup
-```
-
-### 4. 采集初始数据
-
-```bash
-python run.py collect
-```
-
-### 5. 启动应用
-
-```bash
+cd frontend
+cmd /c npm.cmd install
+cd ..
+python run.py frontend-build
 python run.py app
 ```
 
-应用将在浏览器中自动打开，访问地址: http://localhost:8501
+应用地址：`http://localhost:8000`
 
-## 📱 使用说明
-
-### 主界面功能
-
-1. **实时数据卡片**: 显示各指数当前价格和涨跌幅
-2. **趋势图表**: 可视化显示价格走势
-3. **控制面板**: 
-   - 🔄 立即更新数据按钮
-   - 显示/隐藏不同数据类型
-   - 数据源说明
-4. **详细数据表**: 可展开查看完整历史数据
-
-### 数据更新
-
-- **手动更新**: 点击侧边栏"立即更新数据"按钮
-- **自动更新**: 修改 `config.py` 中的定时任务配置
-
-## 🛠️ 技术架构
-
-### 技术栈
-
-- **前端**: Streamlit + Plotly
-- **后端**: FastAPI + SQLAlchemy
-- **数据库**: SQLite
-- **数据源**: 
-  - Yahoo Finance (yfinance)
-  - Binance API (ccxt)
-  - FRED API (fredapi)
-
-### 项目结构
-
-```
-市场监控/
-├── app.py              # Streamlit主应用
-├── config.py           # 配置文件
-├── database.py         # 数据库模型
-├── data_collector.py   # 数据采集模块
-├── run.py             # 启动脚本
-├── requirements.txt    # 依赖包
-├── README.md          # 说明文档
-└── market_monitor.db  # SQLite数据库（自动生成）
-```
-
-## 📊 数据源说明
-
-| 数据类型 | 数据源 | 更新频率 | API限制 |
-|---------|--------|----------|---------|
-| 美股指数 | Yahoo Finance | 实时 | 无限制 |
-| 加密货币 | Binance | 实时 | 无限制 |
-| 债券利率 | Yahoo Finance | 实时 | 无限制 |
-| 经济数据 | FRED API | 日/月 | 需要密钥 |
-
-## 🔧 自定义配置
-
-### 添加新的数据源
-
-修改 `config.py` 文件中的 `DATA_SOURCES` 配置：
-
-```python
-DATA_SOURCES = {
-    "crypto_symbols": {
-        "BTC": "BTC/USDT",
-        "ETH": "ETH/USDT",
-        "新币种": "SYMBOL/USDT"  # 添加新币种
-    }
-}
-```
-
-### 修改更新频率
-
-在 `config.py` 中修改 `UPDATE_SCHEDULE`：
-
-```python
-UPDATE_SCHEDULE = {
-    "crypto_data": "*/5 * * * *",  # 改为每5分钟更新
-}
-```
-
-## 🚀 部署到云端
-
-### 腾讯云部署（推荐）
-
-1. 创建腾讯云 CloudBase 项目
-2. 上传代码到云函数
-3. 配置环境变量
-4. 设置定时触发器
-
-### 本地服务器部署
+开发模式：
 
 ```bash
-# 使用gunicorn部署（生产环境）
-pip install gunicorn
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
+python run.py api-dev
+cd frontend
+cmd /c npm.cmd run dev
 ```
 
-## 🐛 常见问题
+Vite 开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`。
 
-### Q: 数据更新失败？
-A: 检查网络连接，确保能访问Yahoo Finance和Binance API
+## 常用命令
 
-### Q: 图表不显示？
-A: 确保已经采集了数据，点击"立即更新数据"按钮
+| 命令 | 说明 |
+|---|---|
+| `python run.py app` | 构建缺失的 `frontend/dist`，启动 FastAPI，服务 React SPA，并打开 `http://localhost:8000` |
+| `python run.py api-dev` | FastAPI reload 开发服务 |
+| `python run.py frontend-build` | 执行前端 Vite 构建 |
+| `python run.py scan` | 执行一次价格、新闻、预测市场扫描并评估告警 |
+| `python run.py schedule` | 启动独立定时扫描器 |
+| `python run.py setup` | 初始化/补齐数据库表 |
+| `python run.py collect` | 旧版兼容采集路径，写 legacy tables |
 
-### Q: 经济数据为空？
-A: 需要配置FRED API密钥，或者该数据尚未发布
+## 配置
 
-## 📈 未来规划
+复制或创建 `.env`，按需填写：
 
-- [ ] 添加更多技术指标
-- [ ] 支持自定义警报
-- [ ] 移动端优化
-- [ ] 数据导出功能
-- [ ] 实时推送通知
+```bash
+DEEPSEEK_API_KEY=
+WECHAT_WORK_WEBHOOK=
+DUNE_API_KEY=
+DUNE_QUERY_ID_ETH_TOP100_NETFLOW=
+DUNE_QUERY_ID_ETH_DAILY_STATS=
+DUNE_QUERY_ID_ETH_CEX_DAILY_INOUT=
+PROXY_URL=http://127.0.0.1:4780
+```
 
-## 📧 联系支持
+主要运行配置在 [config.py](D:/market_monitor/config.py)：
 
-如有问题或建议，请提交Issue或Pull Request。
+- `SCAN_INTERVALS` 控制价格、新闻、预测市场扫描频率。
+- `ALERT_RULES` 控制价格异动、重要新闻、预测市场异动和 hourly summary。
+- `MARKET_OVERVIEW_DEFAULT_SYMBOLS` 同时用于市场默认走势图和 hourly summary。
+- Dune 查询 ID 用于 `/api/onchain/eth/*`，服务层有 60 分钟内存缓存。
 
----
+## 架构
 
-**⚠️ 免责声明**: 本系统仅供学习和参考使用，所有数据仅用于展示目的，不构成投资建议。投资有风险，决策需谨慎。
+```text
+React/Vite SPA
+  -> /api/*
+FastAPI routes
+  -> services
+services
+  -> SQLAlchemy models / config / integrations
+scanners + alerts
+  -> price_snapshots / news_items / prediction_markets / alert_logs
+```
+
+关键目录：
+
+- [api](D:/market_monitor/api)：FastAPI app、routes、统一错误响应、DB 依赖。
+- [services](D:/market_monitor/services)：市场、新闻、预测、告警、标注、Dune、任务服务。
+- [schemas](D:/market_monitor/schemas)：Pydantic API contract。
+- [frontend](D:/market_monitor/frontend)：React/Vite/TypeScript 前端。
+- [scanners](D:/market_monitor/scanners)：价格、新闻、预测市场扫描器和外部源。
+- [alerts](D:/market_monitor/alerts)：告警规则评估和通道。
+- [models](D:/market_monitor/models)：SQLAlchemy ORM。
+
+更细的结构和数据流请看 [ARCHITECTURE.md](D:/market_monitor/ARCHITECTURE.md) 与 [DATAFLOW.md](D:/market_monitor/DATAFLOW.md)。
+
+## API
+
+核心接口：
+
+- `GET /api/health`, `GET /api/status`
+- `POST /api/tasks/scan`, `GET /api/tasks/{task_id}`
+- `GET /api/market/latest`, `/history`, `/table`, `/table.csv`
+- `GET /api/news`
+- `GET /api/predictions`, `/predictions/families`
+- `GET /api/alerts/rules`, `/alerts/logs`, `POST /api/alerts/test-wechat`
+- `GET /api/annotations/price-rules`, `/symbols`, `/windows`, `/context-news`, `POST /api/annotations`
+- `GET /api/onchain/eth/top100-netflow`, `/daily-stats`, `/cex-flows`
+
+错误响应统一为：
+
+```json
+{ "code": "ERROR_CODE", "message": "Human readable message", "details": {} }
+```
+
+时间字段统一包含 UTC 和北京时间：
+
+```json
+{ "timestamp_utc": "2026-05-03T00:30:00", "timestamp_bj": "2026-05-03 08:30:00" }
+```
+
+## 测试
+
+后端：
+
+```bash
+python -m pytest
+```
+
+前端：
+
+```bash
+cd frontend
+cmd /c npm.cmd run typecheck
+cmd /c npm.cmd run build
+```
+
+Streamlit 清理检查：
+
+```bash
+rg -n "streamlit|st\.|streamlit_autorefresh" -g "*.py" -g "requirements.txt"
+```
+
+应无结果。
+
+## 说明
+
+`frontend/dist` 和 `frontend/node_modules` 不提交。`python run.py app` 会在 `dist` 缺失时尝试自动构建；如果依赖未安装或构建失败，会明确报错并退出。
+
+本系统仅供本地研究和监控使用，不构成投资建议。

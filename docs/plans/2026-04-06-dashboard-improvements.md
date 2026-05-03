@@ -1,5 +1,7 @@
 # Dashboard Improvements Implementation Plan
 
+> Historical document: this plan predates the FastAPI + React/Vite migration. Treat Streamlit/page references as historical context only; use root `ARCHITECTURE.md`, `DATAFLOW.md`, and `README.md` for current structure.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix Polymarket market relevance, add DeepSeek-powered news importance scoring for all sources, and add a cross-asset normalized price chart to the market overview page.

@@ -1,5 +1,7 @@
 # Dashboard Improvements Design
 
+> Historical document: this design predates the FastAPI + React/Vite migration. Treat Streamlit/page references as historical context only; use root `ARCHITECTURE.md`, `DATAFLOW.md`, and `README.md` for current structure.
+
 > **日期**: 2026-04-06
 > **范围**: 三个独立改进，可并行实现
 

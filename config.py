@@ -42,6 +42,12 @@ if not PROXY_AVAILABLE:
 # ============================================================
 FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 DUNE_API_KEY = os.getenv("DUNE_API_KEY", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_BATCH_SIZE = int(os.getenv("DEEPSEEK_BATCH_SIZE", "12"))
+DEEPSEEK_CONNECT_TIMEOUT = float(os.getenv("DEEPSEEK_CONNECT_TIMEOUT", "10"))
+DEEPSEEK_READ_TIMEOUT = float(os.getenv("DEEPSEEK_READ_TIMEOUT", "45"))
+DEEPSEEK_MAX_RETRIES = int(os.getenv("DEEPSEEK_MAX_RETRIES", "1"))
 
 # 企业微信机器人 Webhook
 WECHAT_WORK_WEBHOOK = os.getenv("WECHAT_WORK_WEBHOOK", "")
@@ -59,6 +65,34 @@ SCAN_INTERVALS = {
     "news": 5,
     "prediction": 5,
 }
+SCAN_ROLLING_BACKFILL_INTERVALS = int(os.getenv("SCAN_ROLLING_BACKFILL_INTERVALS", "2"))
+
+# App / scheduler 启动后最多回补的 5m 价格历史小时数。
+# 回补按已入库的最新 timestamp 继续，重复 (symbol, timestamp) 会跳过。
+PRICE_BACKFILL_MAX_HOURS = int(os.getenv("PRICE_BACKFILL_MAX_HOURS", "72"))
+
+# App / scheduler 启动后最多回补的新闻小时数。
+# 回补只用于补齐停机期间缺失的新闻，最多 72 小时，避免重启后拉取过长历史。
+NEWS_BACKFILL_MAX_HOURS = int(os.getenv("NEWS_BACKFILL_MAX_HOURS", "72"))
+NEWS_BACKFILL_LLM_ENABLED = os.getenv("NEWS_BACKFILL_LLM_ENABLED", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+NEWS_BACKFILL_CATCHUP_ROUNDS = int(os.getenv("NEWS_BACKFILL_CATCHUP_ROUNDS", "4"))
+
+# 市场概览「跨资产历史走势对比」默认品种；企业微信 hourly summary 也复用这份清单。
+MARKET_OVERVIEW_DEFAULT_SYMBOLS = [
+    "YM=F",       # 道指期货
+    "NQ=F",       # 纳指期货
+    "000001.SS",  # 上证指数
+    "399006.SZ",  # 创业板指
+    "^N225",      # 日经指数
+    "CL=F",       # 原油
+    "GC=F",       # 黄金
+    "BTC/USDT",   # BTC
+]
 
 # ============================================================
 # 价格数据源配置
@@ -86,11 +120,10 @@ PRICE_SOURCES = {
     },
     # 债券利率
     "bonds": {
-        "US_10Y": {"source": "fred", "series": "DGS10"},
-        "US_2Y": {"source": "fred", "series": "DGS2"},
-        # 日债先尝试 yfinance，不可用则后续补充
-        "JP_10Y": {"source": "yfinance", "symbol": "^TNX"},
-        # JP_2Y yfinance 暂无可靠 ticker，后续补充
+        "US_10Y": {"source": "eastmoney", "secid": "171.US10Y", "name": "美国10年期国债收益率"},
+        "US_2Y": {"source": "eastmoney", "secid": "171.US2Y", "name": "美国2年期国债收益率"},
+        "JP_10Y": {"source": "eastmoney", "secid": "171.JP10Y", "name": "日本10年期国债"},
+        "JP_2Y": {"source": "eastmoney", "secid": "171.JP2Y", "name": "日本2年期国债"},
     },
     # 商品
     "commodities": {
@@ -128,37 +161,16 @@ PRICE_SOURCES = {
 # 新闻源配置
 # ============================================================
 NEWS_SOURCES = {
-    "wallstreetcn": {
-        "enabled": True,
-        "language": "zh",
-    },
     "jin10": {
         "enabled": True,
         "language": "zh",
     },
-    "coindesk_rss": {
+    "bloomberg": {
         "enabled": True,
+        "type": "rss",
         "language": "en",
-        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
-        "name": "CoinDesk",
-    },
-    "cointelegraph_rss": {
-        "enabled": True,
-        "language": "en",
-        "url": "https://cointelegraph.com/rss",
-        "name": "CoinTelegraph",
-    },
-    "theblock_rss": {
-        "enabled": True,
-        "language": "en",
-        "url": "https://www.theblock.co/rss.xml",
-        "name": "The Block",
-    },
-    "reuters_rss": {
-        "enabled": True,
-        "language": "en",
-        "url": "https://www.reutersagency.com/feed/",
-        "name": "Reuters",
+        "url": "https://feeds.bloomberg.com/markets/news.rss",
+        "name": "Bloomberg",
     },
 }
 
@@ -169,28 +181,31 @@ POLYMARKET = {
     "enabled": True,
     "api_url": "https://clob.polymarket.com",
     "gamma_url": "https://gamma-api.polymarket.com",
-    # 跟踪的市场标签（用于搜索相关市场，配合 _is_noise_market 过滤）
+    # tag 仅用于候选发现：Gamma 按 volume 降序取前 discovery_limit 个，再由过滤器筛选
     "tracked_tags": [
         "fed", "fomc", "interest-rate",
-        "tariff", "trade",
-        "crypto", "bitcoin", "sec", "etf",
-        "recession", "inflation", "cpi",
-        "geopolitics",
+        "inflation", "cpi",
+        "geopolitics", "iran", "middle-east", "oil", "shipping", "hormuz",
     ],
-    # 手动指定的市场 slug（优先跟踪，无效 slug 会被静默忽略）
-    # 验证方法: https://gamma-api.polymarket.com/markets?slug=<slug>
+    "discovery_limit": 5,
+    "min_volume": 100_000,
+    # 手动指定的 market/event slug（优先跟踪；event slug 会展开为其 markets；无效 slug 静默忽略）
+    # market 验证: https://gamma-api.polymarket.com/markets?slug=<slug>
+    # event 验证: https://gamma-api.polymarket.com/events/slug/<slug>
     "tracked_slugs": [
         # Fed / 利率
-        "will-the-fed-cut-interest-rates-in-2025",
-        "fed-cut-25-basis-points-june-2025",
-        # 关税 / 贸易
-        "will-us-tariffs-on-china-exceed-100-in-2025",
-        # 加密
-        "will-bitcoin-hit-100k-in-2025",
-        "will-ethereum-etf-be-approved-in-2024",
-        # 宏观经济
-        "us-recession-in-2025",
-        "will-cpi-be-above-3-percent-in-2025",
+        "how-many-fed-rate-cuts-in-2026",
+        "fed-decision-in-june-825",
+        "fed-rate-cut-by-629",
+        "what-will-the-fed-rate-be-at-the-end-of-2026",
+        # US inflation
+        "how-high-will-inflation-get-in-2026",
+        # Strait of Hormuz / shipping normalization
+        "strait-of-hormuz-traffic-returns-to-normal-by-april-30",
+        "strait-of-hormuz-traffic-returns-to-normal-by-may-15",
+        "strait-of-hormuz-traffic-returns-to-normal-by-end-of-may",
+        "strait-of-hormuz-traffic-returns-to-normal-by-end-of-june",
+        "iran-agrees-to-unrestricted-shipping-through-hormuz-in-april",
     ],
 }
 
@@ -201,25 +216,25 @@ ALERT_RULES = [
     {
         "name": "btc_price_spike",
         "rule_type": "price_change",
-        "params": {"symbol": "BTC/USDT", "threshold_pct": 3.0, "window_minutes": 15},
+        "params": {"symbol": "BTC/USDT", "threshold_pct": 0.3, "window_minutes": 15},
         "channels": ["wechat_work"],
-        "cooldown_minutes": 30,
+        "cooldown_minutes": 0,
         "enabled": True,
     },
     {
         "name": "eth_price_spike",
         "rule_type": "price_change",
-        "params": {"symbol": "ETH/USDT", "threshold_pct": 5.0, "window_minutes": 15},
+        "params": {"symbol": "ETH/USDT", "threshold_pct": 0.5, "window_minutes": 15},
         "channels": ["wechat_work"],
-        "cooldown_minutes": 30,
+        "cooldown_minutes": 0,
         "enabled": True,
     },
     {
         "name": "us_futures_spike",
         "rule_type": "price_change",
-        "params": {"symbol": "ES=F", "threshold_pct": 2.0, "window_minutes": 15},
+        "params": {"symbol": "NQ=F", "threshold_pct": 0.3, "window_minutes": 15},
         "channels": ["wechat_work"],
-        "cooldown_minutes": 30,
+        "cooldown_minutes": 0,
         "enabled": True,
     },
     {
@@ -233,9 +248,9 @@ ALERT_RULES = [
     {
         "name": "prediction_shift",
         "rule_type": "prediction_shift",
-        "params": {"threshold_pct": 5.0, "window_minutes": 30},
+        "params": {"threshold_pct": 5.0, "window_minutes": 15},
         "channels": ["wechat_work"],
-        "cooldown_minutes": 30,
+        "cooldown_minutes": 0,
         "enabled": True,
     },
     {
@@ -257,21 +272,16 @@ DUNE_QUERY_ID_ETH_MONTHLY_TX_COUNT = os.getenv("DUNE_QUERY_ID_ETH_MONTHLY_TX_COU
 DUNE_QUERY_ID_ETH_CEX_DAILY_INOUT = os.getenv("DUNE_QUERY_ID_ETH_CEX_DAILY_INOUT", "")
 
 # ============================================================
-# Streamlit 配置
-# ============================================================
-STREAMLIT_CONFIG = {
-    "page_title": "Investment Agent",
-    "page_icon": "📊",
-    "layout": "wide",
-    "initial_sidebar_state": "expanded",
-}
-
-# ============================================================
-# 旧版兼容（供旧代码引用）
+# 旧版兼容（供旧数据采集代码引用）
 # ============================================================
 DATA_SOURCES = {
     "stock_symbols": PRICE_SOURCES["us_indices"],
-    "bond_symbols": {"US_10Y": "^UST10Y", "US_2Y": "^UST2Y"},
+    "bond_symbols": {
+        "US_10Y": "171.US10Y",
+        "US_2Y": "171.US2Y",
+        "JP_10Y": "171.JP10Y",
+        "JP_2Y": "171.JP2Y",
+    },
     "crypto_symbols": PRICE_SOURCES["crypto"],
     "fred_indicators": {"CPI": "CPIAUCSL", "失业率": "UNRATE", "GDP": "GDP"},
 }

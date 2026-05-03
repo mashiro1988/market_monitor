@@ -1,6 +1,6 @@
 """
 RSS 数据源 - 通用 RSS/Atom 订阅解析器
-支持 CoinDesk, CoinTelegraph, The Block, Reuters 等
+支持 CoinDesk, CoinTelegraph, The Block, Bloomberg, FT 等
 """
 import hashlib
 import re
@@ -66,6 +66,15 @@ class RSSSource(BaseSource):
                 # 提取 source_id
                 source_id = entry.get("id", link or title)
 
+                # 提取发布时间
+                published_at = None
+                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                    try:
+                        import calendar
+                        published_at = datetime.utcfromtimestamp(calendar.timegm(entry.published_parsed))
+                    except Exception:
+                        pass
+
                 # 提取分类
                 categories = ""
                 if hasattr(entry, "tags"):
@@ -77,14 +86,25 @@ class RSSSource(BaseSource):
                     title=title,
                     content=content[:2000] if content else None,
                     url=link,
-                    importance=5,  # RSS 条目默认中等重要性
+                    importance=None,
                     language=self.language,
                     categories=categories if categories else None,
+                    published_at=published_at,
                 ))
             except Exception:
                 continue
 
         logger.info(f"RSS {self.name} 获取 {len(records)} 条新闻")
+        return records
+
+    def fetch_backfill(self, start_time: datetime, end_time: datetime) -> list[NewsRecord]:
+        """RSS 无历史翻页接口；从当前 feed 中补齐仍可见的时间段内条目。"""
+        records = [
+            record for record in self.fetch()
+            if record.published_at is not None
+            and start_time <= record.published_at < end_time
+        ]
+        logger.info(f"RSS {self.name} 回补 {len(records)} 条新闻")
         return records
 
     def health_check(self) -> bool:
@@ -102,7 +122,7 @@ def create_rss_sources() -> list[RSSSource]:
     for key, cfg in config.NEWS_SOURCES.items():
         if not cfg.get("enabled", False):
             continue
-        if not key.endswith("_rss"):
+        if cfg.get("type") != "rss":
             continue
         url = cfg.get("url", "")
         if not url:

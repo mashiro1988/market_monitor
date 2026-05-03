@@ -3,7 +3,7 @@ ORM 模型包 - 导出所有模型
 """
 from models.legacy import StockIndex, BondRate, EconomicData, CryptoData, MarketNews
 from models.price import PriceSnapshot
-from models.news import NewsItem
+from models.news import NewsItem, NewsPriceAnnotation
 from models.prediction import PredictionMarket
 from models.alert_log import AlertLog
 

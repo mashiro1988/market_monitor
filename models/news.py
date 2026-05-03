@@ -1,30 +1,60 @@
 """
 新闻条目模型 - 多源新闻聚合存储
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Index
+from sqlalchemy import Boolean, Column, Float, Integer, String, DateTime, Text, Index
 from datetime import datetime
 from database import Base
 
 
 class NewsItem(Base):
-    """多源新闻条目表"""
+    """新闻条目表"""
     __tablename__ = "news_items"
 
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime, nullable=False)
-    source = Column(String(50), nullable=False)         # wallstreetcn, jin10, coindesk_rss, etc.
-    source_id = Column(String(100), nullable=True)      # 源端原始ID，用于源内去重
+    source = Column(String(50), nullable=False)         # jin10, bloomberg
+    source_id = Column(String(100), nullable=True)      # 源端原始ID，用于告警标记和追踪
     title = Column(String(500), nullable=False)
     content = Column(Text, nullable=True)
     url = Column(String(500), nullable=True)
-    importance = Column(Integer, nullable=True)          # 0-10 重要性评分
+    importance = Column(Integer, nullable=True)          # 源端重要标志；Jin10 important 映射为 1/0
+    llm_importance = Column(Integer, nullable=True)      # DeepSeek V4 价格波动重要性评分，1-10
+    llm_importance_reason = Column(Text, nullable=True)
+    llm_model = Column(String(80), nullable=True)
+    llm_scored_at = Column(DateTime, nullable=True)
     language = Column(String(5), nullable=False, default="zh")  # zh, en
     categories = Column(String(200), nullable=True)     # 逗号分隔的标签
-    content_hash = Column(String(64), nullable=True)    # SHA256 标题哈希，用于跨源去重
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        Index("ix_news_source_id", "source", "source_id", unique=True),
-        Index("ix_news_content_hash", "content_hash"),
+        Index("ix_news_source_id", "source", "source_id"),
         Index("ix_news_timestamp", "timestamp"),
+    )
+
+
+class NewsPriceAnnotation(Base):
+    """价格异动窗口与候选新闻的人工标注结果。"""
+    __tablename__ = "news_price_annotations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(30), nullable=False)
+    asset_class = Column(String(20), nullable=True)
+    window_start = Column(DateTime, nullable=False)
+    window_end = Column(DateTime, nullable=False)
+    context_start = Column(DateTime, nullable=False)
+    context_end = Column(DateTime, nullable=False)
+    threshold_pct = Column(Float, nullable=True)
+    price_start = Column(Float, nullable=True)
+    price_end = Column(Float, nullable=True)
+    change_pct = Column(Float, nullable=True)
+    causal_news_ids = Column(Text, nullable=True)        # JSON 数组，元素为 news_items.id
+    no_clear_news = Column(Boolean, nullable=False, default=False)
+    notes = Column(Text, nullable=True)
+    labeler = Column(String(80), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_news_annotation_window", "symbol", "window_start", "window_end", unique=True),
+        Index("ix_news_annotation_created", "created_at"),
     )

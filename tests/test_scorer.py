@@ -64,3 +64,33 @@ def test_scorer_batches_large_input():
     # 25 inputs → 2 batches (20+5) → 25 scores
     assert len(result) == 25
     assert all(s == 5 for s in result)
+
+
+def test_loads_json_accepts_code_fence():
+    payload = NewsScorer._loads_json('```json\n{"items":[{"idx":0,"importance":8}]}\n```', "score")
+    assert payload["items"][0]["importance"] == 8
+
+
+def test_loads_json_rejects_empty_content():
+    try:
+        NewsScorer._loads_json("", "score")
+    except ValueError as e:
+        assert "返回空内容" in str(e)
+    else:
+        raise AssertionError("empty response should fail")
+
+
+def test_enrich_batch_uses_structured_scores():
+    scorer = NewsScorer(api_key="fake-key", model="deepseek-v4-flash")
+    records = [_make_record("Fed cuts rates")]
+
+    with patch.object(
+        scorer,
+        "_score_single_batch_structured",
+        return_value=[{"importance": 9, "reason": "意外降息影响风险资产"}],
+    ):
+        result = scorer.enrich_batch(records)
+
+    assert result[0].llm_importance == 9
+    assert result[0].llm_importance_reason == "意外降息影响风险资产"
+    assert result[0].llm_model == "deepseek-v4-flash"
