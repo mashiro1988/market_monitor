@@ -1,12 +1,45 @@
+# ===== Secrets =====
 .env
-.npm-cache/
-/package-lock.json
+.env.*
+!.env.example
+
+# ===== Python =====
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# ===== Local databases & runtime =====
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.scan.lock
+
+# ===== Frontend =====
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
-*.pyc
-__pycache__/
-.pytest_cache/
-.scan.lock
+.npm-cache/
+/package-lock.json
+
+# ===== IDE / AI tooling (本地自用，不入库) =====
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===== Local skill copies / scratch =====
+building-a-project-map/
+
+# ===== OS =====
+Thumbs.db
+.DS_Store
