@@ -223,7 +223,7 @@ textarea {
 
 .asset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 10px;
   margin-top: 10px;
 }
@@ -307,10 +307,10 @@ code {
 
 .stat strong {
   margin-top: 3px;
-  font-size: 13px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: clip;
 }
 
 .stat.up strong {
@@ -327,6 +327,21 @@ code {
   border-radius: 8px;
   background: var(--panel);
   padding: 10px;
+}
+
+.chart-panel:fullscreen {
+  background: var(--bg);
+  padding: 28px 32px;
+  overflow: auto;
+  border-top: 0;
+}
+
+.chart-panel:fullscreen .chart-shell {
+  height: calc(100vh - 140px) !important;
+}
+
+.chart-panel:fullscreen .panel-head {
+  margin-bottom: 16px;
 }
 
 .table-wrap {

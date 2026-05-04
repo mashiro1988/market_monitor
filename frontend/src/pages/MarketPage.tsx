@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Download, Play } from "lucide-react";
+import { ChevronDown, Download, Maximize2, Minimize2, Play } from "lucide-react";
 import { api } from "../api/client";
 import type { MarketHistoryResponse, MarketLatestItem, MarketTableRow } from "../api/types";
 import { MultiLineChart, type ChartPoint } from "../components/Charts";
@@ -161,6 +161,27 @@ export function MarketPage() {
   const [tableAssetClasses, setTableAssetClasses] = useState<string[]>([]);
   const [tablePage, setTablePage] = useState(1);
 
+  const chartPanelRef = useRef<HTMLElement>(null);
+  const [chartFullscreen, setChartFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handler = () => {
+      setChartFullscreen(document.fullscreenElement === chartPanelRef.current);
+    };
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleChartFullscreen = () => {
+    const el = chartPanelRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void el.requestFullscreen();
+    }
+  };
+
   const latest = useQuery({ queryKey: ["market-latest"], queryFn: api.marketLatest, refetchInterval: 60_000 });
   const symbolsList = useQuery({ queryKey: ["market-symbols"], queryFn: () => api.marketSymbols() });
 
@@ -259,7 +280,7 @@ export function MarketPage() {
         })}
       </div>
 
-      <section className="panel">
+      <section className="panel chart-panel" ref={chartPanelRef}>
         <div className="panel-head">
           <h2>跨资产走势</h2>
           <div className="panel-controls">
@@ -271,6 +292,10 @@ export function MarketPage() {
               emptyLabel="未选"
             />
             <SelectControl label="走势区间" value={hours} onChange={setHours} options={windowOptions} />
+            <Button kind="secondary" onClick={toggleChartFullscreen}>
+              {chartFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              {chartFullscreen ? "退出全屏" : "全屏"}
+            </Button>
           </div>
         </div>
         {history.isLoading ? (
