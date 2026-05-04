@@ -30,6 +30,7 @@ class PriceWindowSchema(BaseModel):
     price_end: float
     change_pct: float
     annotation_id: int | None = None  # 已标注则为对应 NewsPriceAnnotation.id
+    is_primary: bool = True            # 连续异动 run 的第一个为 True；后续延伸窗口为 False，不可被标注
 
 
 class AnnotationCreateRequest(BaseModel):

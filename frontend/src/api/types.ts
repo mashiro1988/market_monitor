@@ -198,6 +198,7 @@ export type PriceWindow = {
   price_end: number;
   change_pct: number;
   annotation_id: number | null;
+  is_primary: boolean;  // 连续异动 run 的第一个；false 时为 continuation，不可标注
 };
 
 export type AnnotationDetail = {

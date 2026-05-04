@@ -139,7 +139,8 @@ def load_price_windows(
         (row.window_start, row.window_end): row.id for row in annotation_rows
     }
 
-    windows: list[PriceWindowSchema] = []
+    # Step 1：扫所有快照，找出全部超阈值的滚动窗口（"原始触发"）。
+    triggers: list[tuple[datetime, dict]] = []  # (window_end_dt, schema_kwargs)
     for current in rows:
         if current.timestamp < display_cutoff:
             continue
@@ -151,22 +152,49 @@ def load_price_windows(
         if abs(change_pct) < threshold_pct:
             continue
         annotation_id = annotation_index.get((baseline.timestamp, current.timestamp))
-        windows.append(
-            PriceWindowSchema(
-                symbol=current.symbol,
-                asset_class=current.asset_class,
-                name=current.name,
-                window_start=timestamp_pair(baseline.timestamp),
-                window_end=timestamp_pair(current.timestamp),
-                configured_window_minutes=window_minutes,
-                actual_window_minutes=round((current.timestamp - baseline.timestamp).total_seconds() / 60, 1),
-                price_start=baseline.price,
-                price_end=current.price,
-                change_pct=change_pct,
-                annotation_id=annotation_id,
-            )
+        triggers.append((
+            current.timestamp,
+            {
+                "symbol": current.symbol,
+                "asset_class": current.asset_class,
+                "name": current.name,
+                "window_start": timestamp_pair(baseline.timestamp),
+                "window_end": timestamp_pair(current.timestamp),
+                "configured_window_minutes": window_minutes,
+                "actual_window_minutes": round((current.timestamp - baseline.timestamp).total_seconds() / 60, 1),
+                "price_start": baseline.price,
+                "price_end": current.price,
+                "change_pct": change_pct,
+                "annotation_id": annotation_id,
+            },
+        ))
+
+    # Step 2：按时间正序聚合连续 run。两个相邻触发同号且 window_end 间隔 ≤ window_minutes
+    # 时视为同一连续异动；run 的第一个为 primary，其余为 secondary（is_primary=False）。
+    triggers.sort(key=lambda t: t[0])
+    enriched: list[tuple[datetime, datetime, PriceWindowSchema]] = []  # (run_anchor_dt, end_dt, schema)
+    last_end_dt: datetime | None = None
+    last_sign: int | None = None
+    run_anchor_dt: datetime | None = None
+    for end_dt, kwargs in triggers:
+        sign = 1 if kwargs["change_pct"] >= 0 else -1
+        is_primary = (
+            last_end_dt is None
+            or sign != last_sign
+            or (end_dt - last_end_dt).total_seconds() / 60 > window_minutes
         )
-    return sorted(windows, key=lambda item: item.window_end.timestamp_utc or "", reverse=True)[:200]
+        if is_primary:
+            run_anchor_dt = end_dt
+        kwargs["is_primary"] = is_primary
+        last_end_dt = end_dt
+        last_sign = sign
+        enriched.append((run_anchor_dt, end_dt, PriceWindowSchema(**kwargs)))
+
+    # Step 3：排序——最新的 run 排前面（按 anchor DESC），run 内部按 end ASC（primary 在前）。
+    # 用稳定排序两步走：先按 end ASC，再按 anchor DESC，得到所需顺序。
+    enriched.sort(key=lambda t: t[1])
+    enriched.sort(key=lambda t: t[0], reverse=True)
+    return [t[2] for t in enriched][:200]
 
 
 def load_context_news(session: Session, context_start: datetime, context_end: datetime) -> ContextNewsResponse:

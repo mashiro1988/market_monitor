@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Circle, RotateCcw, Save, Sparkles } from "lucide-react";
+import { CornerDownRight, Circle, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
@@ -47,24 +47,36 @@ export function AnnotationsPage() {
     enabled: Boolean(currentSymbol)
   });
 
-  const unannotated = useMemo(
-    () => (windowsQuery.data ?? []).filter((w) => w.annotation_id == null),
-    [windowsQuery.data]
-  );
+  // 把后端按 run 排好的窗口分组。后端保证排序：每个 primary 后紧跟它的 secondaries（按时间升序）。
+  // 已标注 primary 的整个 group 在这里被丢掉——primary 进了下方"已标注"块，
+  // secondaries 没必要孤悬展示（它们属于已经处理过的事件）。
+  const groups = useMemo(() => {
+    const all: { primary: PriceWindow; secondaries: PriceWindow[] }[] = [];
+    for (const w of windowsQuery.data ?? []) {
+      if (w.is_primary) {
+        all.push({ primary: w, secondaries: [] });
+      } else if (all.length) {
+        all[all.length - 1].secondaries.push(w);
+      }
+    }
+    return all.filter((g) => g.primary.annotation_id == null);
+  }, [windowsQuery.data]);
 
-  // 默认选第一条未标注；切换 symbol/hours 后若上次的窗口没了也走这里。
+  const unannotatedPrimaries = useMemo(() => groups.map((g) => g.primary), [groups]);
+
+  // 默认选第一条未标注 primary；切换 symbol/hours 后若上次的窗口没了也走这里。
   useEffect(() => {
-    if (!unannotated.length) {
+    if (!unannotatedPrimaries.length) {
       setActiveKey("");
       return;
     }
-    if (activeKey && unannotated.some((w) => windowKey(w) === activeKey)) return;
-    setActiveKey(windowKey(unannotated[0]));
-  }, [unannotated, activeKey]);
+    if (activeKey && unannotatedPrimaries.some((w) => windowKey(w) === activeKey)) return;
+    setActiveKey(windowKey(unannotatedPrimaries[0]));
+  }, [unannotatedPrimaries, activeKey]);
 
   const activeWindow = useMemo(
-    () => unannotated.find((w) => windowKey(w) === activeKey),
-    [unannotated, activeKey]
+    () => unannotatedPrimaries.find((w) => windowKey(w) === activeKey),
+    [unannotatedPrimaries, activeKey]
   );
 
   const contextNews = useQuery({
@@ -143,20 +155,21 @@ export function AnnotationsPage() {
 
       <section className="panel annotation-block">
         <div className="panel-head">
-          <h2>未标注 ({unannotated.length})</h2>
+          <h2>未标注 ({groups.length})</h2>
+          <span className="muted-text small">连续异动会被聚合为一个事件，只标第一次；后续延伸窗口（↳）只展示不标注</span>
         </div>
 
         {windowsQuery.isLoading ? <LoadingState /> :
          windowsQuery.error ? <ErrorState error={windowsQuery.error} /> :
-         !unannotated.length ? <EmptyState title="该回溯期内没有未标注的价格异动窗口" /> : (
+         !groups.length ? <EmptyState title="该回溯期内没有未标注的价格异动事件" /> : (
           <div className="annotation-work">
             <aside className="annotation-work-list">
               <ul className="window-list">
-                {unannotated.map((w) => {
-                  const key = windowKey(w);
+                {groups.map(({ primary, secondaries }) => {
+                  const key = windowKey(primary);
                   const isActive = key === activeKey;
-                  const tone = w.change_pct >= 0 ? "up" : "down";
-                  const sign = w.change_pct > 0 ? "+" : "";
+                  const tone = primary.change_pct >= 0 ? "up" : "down";
+                  const sign = primary.change_pct > 0 ? "+" : "";
                   return (
                     <li key={key}>
                       <button
@@ -166,12 +179,33 @@ export function AnnotationsPage() {
                       >
                         <span className="window-item-icon"><Circle size={14} /></span>
                         <span className="window-item-time">
-                          {w.window_start.timestamp_bj?.slice(5, 16)} → {w.window_end.timestamp_bj?.slice(11, 16)}
+                          {primary.window_start.timestamp_bj?.slice(5, 16)} → {primary.window_end.timestamp_bj?.slice(11, 16)}
                         </span>
                         <span className="window-item-pct">
-                          {sign}{w.change_pct.toFixed(2)}%
+                          {sign}{primary.change_pct.toFixed(2)}%
                         </span>
                       </button>
+                      {secondaries.length ? (
+                        <ul className="window-secondary-list">
+                          {secondaries.map((s) => {
+                            const sTone = s.change_pct >= 0 ? "up" : "down";
+                            const sSign = s.change_pct > 0 ? "+" : "";
+                            return (
+                              <li key={windowKey(s)}>
+                                <div className={`window-item secondary ${sTone}`} title="连续异动延伸窗口，已聚合到上方事件，不需单独标注">
+                                  <span className="window-item-icon"><CornerDownRight size={12} /></span>
+                                  <span className="window-item-time">
+                                    {s.window_end.timestamp_bj?.slice(11, 16)}
+                                  </span>
+                                  <span className="window-item-pct">
+                                    {sSign}{s.change_pct.toFixed(2)}%
+                                  </span>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
                     </li>
                   );
                 })}
