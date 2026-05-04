@@ -40,7 +40,6 @@ if not PROXY_AVAILABLE:
 # ============================================================
 # API 密钥（全部从 .env 读取）
 # ============================================================
-FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 DUNE_API_KEY = os.getenv("DUNE_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
@@ -283,15 +282,6 @@ DATA_SOURCES = {
         "JP_2Y": "171.JP2Y",
     },
     "crypto_symbols": PRICE_SOURCES["crypto"],
-    "fred_indicators": {"CPI": "CPIAUCSL", "失业率": "UNRATE", "GDP": "GDP"},
-}
-
-UPDATE_SCHEDULE = {
-    "stock_indices": "0 9 * * *",
-    "economic_data": "0 9 * * *",
-    "crypto_data": "0 9 * * *",
-    "bond_rates": "0 9 * * *",
-    "market_news": "0 9 * * *",
 }
 
 # ============================================================

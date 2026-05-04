@@ -71,7 +71,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-# 向后兼容导出（旧代码可能直接 from database import StockIndex 等）
-from models.legacy import StockIndex, BondRate, EconomicData, CryptoData, MarketNews  # noqa: E402, F401

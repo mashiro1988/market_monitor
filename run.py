@@ -5,7 +5,6 @@ Investment Agent - 运行入口
   python run.py app        启动 FastAPI + React 仪表板（http://localhost:8000）
   python run.py api-dev    启动 FastAPI 开发服务（不自动构建前端）
   python run.py frontend-build  构建 React 静态产物
-  python run.py collect    执行一次全量数据采集
   python run.py setup      初始化数据库
   python run.py schedule   启动 5 分钟频率定时扫描 + 告警
   python run.py scan       执行一次扫描（不启动调度器）
@@ -247,23 +246,12 @@ def run_api_dev():
     uvicorn.run("api.app:dev_app", host="127.0.0.1", port=8000, reload=True)
 
 
-def collect_data():
-    """兼容旧版：执行一次全量数据采集（旧 DataCollector）"""
-    from database import create_tables
-    from data_collector import DataCollector
-    logger.info("执行旧版全量数据采集...")
-    create_tables()
-    collector = DataCollector()
-    collector.collect_all_data()
-    logger.info("旧版数据采集完成")
-
-
 def setup_database():
-    """初始化数据库（包括新表）"""
+    """初始化数据库"""
     from database import create_tables
     logger.info("初始化数据库...")
     create_tables()
-    logger.info("数据库初始化完成（包含所有新旧表）")
+    logger.info("数据库初始化完成")
 
 
 def run_scan_once():
@@ -504,8 +492,8 @@ def main():
     parser.add_argument(
         "action",
         nargs="?",
-        choices=["app", "api-dev", "frontend-build", "collect", "setup", "schedule", "scan"],
-        help="操作: app(仪表板), api-dev(API开发服务), frontend-build(构建前端), collect(旧版采集), setup(初始化DB), schedule(定时扫描), scan(单次扫描)",
+        choices=["app", "api-dev", "frontend-build", "setup", "schedule", "scan"],
+        help="操作: app(仪表板), api-dev(API开发服务), frontend-build(构建前端), setup(初始化DB), schedule(定时扫描), scan(单次扫描)",
     )
     args = parser.parse_args()
 
@@ -525,13 +513,12 @@ def show_menu():
     print("4. 启动定时扫描 (schedule)")
     print("5. 执行单次扫描 (scan)")
     print("6. 初始化数据库 (setup)")
-    print("7. 旧版数据采集 (collect)")
-    print("8. 退出")
+    print("7. 退出")
     print("=" * 50)
 
     while True:
         try:
-            choice = input("请选择 (1-6): ").strip()
+            choice = input("请选择 (1-7): ").strip()
             actions = {
                 "1": "app",
                 "2": "api-dev",
@@ -539,9 +526,8 @@ def show_menu():
                 "4": "schedule",
                 "5": "scan",
                 "6": "setup",
-                "7": "collect",
             }
-            if choice == "8":
+            if choice == "7":
                 break
             elif choice in actions:
                 execute(actions[choice])
@@ -558,7 +544,6 @@ def execute(action: str):
         "app": run_fastapi_app,
         "api-dev": run_api_dev,
         "frontend-build": build_frontend,
-        "collect": collect_data,
         "setup": setup_database,
         "schedule": start_scheduler,
         "scan": run_scan_once,
