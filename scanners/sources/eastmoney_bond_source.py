@@ -121,6 +121,12 @@ class EastmoneyBondQuoteSource(BaseSource):
             logger.warning("[EastmoneyBond] no eastmoney bond quotes configured")
             return records
 
+        # 用本次扫描时间统一覆盖各 record 的 timestamp。Eastmoney 行情更新时间 f86
+        # 在美债现货收盘期间会停滞数小时，配合 (symbol, timestamp) 唯一约束会让连续多次
+        # 5m 扫描全被去重跳过，造成 DB 中出现数小时的数据空洞，进而让 1h / 24h 涨跌幅
+        # 找不到基线快照。改用 scan_time 后每 5m 都会落一条新 snapshot（价格不变时
+        # change_pct = 0%），让窗口对比始终有 baseline。
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         proxies = config.proxies()
         for symbol, info in self.bond_quotes.items():
             secid = info.get("secid")
@@ -142,6 +148,7 @@ class EastmoneyBondQuoteSource(BaseSource):
                 if record is None:
                     logger.warning(f"[EastmoneyBond] {symbol} ({secid}) returned no quote")
                     continue
+                record.timestamp = now
                 records.append(record)
                 logger.info(
                     f"[EastmoneyBond] {symbol} ({secid}): {record.price:.4f}%"
