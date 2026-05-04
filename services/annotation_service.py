@@ -15,6 +15,7 @@ from models.price import PriceSnapshot
 from schemas.annotations import (
     AnnotationCreateRequest,
     AnnotationDetail,
+    AnnotationListItem,
     AnnotationResponse,
     AnnotationSymbol,
     AutoAnnotateRequest,
@@ -298,6 +299,34 @@ def get_annotation_detail(session: Session, annotation_id: int) -> AnnotationDet
         created_at=timestamp_pair(row.created_at),
         updated_at=timestamp_pair(row.updated_at),
     )
+
+
+def list_annotations(session: Session, symbol: str | None, hours: int) -> list[AnnotationListItem]:
+    """已标注的轻量列表，按 window_end 倒序。symbol 为空则不过滤。"""
+    hours = max(1, min(int(hours or 72), 24 * 30))
+    cutoff = utc_now_naive() - timedelta(hours=hours)
+    query = session.query(NewsPriceAnnotation).filter(NewsPriceAnnotation.window_end >= cutoff)
+    if symbol:
+        query = query.filter(NewsPriceAnnotation.symbol == symbol)
+    rows = query.order_by(NewsPriceAnnotation.window_end.desc()).limit(500).all()
+    items: list[AnnotationListItem] = []
+    for row in rows:
+        selected_ids = _parse_news_ids(row.causal_news_ids)
+        items.append(AnnotationListItem(
+            id=row.id,
+            symbol=row.symbol,
+            asset_class=row.asset_class,
+            window_start=timestamp_pair(row.window_start),
+            window_end=timestamp_pair(row.window_end),
+            change_pct=row.change_pct,
+            no_clear_news=bool(row.no_clear_news),
+            selected_count=len(selected_ids),
+            labeler=row.labeler,
+            notes=row.notes,
+            created_at=timestamp_pair(row.created_at),
+            updated_at=timestamp_pair(row.updated_at),
+        ))
+    return items
 
 
 def delete_annotation(session: Session, annotation_id: int) -> int:

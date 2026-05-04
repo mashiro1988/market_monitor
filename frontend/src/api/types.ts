@@ -243,6 +243,21 @@ export type DeleteAnnotationResponse = {
   deleted: boolean;
 };
 
+export type AnnotationListItem = {
+  id: number;
+  symbol: string;
+  asset_class: string | null;
+  window_start: TimeFields;
+  window_end: TimeFields;
+  change_pct: number | null;
+  no_clear_news: boolean;
+  selected_count: number;
+  labeler: string | null;
+  notes: string | null;
+  created_at: TimeFields;
+  updated_at: TimeFields;
+};
+
 export type AnnotationCreateRequest = {
   symbol: string;
   window_start_utc: string;

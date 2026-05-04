@@ -17,6 +17,7 @@ from schemas.alerts import AlertLogSchema, AlertRuleSchema, AlertTestResponse, A
 from schemas.annotations import (
     AnnotationCreateRequest,
     AnnotationDetail,
+    AnnotationListItem,
     AnnotationResponse,
     AnnotationSymbol,
     AutoAnnotateRequest,
@@ -246,6 +247,15 @@ def annotations(request: AnnotationCreateRequest, db: Session = Depends(get_db))
         return annotation_service.upsert_annotation(db, request)
     except ValueError as exc:
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
+
+
+@router.get("/annotations", response_model=list[AnnotationListItem])
+def annotation_list(
+    symbol: str | None = None,
+    hours: int = 72,
+    db: Session = Depends(get_db),
+) -> list[AnnotationListItem]:
+    return annotation_service.list_annotations(db, symbol, hours)
 
 
 @router.get("/annotations/{annotation_id}", response_model=AnnotationDetail)

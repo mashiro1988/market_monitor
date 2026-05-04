@@ -96,3 +96,19 @@ class AutoAnnotateResponse(BaseModel):
 class DeleteAnnotationResponse(BaseModel):
     id: int
     deleted: bool = True
+
+
+class AnnotationListItem(BaseModel):
+    """已标注列表的轻量行，不包含完整 selected_news（用 GET /api/annotations/{id} 拉详情）。"""
+    id: int
+    symbol: str
+    asset_class: str | None
+    window_start: TimeFields
+    window_end: TimeFields
+    change_pct: float | None
+    no_clear_news: bool
+    selected_count: int
+    labeler: str | None
+    notes: str | None
+    created_at: TimeFields
+    updated_at: TimeFields

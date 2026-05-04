@@ -5,6 +5,7 @@ import type {
   AlertWebhookStatus,
   AnnotationCreateRequest,
   AnnotationDetail,
+  AnnotationListItem,
   AnnotationResponse,
   AnnotationSymbol,
   ApiErrorPayload,
@@ -109,6 +110,8 @@ export const api = {
     request<{ items: import("./types").NewsItem[] }>(`/annotations/context-news${buildQuery(params)}`),
   saveAnnotation: (body: AnnotationCreateRequest) =>
     request<AnnotationResponse>("/annotations", { method: "POST", body: JSON.stringify(body) }),
+  annotationsList: (params: { symbol?: string; hours?: number }) =>
+    request<AnnotationListItem[]>(`/annotations${buildQuery(params)}`),
   annotationDetail: (id: number) =>
     request<AnnotationDetail>(`/annotations/${id}`),
   deleteAnnotation: (id: number) =>

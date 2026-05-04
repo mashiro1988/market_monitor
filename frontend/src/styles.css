@@ -517,37 +517,107 @@ code {
   color: #cbd5e1;
 }
 
-.annotation-layout {
+.annotation-filter {
+  display: flex;
+  gap: 14px;
+  align-items: end;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+
+.annotation-block {
+  margin-bottom: 18px;
+}
+
+.annotation-block .panel-head {
+  margin-bottom: 12px;
+}
+
+.annotation-work {
   display: grid;
-  grid-template-columns: 280px minmax(280px, 0.8fr) minmax(380px, 1.2fr);
+  grid-template-columns: 280px 1fr;
   gap: 16px;
   align-items: start;
 }
 
-.side-panel {
+.annotation-work-list {
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 10px;
+  max-height: 540px;
+  overflow-y: auto;
+}
+
+.annotation-work-list .window-list {
+  max-height: none;
+}
+
+.annotation-work-detail {
   display: grid;
   gap: 12px;
 }
 
-.window-group {
-  display: grid;
-  gap: 6px;
-}
-
-.window-group-head {
+.auto-annotate-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--muted);
-  padding: 4px 0 2px;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
+}
+
+.block-subhead {
+  margin: 6px 0 4px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.annotation-form-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
   margin-top: 4px;
 }
 
-.window-group-head strong {
-  color: var(--text);
-  font-size: 13px;
+.up-text {
+  color: var(--up);
+  font-variant-numeric: tabular-nums;
+}
+
+.down-text {
+  color: var(--down);
+  font-variant-numeric: tabular-nums;
+}
+
+.link-button.danger {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--danger);
+}
+
+.link-button.danger:hover {
+  text-decoration: underline;
+}
+
+.link-button.danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+@media (max-width: 1080px) {
+  .annotation-work {
+    grid-template-columns: 1fr;
+  }
+
+  .annotation-work-list {
+    max-height: 220px;
+  }
 }
 
 .window-list {
@@ -876,8 +946,7 @@ code {
     white-space: nowrap;
   }
 
-  .two-columns,
-  .annotation-layout {
+  .two-columns {
     grid-template-columns: 1fr;
   }
 }
