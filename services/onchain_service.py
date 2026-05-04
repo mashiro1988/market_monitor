@@ -24,7 +24,7 @@ def _frame_to_rows(df: pd.DataFrame) -> list[dict]:
 
 
 def _load_fetcher(name: str) -> Callable[[], pd.DataFrame]:
-    module = importlib.import_module("市场监控.dune_queries")
+    module = importlib.import_module("onchain_data.dune_queries")
     return getattr(module, name)
 
 

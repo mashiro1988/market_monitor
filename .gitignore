@@ -43,7 +43,9 @@ building-a-project-map/
 # ===== 个人工作笔记 / 项目地图 (本地自用，不入库) =====
 AGENTS.md
 ARCHITECTURE.md
+ARCHITECTURE.html
 DATAFLOW.md
+DATAFLOW.html
 DECISIONS.md
 PENDING.md
 
