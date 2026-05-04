@@ -13,7 +13,7 @@ from models.alert_log import AlertLog
 from models.price import PriceSnapshot
 from models.news import NewsItem
 from models.prediction import PredictionMarket
-from alerts.rules import AlertRule
+from alerts.rules import AlertRule, AlertRuleType
 from alerts.channels.wechat_work import WeChatWorkChannel
 from alerts.channels.console import ConsoleChannel
 from scanners.base import PriceRecord, NewsRecord, PredictionRecord
@@ -116,12 +116,12 @@ class AlertEngine:
         alerts_to_send = []
 
         for rule in self.rules:
-            if not rule.enabled or rule.rule_type not in ("price_change", "price_level"):
+            if not rule.enabled or rule.rule_type not in (AlertRuleType.PRICE_CHANGE, AlertRuleType.PRICE_LEVEL):
                 continue
             if self._is_in_cooldown(rule.name, rule.cooldown_minutes):
                 continue
 
-            if rule.rule_type == "price_change":
+            if rule.rule_type == AlertRuleType.PRICE_CHANGE:
                 threshold = rule.params.get("threshold_pct", 3.0)
                 target_symbol = rule.params.get("symbol")
                 window_minutes = int(rule.params.get("window_minutes", 0) or 0)
@@ -278,7 +278,7 @@ class AlertEngine:
     def evaluate_news(self, news_records: list[NewsRecord]):
         """评估新闻相关的告警规则 - 每条新闻只推送一次，按发布时间降序分页推送"""
         for rule in self.rules:
-            if not rule.enabled or rule.rule_type != "news_importance":
+            if not rule.enabled or rule.rule_type != AlertRuleType.NEWS_IMPORTANCE:
                 continue
 
             min_importance = rule.params.get("min_importance", 8)
@@ -361,7 +361,7 @@ class AlertEngine:
     def evaluate_predictions(self, prediction_records: list[PredictionRecord]):
         """评估预测市场相关的告警规则"""
         for rule in self.rules:
-            if not rule.enabled or rule.rule_type != "prediction_shift":
+            if not rule.enabled or rule.rule_type != AlertRuleType.PREDICTION_SHIFT:
                 continue
             if self._is_in_cooldown(rule.name, rule.cooldown_minutes):
                 continue
@@ -472,7 +472,7 @@ class AlertEngine:
         summaries: list[PriceThresholdSummary] = []
 
         for rule in self.rules:
-            if not rule.enabled or rule.rule_type != "price_change":
+            if not rule.enabled or rule.rule_type != AlertRuleType.PRICE_CHANGE:
                 continue
 
             configured_symbol = rule.params.get("symbol")
@@ -519,7 +519,7 @@ class AlertEngine:
     def send_hourly_summary(self):
         """发送每小时市场状态摘要"""
         for rule in self.rules:
-            if not rule.enabled or rule.rule_type != "hourly_summary":
+            if not rule.enabled or rule.rule_type != AlertRuleType.HOURLY_SUMMARY:
                 continue
             if self._is_in_cooldown(rule.name, rule.cooldown_minutes):
                 continue

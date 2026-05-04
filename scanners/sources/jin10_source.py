@@ -25,7 +25,6 @@ class Jin10Source(BaseSource):
             "x-app-id": "bVBF4FyRTn5NJF5n",
             "x-version": "1.0.0",
         }
-        self.proxy = config.PROXY
 
     @classmethod
     def _now_beijing_naive(cls) -> datetime:
@@ -59,7 +58,7 @@ class Jin10Source(BaseSource):
                 "max_time": query_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "channel": "-8200",
             }
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+            proxies = config.proxies()
             r = requests.get(
                 self.url,
                 headers=self.headers,
@@ -159,7 +158,7 @@ class Jin10Source(BaseSource):
 
     def health_check(self) -> bool:
         try:
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+            proxies = config.proxies()
             r = requests.get(
                 self.url,
                 headers=self.headers,

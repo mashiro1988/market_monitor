@@ -44,12 +44,8 @@ class CoinGeckoPriceSource(BaseSource):
 
     def __init__(self):
         self.base_url = "https://api.coingecko.com/api/v3"
-        self.proxy = config.PROXY
         # 从 config 中获取要监控的 symbol 列表
         self.symbols = list(config.PRICE_SOURCES.get("crypto", {}).keys())
-
-    def _get_proxies(self):
-        return {"http": self.proxy, "https": self.proxy} if self.proxy else {}
 
     def fetch_symbols(self, symbols: list[str]) -> list[PriceRecord]:
         """批量获取指定加密货币实时价格；timestamp 为本次采集时点。"""
@@ -80,7 +76,7 @@ class CoinGeckoPriceSource(BaseSource):
                 url,
                 params=params,
                 timeout=15,
-                proxies=self._get_proxies(),
+                proxies=config.proxies(),
                 headers={"Accept": "application/json"},
             )
 
@@ -136,7 +132,7 @@ class CoinGeckoPriceSource(BaseSource):
             r = requests.get(
                 f"{self.base_url}/ping",
                 timeout=10,
-                proxies=self._get_proxies(),
+                proxies=config.proxies(),
             )
             return r.status_code == 200
         except Exception:

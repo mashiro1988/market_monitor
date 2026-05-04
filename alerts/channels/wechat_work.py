@@ -13,7 +13,6 @@ class WeChatWorkChannel:
 
     def __init__(self):
         self.webhook_url = config.WECHAT_WORK_WEBHOOK
-        self.proxy = config.PROXY
 
     def send(self, title: str, content: str) -> bool:
         """
@@ -37,7 +36,7 @@ class WeChatWorkChannel:
         }
 
         try:
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+            proxies = config.proxies()
             r = requests.post(
                 self.webhook_url,
                 json=payload,
@@ -66,7 +65,7 @@ class WeChatWorkChannel:
         }
 
         try:
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+            proxies = config.proxies()
             r = requests.post(self.webhook_url, json=payload, timeout=10, proxies=proxies)
             return r.json().get("errcode") == 0
         except Exception:

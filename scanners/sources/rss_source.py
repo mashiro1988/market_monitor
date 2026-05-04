@@ -26,7 +26,6 @@ class RSSSource(BaseSource):
         self.url = url
         self.name = name
         self.language = language
-        self.proxy = config.PROXY
 
     def fetch(self) -> list[NewsRecord]:
         """解析 RSS 订阅并返回新闻记录"""
@@ -37,7 +36,7 @@ class RSSSource(BaseSource):
         records = []
         try:
             # feedparser 不直接支持代理，手动下载后解析
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+            proxies = config.proxies()
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -109,7 +108,7 @@ class RSSSource(BaseSource):
 
     def health_check(self) -> bool:
         try:
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+            proxies = config.proxies()
             r = requests.head(self.url, timeout=10, proxies=proxies)
             return r.status_code < 400
         except Exception:
