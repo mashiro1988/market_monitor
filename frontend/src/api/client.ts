@@ -4,9 +4,13 @@ import type {
   AlertTestResponse,
   AlertWebhookStatus,
   AnnotationCreateRequest,
+  AnnotationDetail,
   AnnotationResponse,
   AnnotationSymbol,
   ApiErrorPayload,
+  AutoAnnotateRequest,
+  AutoAnnotateResponse,
+  DeleteAnnotationResponse,
   MarketHistoryResponse,
   MarketLatestResponse,
   MarketSymbol,
@@ -101,8 +105,14 @@ export const api = {
   annotationSymbols: (hours = 72) => request<AnnotationSymbol[]>(`/annotations/symbols${buildQuery({ hours })}`),
   annotationWindows: (params: { symbol: string; hours?: number; threshold_pct?: number; window_minutes?: number }) =>
     request<PriceWindow[]>(`/annotations/windows${buildQuery(params)}`),
-  contextNews: (params: { window_start_utc: string; window_end_utc: string; minutes?: number }) =>
+  contextNews: (params: { window_start_utc: string; window_end_utc: string; pre_minutes?: number; post_minutes?: number }) =>
     request<{ items: import("./types").NewsItem[] }>(`/annotations/context-news${buildQuery(params)}`),
   saveAnnotation: (body: AnnotationCreateRequest) =>
-    request<AnnotationResponse>("/annotations", { method: "POST", body: JSON.stringify(body) })
+    request<AnnotationResponse>("/annotations", { method: "POST", body: JSON.stringify(body) }),
+  annotationDetail: (id: number) =>
+    request<AnnotationDetail>(`/annotations/${id}`),
+  deleteAnnotation: (id: number) =>
+    request<DeleteAnnotationResponse>(`/annotations/${id}`, { method: "DELETE" }),
+  autoAnnotate: (body: AutoAnnotateRequest) =>
+    request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) })
 };

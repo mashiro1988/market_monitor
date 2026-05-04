@@ -197,6 +197,50 @@ export type PriceWindow = {
   price_start: number;
   price_end: number;
   change_pct: number;
+  annotation_id: number | null;
+};
+
+export type AnnotationDetail = {
+  id: number;
+  symbol: string;
+  asset_class: string | null;
+  window_start: TimeFields;
+  window_end: TimeFields;
+  context_start: TimeFields;
+  context_end: TimeFields;
+  threshold_pct: number | null;
+  price_start: number | null;
+  price_end: number | null;
+  change_pct: number | null;
+  selected_news_ids: number[];
+  selected_news: NewsItem[];
+  no_clear_news: boolean;
+  notes: string | null;
+  labeler: string | null;
+  created_at: TimeFields;
+  updated_at: TimeFields;
+};
+
+export type AutoAnnotateRequest = {
+  symbol: string;
+  window_start_utc: string;
+  window_end_utc: string;
+  threshold_pct: number;
+};
+
+export type AutoAnnotateResponse = {
+  selected_news_ids: number[];
+  no_clear_news: boolean;
+  summary: string;
+  reasoning: string;
+  model: string;
+  duration_seconds: number;
+  candidate_count: number;
+};
+
+export type DeleteAnnotationResponse = {
+  id: number;
+  deleted: boolean;
 };
 
 export type AnnotationCreateRequest = {
