@@ -37,6 +37,12 @@ if not PROXY_AVAILABLE:
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
         os.environ.pop(key, None)
 
+
+def proxies() -> dict:
+    """返回 requests 风格的 proxies dict；代理不可用时返回空 dict。
+    替代过去散落在各源 / 通道里的 `{"http": PROXY, "https": PROXY} if PROXY else {}` 模板。"""
+    return {"http": PROXY, "https": PROXY} if PROXY else {}
+
 # ============================================================
 # API 密钥（全部从 .env 读取）
 # ============================================================

@@ -27,7 +27,6 @@ class EastmoneyBondQuoteSource(BaseSource):
     )
 
     def __init__(self):
-        self.proxy = config.PROXY
         self.bond_quotes = {
             symbol: info
             for symbol, info in config.PRICE_SOURCES.get("bonds", {}).items()
@@ -122,7 +121,7 @@ class EastmoneyBondQuoteSource(BaseSource):
             logger.warning("[EastmoneyBond] no eastmoney bond quotes configured")
             return records
 
-        proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+        proxies = config.proxies()
         for symbol, info in self.bond_quotes.items():
             secid = info.get("secid")
             if not secid:
@@ -158,7 +157,7 @@ class EastmoneyBondQuoteSource(BaseSource):
             probes = list(self.bond_quotes.values())
             if not probes:
                 return False
-            proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+            proxies = config.proxies()
             response = requests.get(
                 self.URL,
                 params={"secid": probes[0].get("secid"), "fields": self.FIELDS},
