@@ -40,6 +40,13 @@ frontend/vite.config.d.ts
 # ===== Local skill copies / scratch =====
 building-a-project-map/
 
+# ===== 个人工作笔记 / 项目地图 (本地自用，不入库) =====
+AGENTS.md
+ARCHITECTURE.md
+DATAFLOW.md
+DECISIONS.md
+PENDING.md
+
 # ===== OS =====
 Thumbs.db
 .DS_Store
