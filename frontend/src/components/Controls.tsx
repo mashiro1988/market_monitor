@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { ReactNode } from "react";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
@@ -48,5 +49,68 @@ export function Stat({ label, value, tone }: { label: string; value: string; ton
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+export type MultiOption = { label: string; value: string; group?: string };
+
+export function MultiSelectControl({
+  label,
+  values,
+  onChange,
+  options,
+  emptyLabel = "全部"
+}: {
+  label: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+  options: MultiOption[];
+  emptyLabel?: string;
+}) {
+  const groups = useMemo(() => {
+    const map = new Map<string, MultiOption[]>();
+    options.forEach((opt) => {
+      const g = opt.group ?? "";
+      const arr = map.get(g) ?? [];
+      arr.push(opt);
+      map.set(g, arr);
+    });
+    return Array.from(map.entries());
+  }, [options]);
+
+  const toggle = (v: string) => {
+    onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
+  };
+
+  const summary = values.length === 0 ? emptyLabel : `已选 ${values.length}`;
+
+  return (
+    <details className="multi-select">
+      <summary>
+        <span>{label}</span>
+        <strong>{summary}</strong>
+      </summary>
+      <div className="multi-select-popup">
+        <div className="multi-select-actions">
+          <button type="button" className="link-button" onClick={() => onChange(options.map((o) => o.value))}>全选</button>
+          <button type="button" className="link-button" onClick={() => onChange([])}>清空</button>
+        </div>
+        {groups.map(([group, opts]) => (
+          <div key={group || "_"}>
+            {group ? <div className="multi-select-group">{group}</div> : null}
+            {opts.map((opt) => (
+              <label key={opt.value} className="multi-select-option">
+                <input
+                  type="checkbox"
+                  checked={values.includes(opt.value)}
+                  onChange={() => toggle(opt.value)}
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
