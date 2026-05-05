@@ -109,6 +109,24 @@ def classify_market_family(question: str) -> dict | None:
     if "unrestricted shipping through hormuz in april" in q:
         return {"id": "hormuz_normalization", "name": "霍尔木兹海峡通行恢复", "label": "Unrestricted in April", "order": 4.1}
 
+    match = re.search(r"will wti crude oil.*?hit \((high|low)\) \$([0-9]+) in ([a-z]+)", q)
+    if match:
+        side, price_str, month = match.group(1), match.group(2), match.group(3).title()
+        price = int(price_str)
+        if side == "high":
+            return {
+                "id": f"wti_high_{month.lower()}",
+                "name": f"WTI 原油 {month} 触及上沿",
+                "label": f"≥${price}",
+                "order": float(price),
+            }
+        return {
+            "id": f"wti_low_{month.lower()}",
+            "name": f"WTI 原油 {month} 触及下沿",
+            "label": f"≤${price}",
+            "order": float(price),
+        }
+
     return None
 
 
