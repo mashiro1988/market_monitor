@@ -26,7 +26,10 @@ import type {
   PredictionsResponse,
   PriceRule,
   PriceWindow,
-  TaskStatus
+  TaskStatus,
+  TrackedMarket,
+  TrackedMarketCreatePayload,
+  TrackedMarketUpdatePayload
 } from "./types";
 
 export class ApiError extends Error {
@@ -101,6 +104,19 @@ export const api = {
     request<PredictionFamily[]>(`/predictions/families${buildQuery(params)}`),
   predictionHistory: (marketId: string, hours: number) =>
     request<PredictionRow[]>(`/predictions/${encodeURIComponent(marketId)}/history${buildQuery({ hours })}`),
+  predictionTracked: () => request<TrackedMarket[]>("/predictions/tracked"),
+  createPredictionTracked: (payload: TrackedMarketCreatePayload) =>
+    request<TrackedMarket>("/predictions/tracked", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  updatePredictionTracked: (id: number, payload: TrackedMarketUpdatePayload) =>
+    request<TrackedMarket>(`/predictions/tracked/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  deletePredictionTracked: (id: number) =>
+    request<{ ok: boolean }>(`/predictions/tracked/${id}`, { method: "DELETE" }),
   alertRules: () => request<AlertRule[]>("/alerts/rules"),
   alertLogs: (params: { hours_back?: number; page?: number; page_size?: number }) =>
     request<Page<AlertLog>>(`/alerts/logs${buildQuery(params)}`),

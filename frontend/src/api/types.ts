@@ -142,6 +142,28 @@ export type PredictionsResponse = {
   latest_timestamp: TimeFields | null;
 };
 
+export type TrackedMarket = {
+  id: number;
+  kind: "slug" | "tag";
+  identifier: string;
+  display_name: string | null;
+  enabled: boolean;
+  notes: string | null;
+};
+
+export type TrackedMarketCreatePayload = {
+  kind: "slug" | "tag";
+  identifier: string;
+  display_name?: string | null;
+  notes?: string | null;
+};
+
+export type TrackedMarketUpdatePayload = {
+  enabled?: boolean;
+  display_name?: string | null;
+  notes?: string | null;
+};
+
 export type AlertRule = {
   name: string;
   rule_type: string;
