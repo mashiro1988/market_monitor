@@ -215,9 +215,12 @@ export type AnnotationDetail = {
   change_pct: number | null;
   selected_news_ids: number[];
   selected_news: NewsItem[];
+  candidate_news_ids: number[];
   no_clear_news: boolean;
   notes: string | null;
   labeler: string | null;
+  auto_reasoning: string | null;
+  auto_summary: string | null;
   created_at: TimeFields;
   updated_at: TimeFields;
 };
@@ -268,6 +271,10 @@ export type AnnotationCreateRequest = {
   no_clear_news: boolean;
   notes?: string | null;
   labeler?: string | null;
+  // 训练数据增强字段：
+  candidate_news_ids?: number[] | null;  // 标注时这个 context 窗口里的全部候选新闻 ID（含未选中作负样本）
+  auto_reasoning?: string | null;        // DeepSeek auto-annotate 的 reasoning_content 全文（纯人工则 null）
+  auto_summary?: string | null;          // DeepSeek auto-annotate 的 summary 原文（与人改后的 notes 区分）
 };
 
 export type AnnotationResponse = {

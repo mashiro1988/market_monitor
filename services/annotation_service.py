@@ -275,9 +275,15 @@ def upsert_annotation(session: Session, request: AnnotationCreateRequest) -> Ann
     existing.price_end = end_snapshot.price
     existing.change_pct = ((end_snapshot.price - start_snapshot.price) / abs(start_snapshot.price)) * 100 if start_snapshot.price else None
     existing.causal_news_ids = json.dumps(request.selected_news_ids, ensure_ascii=False)
+    if request.candidate_news_ids is not None:
+        existing.candidate_news_ids = json.dumps(request.candidate_news_ids, ensure_ascii=False)
     existing.no_clear_news = request.no_clear_news
     existing.notes = (request.notes or "").strip() or None
     existing.labeler = (request.labeler or "").strip() or None
+    if request.auto_reasoning is not None:
+        existing.auto_reasoning = request.auto_reasoning.strip() or None
+    if request.auto_summary is not None:
+        existing.auto_summary = request.auto_summary.strip() or None
     existing.updated_at = utc_now_naive()
     session.commit()
     return AnnotationResponse(id=existing.id)
@@ -321,9 +327,12 @@ def get_annotation_detail(session: Session, annotation_id: int) -> AnnotationDet
         change_pct=row.change_pct,
         selected_news_ids=selected_ids,
         selected_news=selected_news,
+        candidate_news_ids=_parse_news_ids(row.candidate_news_ids),
         no_clear_news=bool(row.no_clear_news),
         notes=row.notes,
         labeler=row.labeler,
+        auto_reasoning=row.auto_reasoning,
+        auto_summary=row.auto_summary,
         created_at=timestamp_pair(row.created_at),
         updated_at=timestamp_pair(row.updated_at),
     )

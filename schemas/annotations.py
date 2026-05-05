@@ -42,6 +42,11 @@ class AnnotationCreateRequest(BaseModel):
     no_clear_news: bool = False
     notes: str | None = None
     labeler: str | None = None
+    # 训练用：标注当时这个 context 窗口里的全部候选新闻 ID（含未选中的，作负样本）。
+    candidate_news_ids: list[int] | None = None
+    # 自动标注流程：LLM 原始推理 + 摘要（与人审后的 notes 分开存）；纯人工标注则两者都为 None。
+    auto_reasoning: str | None = None
+    auto_summary: str | None = None
 
 
 class AnnotationResponse(BaseModel):
@@ -68,9 +73,12 @@ class AnnotationDetail(BaseModel):
     change_pct: float | None
     selected_news_ids: list[int] = Field(default_factory=list)
     selected_news: list[NewsItemSchema] = Field(default_factory=list)
+    candidate_news_ids: list[int] = Field(default_factory=list)
     no_clear_news: bool = False
     notes: str | None = None
     labeler: str | None = None
+    auto_reasoning: str | None = None
+    auto_summary: str | None = None
     created_at: TimeFields
     updated_at: TimeFields
 

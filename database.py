@@ -38,25 +38,34 @@ def _ensure_sqlite_schema():
 
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
-    if "news_items" not in table_names:
-        return
-
-    existing_columns = {col["name"] for col in inspector.get_columns("news_items")}
-    required_columns = {
-        "llm_importance": "INTEGER",
-        "llm_importance_reason": "TEXT",
-        "llm_model": "VARCHAR(80)",
-        "llm_scored_at": "DATETIME",
-    }
 
     with engine.begin() as conn:
-        for column_name, column_type in required_columns.items():
-            if column_name not in existing_columns:
-                conn.execute(text(f"ALTER TABLE news_items ADD COLUMN {column_name} {column_type}"))
-        conn.execute(text("DROP INDEX IF EXISTS ix_news_content_hash"))
-        if "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:
-            conn.execute(text("DROP INDEX IF EXISTS ix_news_source_id"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_source_id ON news_items (source, source_id)"))
+        # news_items：补 LLM 评分列 + 修索引。
+        if "news_items" in table_names:
+            existing = {col["name"] for col in inspector.get_columns("news_items")}
+            for column_name, column_type in {
+                "llm_importance": "INTEGER",
+                "llm_importance_reason": "TEXT",
+                "llm_model": "VARCHAR(80)",
+                "llm_scored_at": "DATETIME",
+            }.items():
+                if column_name not in existing:
+                    conn.execute(text(f"ALTER TABLE news_items ADD COLUMN {column_name} {column_type}"))
+            conn.execute(text("DROP INDEX IF EXISTS ix_news_content_hash"))
+            if "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:
+                conn.execute(text("DROP INDEX IF EXISTS ix_news_source_id"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_source_id ON news_items (source, source_id)"))
+
+        # news_price_annotations：补训练数据列（候选集 + LLM 推理 + LLM 摘要）。
+        if "news_price_annotations" in table_names:
+            existing = {col["name"] for col in inspector.get_columns("news_price_annotations")}
+            for column_name, column_type in {
+                "candidate_news_ids": "TEXT",
+                "auto_reasoning": "TEXT",
+                "auto_summary": "TEXT",
+            }.items():
+                if column_name not in existing:
+                    conn.execute(text(f"ALTER TABLE news_price_annotations ADD COLUMN {column_name} {column_type}"))
 
 
 def get_session():

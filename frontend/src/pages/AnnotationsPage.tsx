@@ -107,7 +107,12 @@ export function AnnotationsPage() {
       selected_news_ids: selectedNews,
       no_clear_news: noClearNews,
       notes,
-      labeler: autoResult ? `${labeler || ""}${labeler ? " · " : ""}${autoResult.model} (auto, reviewed)` : labeler
+      labeler: autoResult ? `${labeler || ""}${labeler ? " · " : ""}${autoResult.model} (auto, reviewed)` : labeler,
+      // 训练数据：把当前展示的全部候选新闻 ID 一起存（即使是纯人工标注，也保留负样本信息）。
+      candidate_news_ids: (contextNews.data?.items ?? []).map((item) => item.id),
+      // 自动标注流程：保存 LLM 原始推理 + 摘要，与人改后的 notes 分开。
+      auto_reasoning: autoResult?.reasoning ?? null,
+      auto_summary: autoResult?.summary ?? null
     }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["annotation-windows"] });
