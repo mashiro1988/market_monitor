@@ -75,6 +75,14 @@ export function AnnotationsPage() {
 
   const unannotatedPrimaries = useMemo(() => groups.map((g) => g.primary), [groups]);
 
+  // 还没有 batchByKey 缓存结果的 primary 子集——批量自动标注每次只对这些发请求，
+  // 避免用户多次点按钮时把已经推理过的窗口重新喂一遍。手动 per-window 自动标注会更新
+  // 同一个 batchByKey entry，所以也会把对应窗口从 pending 中移除。
+  const pendingForBatch = useMemo(
+    () => unannotatedPrimaries.filter((w) => !batchByKey.has(windowKey(w))),
+    [unannotatedPrimaries, batchByKey]
+  );
+
   // 默认选第一条未标注 primary；切换 symbol/hours 后若上次的窗口没了也走这里。
   useEffect(() => {
     if (!unannotatedPrimaries.length) {
@@ -167,14 +175,36 @@ export function AnnotationsPage() {
       setSelectedNews(result.selected_news_ids);
       setNoClearNews(result.no_clear_news);
       setNotes(result.summary);
+      // 单窗口自动标注的结果也写入 batchByKey，让批量按钮把这条视为已处理。
+      if (activeWindow) {
+        setBatchByKey((prev) => {
+          const next = new Map(prev);
+          next.set(activeKey, {
+            symbol: activeWindow.symbol,
+            window_start_utc: activeWindow.window_start.timestamp_utc!,
+            window_end_utc: activeWindow.window_end.timestamp_utc!,
+            selected_news_ids: result.selected_news_ids,
+            no_clear_news: result.no_clear_news,
+            summary: result.summary,
+            candidate_count: result.candidate_count,
+            candidate_news_ids: []  // 单窗口接口未返回 candidate_news_ids，留空；保存时前端从 contextNews 重算
+          });
+          return next;
+        });
+        setBatchMeta({
+          reasoning: result.reasoning,
+          model: result.model,
+          duration_seconds: result.duration_seconds
+        });
+      }
     }
   });
 
-  // 批量自动标注：把所有未标注 primary 分片调 /api/annotations/auto-batch，
+  // 批量自动标注：把**还没缓存过结果**的未标注 primary 分片调 /api/annotations/auto-batch，
   // 每片 ≤AUTO_BATCH_CHUNK 个窗口；结果累积到 batchByKey，用户点开任一窗口都能预填。
   const runBatchAutoAnnotate = async () => {
     setBatchError(null);
-    const targets = unannotatedPrimaries;
+    const targets = pendingForBatch;
     if (!targets.length) return;
 
     const chunks: PriceWindow[][] = [];
@@ -241,14 +271,16 @@ export function AnnotationsPage() {
             <Button
               kind="secondary"
               onClick={() => void runBatchAutoAnnotate()}
-              disabled={!groups.length || batchInFlight}
+              disabled={!pendingForBatch.length || batchInFlight}
             >
               <Layers size={16} />
               {batchInFlight
                 ? `批量推理中 ${batchProgress!.done}/${batchProgress!.total}...`
-                : `批量自动标注 (${groups.length})`}
+                : pendingForBatch.length === 0 && groups.length > 0
+                  ? `已全部推理 (${groups.length})`
+                  : `批量自动标注 (剩余 ${pendingForBatch.length}${groups.length !== pendingForBatch.length ? ` / ${groups.length}` : ""})`}
             </Button>
-            <span className="muted-text small">同一份 system prompt 一次喂 ≤{AUTO_BATCH_CHUNK} 窗口，省 KV cache</span>
+            <span className="muted-text small">同一份 system prompt 一次喂 ≤{AUTO_BATCH_CHUNK} 窗口；已推理过的窗口自动跳过，不会重复调用</span>
           </div>
         </div>
         <p className="muted-text small">连续异动会被聚合为一个事件，只标第一次；后续延伸窗口（↳）只展示不标注。批量自动标注后点击任一窗口即可看到 LLM 建议并保存。</p>
