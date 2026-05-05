@@ -602,6 +602,74 @@ code {
   gap: 10px;
 }
 
+/* 价格区间 hover tooltip：position: fixed 渲染到 body 顶层，逃出 panel 的
+   overflow:hidden / overflow:auto 裁切。z-index 高于 multi-select 弹层 (20)。*/
+.price-peek {
+  position: fixed;
+  z-index: 80;
+  min-width: 180px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+  pointer-events: none;
+  overflow: hidden;
+  animation: price-peek-fade 0.12s ease-out;
+}
+
+@keyframes price-peek-fade {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.price-peek-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line-soft);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.price-peek-head.up {
+  color: var(--up);
+  background: linear-gradient(90deg, rgba(94, 234, 212, 0.12), var(--panel-2));
+}
+
+.price-peek-head.down {
+  color: var(--down);
+  background: linear-gradient(90deg, rgba(251, 113, 133, 0.12), var(--panel-2));
+}
+
+.price-peek-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 10px;
+  gap: 18px;
+}
+
+.price-peek-row + .price-peek-row {
+  border-top: 1px dashed var(--line-soft);
+}
+
+.price-peek-row > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.price-peek-row > strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 /* 未标注 panel-head 的 LLM 行动按钮组合（批量 + 当前窗口）。两个按钮挨在一起，
    语义上都是「让 reasoner 给建议」，视觉上也并排，不再被分散在不同区域。 */
 .annotation-actions {
