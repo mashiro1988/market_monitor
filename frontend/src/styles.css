@@ -1116,7 +1116,7 @@ code {
 
 .prediction-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   margin-top: 12px;
 }
@@ -1208,7 +1208,13 @@ code {
   background: rgba(94, 234, 212, 0.06);
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1280px) {
+  .prediction-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
   .prediction-grid {
     grid-template-columns: 1fr;
   }
