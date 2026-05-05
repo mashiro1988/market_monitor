@@ -267,7 +267,7 @@ export function AnnotationsPage() {
       <section className="panel annotation-block">
         <div className="panel-head">
           <h2>未标注 ({groups.length})</h2>
-          <div className="panel-controls">
+          <div className="annotation-actions">
             <Button
               kind="secondary"
               onClick={() => void runBatchAutoAnnotate()}
@@ -275,15 +275,24 @@ export function AnnotationsPage() {
             >
               <Layers size={16} />
               {batchInFlight
-                ? `批量推理中 ${batchProgress!.done}/${batchProgress!.total}...`
+                ? `批量推理中 ${batchProgress!.done}/${batchProgress!.total}`
                 : pendingForBatch.length === 0 && groups.length > 0
                   ? `已全部推理 (${groups.length})`
-                  : `批量自动标注 (剩余 ${pendingForBatch.length}${groups.length !== pendingForBatch.length ? ` / ${groups.length}` : ""})`}
+                  : `批量自动标注 (剩余 ${pendingForBatch.length}${groups.length !== pendingForBatch.length ? `/${groups.length}` : ""})`}
             </Button>
-            <span className="muted-text small">同一份 system prompt 一次喂 ≤{AUTO_BATCH_CHUNK} 窗口；已推理过的窗口自动跳过，不会重复调用</span>
+            <Button
+              kind="secondary"
+              onClick={() => autoAnnotate.mutate()}
+              disabled={!activeWindow || autoAnnotate.isPending}
+            >
+              <Sparkles size={16} />
+              {autoAnnotate.isPending ? "推理中..." : "自动标注当前窗口"}
+            </Button>
           </div>
         </div>
-        <p className="muted-text small">连续异动会被聚合为一个事件，只标第一次；后续延伸窗口（↳）只展示不标注。批量自动标注后点击任一窗口即可看到 LLM 建议并保存。</p>
+        <p className="muted-text small">
+          连续异动会被聚合为一个事件，只标第一次（↳ 续发窗口只展示不标）。候选新闻取窗口前 15 / 后 30 分钟。批量推理一次喂 ≤{AUTO_BATCH_CHUNK} 窗口共用 system prompt 省 KV cache，已推理过的窗口自动跳过。
+        </p>
         {batchError ? <ErrorState error={batchError} /> : null}
 
         {windowsQuery.isLoading ? <LoadingState /> :
@@ -349,18 +358,6 @@ export function AnnotationsPage() {
                     <Stat label="窗口分钟" value={`${activeWindow.actual_window_minutes}m`} />
                   </div>
                   <p className="muted-text small">{activeWindow.window_start.timestamp_bj} 至 {activeWindow.window_end.timestamp_bj}</p>
-
-                  <div className="auto-annotate-bar">
-                    <Button
-                      kind="secondary"
-                      onClick={() => autoAnnotate.mutate()}
-                      disabled={autoAnnotate.isPending}
-                    >
-                      <Sparkles size={16} />
-                      {autoAnnotate.isPending ? "推理中（可能需要 1-3 分钟）..." : "自动标注 (DeepSeek v4-pro)"}
-                    </Button>
-                    <span className="muted-text small">候选新闻取窗口前 15 / 后 30 分钟</span>
-                  </div>
 
                   {autoResult ? (
                     <details className="reasoning-block" open>

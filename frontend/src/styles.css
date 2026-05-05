@@ -545,9 +545,11 @@ code {
 
 .annotation-work {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 16px;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
+  /* 超宽屏上把整体宽度锁住，避免右栏的候选新闻表稀松成一片 */
+  max-width: 1440px;
 }
 
 .annotation-work-list {
@@ -555,7 +557,7 @@ code {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   padding: 10px;
-  max-height: 540px;
+  max-height: 720px;
   overflow-y: auto;
 }
 
@@ -568,14 +570,13 @@ code {
   gap: 12px;
 }
 
-.auto-annotate-bar {
+/* 未标注 panel-head 的 LLM 行动按钮组合（批量 + 当前窗口）。两个按钮挨在一起，
+   语义上都是「让 reasoner 给建议」，视觉上也并排，不再被分散在不同区域。 */
+.annotation-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 0;
-  border-top: 1px solid var(--line-soft);
-  border-bottom: 1px solid var(--line-soft);
 }
 
 .block-subhead {

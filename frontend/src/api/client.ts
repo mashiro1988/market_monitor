@@ -19,6 +19,7 @@ import type {
   MarketSymbol,
   MarketTableRow,
   NewsResponse,
+  NewsSourceMeta,
   Page,
   PredictionFamily,
   PredictionRow,
@@ -93,6 +94,7 @@ export const api = {
     page?: number;
     page_size?: number;
   }) => request<NewsResponse>(`/news${buildQuery(params)}`),
+  newsSources: () => request<NewsSourceMeta[]>("/news/sources"),
   predictions: (params: { hours?: number; search?: string }) =>
     request<PredictionsResponse>(`/predictions${buildQuery(params)}`),
   predictionFamilies: (params: { hours?: number; search?: string }) =>

@@ -174,6 +174,7 @@ NEWS_SOURCES = {
     "jin10": {
         "enabled": True,
         "language": "zh",
+        "name": "Jin10",
     },
     # CNBC Top News：全球突发 + 财经为主，每日数十条新增，覆盖 Fed / 监管 / 公司事件 / 地缘等。
     # 比之前用的 Bloomberg RSS 稳定，且非加密专项。

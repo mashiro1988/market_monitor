@@ -98,6 +98,12 @@ export type NewsResponse = {
   en_count: number;
 };
 
+export type NewsSourceMeta = {
+  key: string;
+  name: string;
+  language: string;
+};
+
 export type PredictionRow = TimeFields & {
   market_id: string;
   question: string;

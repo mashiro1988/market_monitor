@@ -28,3 +28,10 @@ class NewsResponse(BaseModel):
     page_size: int
     zh_count: int
     en_count: int
+
+
+class NewsSourceMeta(BaseModel):
+    """`/api/news/sources` 返回项；前端用来构造新闻源下拉框，避免硬编码 source key。"""
+    key: str
+    name: str
+    language: str

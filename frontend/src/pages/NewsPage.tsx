@@ -1,15 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { NewsItem } from "../api/types";
 import { PageHeader, SelectControl, TextInput } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
-
-const sourceOptions = [
-  { label: "全部", value: "" },
-  { label: "中文 Jin10", value: "jin10" },
-  { label: "英文 Bloomberg", value: "bloomberg" }
-];
 
 const importantOptions = [
   { label: "全部", value: "all" },
@@ -52,6 +46,7 @@ export function NewsPage() {
   const [hours, setHours] = useState("24");
   const [jin10Importance, setJin10Importance] = useState("all");
   const [search, setSearch] = useState("");
+  const sources = useQuery({ queryKey: ["news-sources"], queryFn: api.newsSources });
   const news = useQuery({
     queryKey: ["news", source, importance, hours, jin10Importance, search],
     queryFn: () => api.news({
@@ -64,8 +59,19 @@ export function NewsPage() {
     })
   });
 
-  const zh = news.data?.items.filter((item) => item.source === "jin10" || item.language === "zh") ?? [];
-  const en = news.data?.items.filter((item) => item.source === "bloomberg" || item.language === "en") ?? [];
+  // 下拉选项基于后端 /api/news/sources（即 config.NEWS_SOURCES 启用项），不再硬编码 bloomberg。
+  const sourceOptions = useMemo(() => {
+    const opts = [{ label: "全部", value: "" }];
+    for (const s of sources.data ?? []) {
+      const langTag = s.language === "zh" ? "中文" : s.language === "en" ? "英文" : s.language.toUpperCase();
+      opts.push({ label: `${langTag} ${s.name}`, value: s.key });
+    }
+    return opts;
+  }, [sources.data]);
+
+  // 中英分栏完全按 language 字段切分；新加源不需要再改这里。
+  const zh = news.data?.items.filter((item) => item.language === "zh") ?? [];
+  const en = news.data?.items.filter((item) => item.language === "en") ?? [];
 
   return (
     <section>

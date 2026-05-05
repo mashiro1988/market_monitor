@@ -31,7 +31,7 @@ from schemas.annotations import (
 )
 from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
-from schemas.news import NewsResponse
+from schemas.news import NewsResponse, NewsSourceMeta
 from schemas.onchain import OnchainDataset
 from schemas.predictions import PredictionFamily, PredictionRow, PredictionsResponse
 from schemas.tasks import TaskStatus
@@ -157,6 +157,11 @@ def news(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/news/sources", response_model=list[NewsSourceMeta])
+def news_sources_list() -> list[NewsSourceMeta]:
+    return news_service.list_sources()
 
 
 @router.get("/predictions", response_model=PredictionsResponse)
