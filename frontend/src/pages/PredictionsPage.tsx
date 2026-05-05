@@ -2,8 +2,10 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { PredictionFamily, PredictionMarketSummary, PredictionRow } from "../api/types";
-import { MultiLineChart, type ChartPoint } from "../components/Charts";
-import { PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
+import { type ChartPoint } from "../components/Charts";
+import { PageHeader, SelectControl, TextInput } from "../components/Controls";
+import { PredictionCard } from "../components/PredictionCard";
+import { TrackedMarketsPanel } from "../components/TrackedMarketsPanel";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 
 const hourOptions = [
@@ -29,78 +31,126 @@ function buildFamilyChart(family: PredictionFamily): { data: ChartPoint[]; keys:
   return { data: Array.from(byTime.values()), keys };
 }
 
-function MarketDetail({ market, hours }: { market: PredictionMarketSummary; hours: number }) {
+function buildMarketChart(history: PredictionRow[]): { data: ChartPoint[]; keys: string[] } {
+  const byTime = new Map<string, ChartPoint>();
+  const keys = Array.from(new Set(history.map((row) => row.outcome)));
+  history.forEach((row) => {
+    const time = row.timestamp_bj?.slice(5, 16) ?? "";
+    const entry = byTime.get(time) ?? { time };
+    entry[row.outcome] = row.probability_pct;
+    byTime.set(time, entry);
+  });
+  return { data: Array.from(byTime.values()), keys };
+}
+
+function MarketCard({ market, hours }: { market: PredictionMarketSummary; hours: number }) {
   const history = useQuery({
     queryKey: ["prediction-history", market.market_id, hours],
     queryFn: () => api.predictionHistory(market.market_id, hours),
     enabled: Boolean(market.market_id)
   });
-  const chart = useMemo(() => {
-    const byTime = new Map<string, ChartPoint>();
-    const keys = Array.from(new Set((history.data ?? []).map((row: PredictionRow) => row.outcome)));
-    (history.data ?? []).forEach((row) => {
-      const time = row.timestamp_bj?.slice(5, 16) ?? "";
-      const entry = byTime.get(time) ?? { time };
-      entry[row.outcome] = row.probability_pct;
-      byTime.set(time, entry);
-    });
-    return { data: Array.from(byTime.values()), keys };
-  }, [history.data]);
+  const chart = useMemo(
+    () => buildMarketChart(history.data ?? []),
+    [history.data]
+  );
+  const yes = market.outcomes.find((o) => o.outcome.toLowerCase() === "yes");
+  const latestPct = yes?.probability_pct ?? market.outcomes[0]?.probability_pct;
+  const updatedAt = market.outcomes[0]?.timestamp_bj ?? null;
 
   return (
-    <section className="panel">
-      <div className="panel-head"><h2>{market.question}</h2></div>
-      <div className="metric-row">
-        {market.outcomes.map((outcome) => (
-          <Stat key={outcome.outcome} label={outcome.outcome} value={`${outcome.probability_pct.toFixed(1)}%`} tone={(outcome.delta_pct ?? 0) >= 0 ? "up" : "down"} />
-        ))}
-      </div>
-      {history.isLoading ? <LoadingState /> : history.error ? <ErrorState error={history.error} /> : <MultiLineChart data={chart.data} keys={chart.keys} height={300} />}
-    </section>
+    <PredictionCard
+      title={market.question}
+      data={chart.data}
+      keys={chart.keys}
+      meta={{
+        volume: market.volume,
+        outcomes: market.outcomes.length,
+        latestPct,
+        updatedAt
+      }}
+    />
   );
 }
 
 export function PredictionsPage() {
   const [hours, setHours] = useState("24");
   const [search, setSearch] = useState("");
-  const families = useQuery({ queryKey: ["prediction-families", hours, search], queryFn: () => api.predictionFamilies({ hours: Number(hours), search }) });
-  const predictions = useQuery({ queryKey: ["predictions", hours, search], queryFn: () => api.predictions({ hours: Number(hours), search }) });
-  const [selectedMarket, setSelectedMarket] = useState("");
-  const market = predictions.data?.markets.find((item) => item.market_id === selectedMarket) ?? predictions.data?.markets[0];
+
+  const families = useQuery({
+    queryKey: ["prediction-families", hours, search],
+    queryFn: () => api.predictionFamilies({ hours: Number(hours), search })
+  });
+  const predictions = useQuery({
+    queryKey: ["predictions", hours, search],
+    queryFn: () => api.predictions({ hours: Number(hours), search })
+  });
+
+  const familyMarketIds = useMemo(() => {
+    const ids = new Set<string>();
+    (families.data ?? []).forEach((f) =>
+      f.series.forEach((s) => ids.add(s.market_id))
+    );
+    return ids;
+  }, [families.data]);
+
+  const standaloneMarkets = useMemo(() => {
+    return (predictions.data?.markets ?? []).filter((m) => !familyMarketIds.has(m.market_id));
+  }, [predictions.data, familyMarketIds]);
 
   return (
     <section>
-      <PageHeader title="预测市场" subtitle={`最后更新 ${predictions.data?.latest_timestamp?.timestamp_bj ?? "—"}`} />
+      <PageHeader
+        title="预测市场"
+        subtitle={`最后更新 ${predictions.data?.latest_timestamp?.timestamp_bj ?? "—"}`}
+      />
       <div className="toolbar">
         <SelectControl label="时间窗口" value={hours} onChange={setHours} options={hourOptions} />
         <TextInput label="搜索市场" value={search} onChange={setSearch} placeholder="Fed / inflation / hormuz" />
       </div>
 
+      <TrackedMarketsPanel />
+
       <section className="panel">
         <div className="panel-head"><h2>主题概率对比</h2></div>
-        {families.isLoading ? <LoadingState /> : families.error ? <ErrorState error={families.error} /> : (
-          families.data?.length ? families.data.map((family) => {
-            const chart = buildFamilyChart(family);
-            return (
-              <details className="family-block" key={family.id} open>
-                <summary>{family.name}</summary>
-                <MultiLineChart data={chart.data} keys={chart.keys} height={320} />
-              </details>
-            );
-          }) : <EmptyState title="当前窗口内没有可聚合的主题组" />
+        {families.isLoading ? (
+          <LoadingState />
+        ) : families.error ? (
+          <ErrorState error={families.error} />
+        ) : (families.data ?? []).length ? (
+          <div className="prediction-grid">
+            {(families.data ?? []).map((family) => {
+              const chart = buildFamilyChart(family);
+              return (
+                <PredictionCard
+                  key={family.id}
+                  title={family.name}
+                  subtitle={`${family.series.length} 个分支`}
+                  data={chart.data}
+                  keys={chart.keys}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState title="当前窗口内没有可聚合的主题组" />
         )}
       </section>
 
       <section className="panel">
-        <div className="panel-head">
-          <h2>单市场明细</h2>
-          <select value={market?.market_id ?? ""} onChange={(event) => setSelectedMarket(event.target.value)}>
-            {(predictions.data?.markets ?? []).slice(0, 300).map((item) => (
-              <option key={item.market_id} value={item.market_id}>{item.question.slice(0, 140)}</option>
+        <div className="panel-head"><h2>单市场</h2></div>
+        {predictions.isLoading ? (
+          <LoadingState />
+        ) : predictions.error ? (
+          <ErrorState error={predictions.error} />
+        ) : standaloneMarkets.length ? (
+          <div className="prediction-grid">
+            {standaloneMarkets.map((m) => (
+              <MarketCard key={m.market_id} market={m} hours={Number(hours)} />
             ))}
-          </select>
-        </div>
-        {predictions.isLoading ? <LoadingState /> : predictions.error ? <ErrorState error={predictions.error} /> : market ? <MarketDetail market={market} hours={Number(hours)} /> : <EmptyState title="没有匹配市场" />}
+          </div>
+        ) : (
+          <EmptyState title="没有不属于任何主题组的单市场" />
+        )}
       </section>
     </section>
   );
