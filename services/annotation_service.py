@@ -814,8 +814,8 @@ def _call_deepseek_reasoner_batch(user_content: str) -> tuple[str, str, float]:
             "reasoning_effort": config.DEEPSEEK_REASONER_EFFORT,
         },
         "response_format": {"type": "json_object"},
-        # 批量返回 N 项 + 思考量翻倍，给足生成空间；KV cache 让 prompt 部分几乎免费。
-        "max_tokens": 8000,
+        # max_tokens 同时覆盖 reasoning_content + content；批量场景里 thinking 容易吃掉
+        "max_tokens": 16000,
     }
     headers = {
         "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",

@@ -4,9 +4,10 @@ import { CornerDownRight, Circle, Layers, RotateCcw, Save, Sparkles } from "luci
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
 
-// 比后端 AUTO_ANNOTATE_BATCH_LIMIT (10) 保守一档：5 个窗口 × thinking 模式总耗时
-// 通常 60-300s，留余地给 600s read_timeout。10 窗口曾经触发过浏览器/连接侧 "Failed to fetch"。
-const AUTO_BATCH_CHUNK = 5;
+// 实测 5 窗口 × reasoning_effort=max 经常把 max_tokens 预算用完导致空 content（模型
+// 还在思考没产出 JSON），所以再保守一档到 3。后端 AUTO_ANNOTATE_BATCH_LIMIT 仍是 10，
+// 是给 API 留的硬上限，不是日常工况。
+const AUTO_BATCH_CHUNK = 3;
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
