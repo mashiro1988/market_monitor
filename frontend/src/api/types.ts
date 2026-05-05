@@ -98,6 +98,12 @@ export type NewsResponse = {
   en_count: number;
 };
 
+export type NewsSourceMeta = {
+  key: string;
+  name: string;
+  language: string;
+};
+
 export type PredictionRow = TimeFields & {
   market_id: string;
   question: string;
@@ -240,6 +246,30 @@ export type AutoAnnotateResponse = {
   model: string;
   duration_seconds: number;
   candidate_count: number;
+};
+
+export type AutoAnnotateBatchRequest = {
+  windows: AutoAnnotateRequest[];
+};
+
+export type AutoAnnotateBatchItem = {
+  symbol: string;
+  window_start_utc: string;
+  window_end_utc: string;
+  selected_news_ids: number[];
+  no_clear_news: boolean;
+  summary: string;
+  candidate_count: number;
+  candidate_news_ids: number[];
+};
+
+export type AutoAnnotateBatchResponse = {
+  results: AutoAnnotateBatchItem[];
+  reasoning: string;
+  model: string;
+  duration_seconds: number;
+  requested_count: number;
+  answered_count: number;
 };
 
 export type DeleteAnnotationResponse = {

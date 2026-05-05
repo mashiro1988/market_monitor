@@ -102,6 +102,33 @@ class AutoAnnotateResponse(BaseModel):
     candidate_count: int  # 模型看了多少条候选新闻
 
 
+class AutoAnnotateBatchRequest(BaseModel):
+    """一次喂多个窗口给 reasoner，复用同一份 system prompt + 一次 thinking pass，提高 KV cache 命中率。"""
+    windows: list[AutoAnnotateRequest] = Field(default_factory=list)
+
+
+class AutoAnnotateBatchItem(BaseModel):
+    """批量自动标注里单个窗口的结果。"""
+    symbol: str
+    window_start_utc: str
+    window_end_utc: str
+    selected_news_ids: list[int] = Field(default_factory=list)
+    no_clear_news: bool = False
+    summary: str = ""
+    candidate_count: int = 0
+    candidate_news_ids: list[int] = Field(default_factory=list)
+
+
+class AutoAnnotateBatchResponse(BaseModel):
+    """一次批量调用返回 N 个窗口的结果 + 一份全局 reasoning_content。"""
+    results: list[AutoAnnotateBatchItem] = Field(default_factory=list)
+    reasoning: str = ""  # 整批共用一段 reasoning_content（窗口间穿插，按训练样本视角附给每个窗口）
+    model: str
+    duration_seconds: float
+    requested_count: int  # 请求传入的窗口数
+    answered_count: int   # 模型实际给出 item 的数量（理论上应该一致）
+
+
 class DeleteAnnotationResponse(BaseModel):
     id: int
     deleted: bool = True

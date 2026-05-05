@@ -9,6 +9,8 @@ import type {
   AnnotationResponse,
   AnnotationSymbol,
   ApiErrorPayload,
+  AutoAnnotateBatchRequest,
+  AutoAnnotateBatchResponse,
   AutoAnnotateRequest,
   AutoAnnotateResponse,
   DeleteAnnotationResponse,
@@ -17,6 +19,7 @@ import type {
   MarketSymbol,
   MarketTableRow,
   NewsResponse,
+  NewsSourceMeta,
   Page,
   PredictionFamily,
   PredictionRow,
@@ -91,6 +94,7 @@ export const api = {
     page?: number;
     page_size?: number;
   }) => request<NewsResponse>(`/news${buildQuery(params)}`),
+  newsSources: () => request<NewsSourceMeta[]>("/news/sources"),
   predictions: (params: { hours?: number; search?: string }) =>
     request<PredictionsResponse>(`/predictions${buildQuery(params)}`),
   predictionFamilies: (params: { hours?: number; search?: string }) =>
@@ -117,5 +121,7 @@ export const api = {
   deleteAnnotation: (id: number) =>
     request<DeleteAnnotationResponse>(`/annotations/${id}`, { method: "DELETE" }),
   autoAnnotate: (body: AutoAnnotateRequest) =>
-    request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) })
+    request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) }),
+  autoAnnotateBatch: (body: AutoAnnotateBatchRequest) =>
+    request<AutoAnnotateBatchResponse>("/annotations/auto-batch", { method: "POST", body: JSON.stringify(body) })
 };

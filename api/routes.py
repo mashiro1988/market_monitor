@@ -20,6 +20,8 @@ from schemas.annotations import (
     AnnotationListItem,
     AnnotationResponse,
     AnnotationSymbol,
+    AutoAnnotateBatchRequest,
+    AutoAnnotateBatchResponse,
     AutoAnnotateRequest,
     AutoAnnotateResponse,
     ContextNewsResponse,
@@ -29,7 +31,7 @@ from schemas.annotations import (
 )
 from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
-from schemas.news import NewsResponse
+from schemas.news import NewsResponse, NewsSourceMeta
 from schemas.onchain import OnchainDataset
 from schemas.predictions import PredictionFamily, PredictionRow, PredictionsResponse
 from schemas.tasks import TaskStatus
@@ -157,6 +159,11 @@ def news(
     )
 
 
+@router.get("/news/sources", response_model=list[NewsSourceMeta])
+def news_sources_list() -> list[NewsSourceMeta]:
+    return news_service.list_sources()
+
+
 @router.get("/predictions", response_model=PredictionsResponse)
 def predictions(hours: int = 24, search: str | None = None, db: Session = Depends(get_db)) -> PredictionsResponse:
     return prediction_service.get_predictions(db, hours=hours, search=search)
@@ -279,6 +286,16 @@ def delete_annotation(annotation_id: int, db: Session = Depends(get_db)) -> Dele
 def annotation_auto(request: AutoAnnotateRequest, db: Session = Depends(get_db)) -> AutoAnnotateResponse:
     try:
         return annotation_service.auto_annotate(db, request)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
+    except RuntimeError as exc:
+        raise ApiError("AUTO_ANNOTATE_FAILED", str(exc), status_code=502) from exc
+
+
+@router.post("/annotations/auto-batch", response_model=AutoAnnotateBatchResponse)
+def annotation_auto_batch(request: AutoAnnotateBatchRequest, db: Session = Depends(get_db)) -> AutoAnnotateBatchResponse:
+    try:
+        return annotation_service.auto_annotate_batch(db, request)
     except ValueError as exc:
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
     except RuntimeError as exc:

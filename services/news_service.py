@@ -5,10 +5,31 @@ from datetime import timedelta
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+import config
 from models.news import NewsItem
-from schemas.news import NewsItemSchema, NewsResponse
+from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta
 from services.pagination import clamp_page
 from services.time_utils import timestamp_pair, utc_now_naive
+
+
+def _enabled_news_sources() -> list[str]:
+    """白名单：从 `config.NEWS_SOURCES` 取启用的源 key，避免硬编码源名导致漂移。"""
+    return [k for k, v in config.NEWS_SOURCES.items() if v.get("enabled")]
+
+
+def list_sources() -> list[NewsSourceMeta]:
+    """枚举当前启用的新闻源给前端构造下拉框用。`name` 优先取 config 里配置的，
+    缺省时大写 key。"""
+    items: list[NewsSourceMeta] = []
+    for key, cfg in config.NEWS_SOURCES.items():
+        if not cfg.get("enabled"):
+            continue
+        items.append(NewsSourceMeta(
+            key=key,
+            name=cfg.get("name") or key.upper(),
+            language=cfg.get("language", "en"),
+        ))
+    return items
 
 
 def is_jin10_important(item: NewsItem) -> bool:
@@ -57,7 +78,7 @@ def get_news(
     if sources:
         query = query.filter(NewsItem.source.in_(sources))
     else:
-        query = query.filter(NewsItem.source.in_(["jin10", "bloomberg"]))
+        query = query.filter(NewsItem.source.in_(_enabled_news_sources()))
 
     if search:
         like = f"%{search.strip()}%"
@@ -78,6 +99,6 @@ def get_news(
         total=total,
         page=page,
         page_size=page_size,
-        zh_count=sum(1 for item in filtered if item.source == "jin10" or item.language == "zh"),
-        en_count=sum(1 for item in filtered if item.source == "bloomberg" or item.language == "en"),
+        zh_count=sum(1 for item in filtered if item.language == "zh"),
+        en_count=sum(1 for item in filtered if item.language == "en"),
     )

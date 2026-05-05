@@ -57,6 +57,8 @@ DEEPSEEK_MAX_RETRIES = int(os.getenv("DEEPSEEK_MAX_RETRIES", "1"))
 # v4 pro 推理模型（自动标注用）。thinking 模式对应 reasoning_content，需要更长 read timeout。
 DEEPSEEK_REASONER_MODEL = os.getenv("DEEPSEEK_REASONER_MODEL", "deepseek-v4-pro")
 DEEPSEEK_REASONER_READ_TIMEOUT = float(os.getenv("DEEPSEEK_REASONER_READ_TIMEOUT", "240"))
+# 批量调用一次喂多个窗口，单次思考时间 = 单窗口 × 倍数；read timeout 也要相应放大。
+DEEPSEEK_REASONER_BATCH_READ_TIMEOUT = float(os.getenv("DEEPSEEK_REASONER_BATCH_READ_TIMEOUT", "600"))
 DEEPSEEK_REASONER_EFFORT = os.getenv("DEEPSEEK_REASONER_EFFORT", "max")  # "high" | "max"
 
 # 企业微信机器人 Webhook
@@ -174,13 +176,17 @@ NEWS_SOURCES = {
     "jin10": {
         "enabled": True,
         "language": "zh",
+        "name": "Jin10",
     },
-    "bloomberg": {
+    # CNBC Top News：全球突发 + 财经为主，每日数十条新增，覆盖 Fed / 监管 / 公司事件 / 地缘等。
+    # 比之前用的 Bloomberg RSS 稳定，且非加密专项。
+    # 备选 feed（按 id 切换）：100003114=Top News, 15839069=Markets, 19834094=Investing。
+    "cnbc": {
         "enabled": True,
         "type": "rss",
         "language": "en",
-        "url": "https://feeds.bloomberg.com/markets/news.rss",
-        "name": "Bloomberg",
+        "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "name": "CNBC",
     },
 }
 
