@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CornerDownRight, Circle, RotateCcw, Save, Sparkles } from "lucide-react";
+import { CornerDownRight, Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
-import type { AnnotationListItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
+import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
+
+const AUTO_BATCH_CHUNK = 10;  // 后端 AUTO_ANNOTATE_BATCH_LIMIT，前端分片大小一致
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
@@ -29,6 +31,15 @@ export function AnnotationsPage() {
   const [notes, setNotes] = useState("");
   const [labeler, setLabeler] = useState("");
   const [autoResult, setAutoResult] = useState<AutoAnnotateResponse | null>(null);
+
+  // 批量自动标注的结果缓存。Key = windowKey(window)。一次「批量自动标注」可能产生多片
+  // batch 调用（每片 ≤10 窗口），每个窗口的结果按 key 暂存，等用户点中某个窗口时回填表单。
+  const [batchByKey, setBatchByKey] = useState<Map<string, AutoAnnotateBatchItem>>(new Map());
+  // 当前/最近一次批量调用的全局元数据（reasoning + 模型名 + 总耗时），用于附给每个窗口的 autoResult。
+  const [batchMeta, setBatchMeta] = useState<{ reasoning: string; model: string; duration_seconds: number } | null>(null);
+  // 批处理进度：{ done, total } 用来显示「3/12」之类的状态。
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
+  const [batchError, setBatchError] = useState<unknown>(null);
 
   const rules = useQuery({ queryKey: ["annotation-rules"], queryFn: api.priceRules });
   const symbols = useQuery({ queryKey: ["annotation-symbols", hours], queryFn: () => api.annotationSymbols(Number(hours)) });
@@ -90,13 +101,29 @@ export function AnnotationsPage() {
     enabled: Boolean(activeWindow)
   });
 
-  // 切换窗口时清空表单 + 上次的自动标注结果。
+  // 切换窗口时：如果该窗口在批量结果缓存里有，回填表单和 autoResult；否则清空。
   useEffect(() => {
-    setSelectedNews([]);
-    setNoClearNews(false);
-    setNotes("");
-    setAutoResult(null);
-  }, [activeKey]);
+    const cached = batchByKey.get(activeKey);
+    if (cached && batchMeta) {
+      setSelectedNews(cached.selected_news_ids);
+      setNoClearNews(cached.no_clear_news);
+      setNotes(cached.summary);
+      setAutoResult({
+        selected_news_ids: cached.selected_news_ids,
+        no_clear_news: cached.no_clear_news,
+        summary: cached.summary,
+        reasoning: batchMeta.reasoning,  // 批量共享同一段 reasoning_content
+        model: batchMeta.model,
+        duration_seconds: batchMeta.duration_seconds,
+        candidate_count: cached.candidate_count
+      });
+    } else {
+      setSelectedNews([]);
+      setNoClearNews(false);
+      setNotes("");
+      setAutoResult(null);
+    }
+  }, [activeKey, batchByKey, batchMeta]);
 
   const save = useMutation({
     mutationFn: () => api.saveAnnotation({
@@ -143,6 +170,55 @@ export function AnnotationsPage() {
     }
   });
 
+  // 批量自动标注：把所有未标注 primary 分片调 /api/annotations/auto-batch，
+  // 每片 ≤AUTO_BATCH_CHUNK 个窗口；结果累积到 batchByKey，用户点开任一窗口都能预填。
+  const runBatchAutoAnnotate = async () => {
+    setBatchError(null);
+    const targets = unannotatedPrimaries;
+    if (!targets.length) return;
+
+    const chunks: PriceWindow[][] = [];
+    for (let i = 0; i < targets.length; i += AUTO_BATCH_CHUNK) {
+      chunks.push(targets.slice(i, i + AUTO_BATCH_CHUNK));
+    }
+
+    setBatchProgress({ done: 0, total: chunks.length });
+    const accum = new Map(batchByKey);
+    let lastReasoning = batchMeta?.reasoning ?? "";
+    let lastModel = batchMeta?.model ?? "";
+    let totalDuration = batchMeta?.duration_seconds ?? 0;
+
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const response = await api.autoAnnotateBatch({
+          windows: chunk.map((w) => ({
+            symbol: w.symbol,
+            window_start_utc: w.window_start.timestamp_utc!,
+            window_end_utc: w.window_end.timestamp_utc!,
+            threshold_pct: rule?.threshold_pct ?? 0
+          }))
+        });
+        for (const item of response.results) {
+          accum.set(`${item.symbol}|${item.window_start_utc}|${item.window_end_utc}`, item);
+        }
+        // 多片时各 chunk 的 reasoning 互相独立，前端只展示最近一片，避免拼太长。
+        lastReasoning = response.reasoning;
+        lastModel = response.model;
+        totalDuration += response.duration_seconds;
+        setBatchByKey(new Map(accum));
+        setBatchMeta({ reasoning: lastReasoning, model: lastModel, duration_seconds: totalDuration });
+        setBatchProgress({ done: i + 1, total: chunks.length });
+      }
+    } catch (err) {
+      setBatchError(err);
+    } finally {
+      setBatchProgress((prev) => prev && prev.done >= prev.total ? null : prev);
+    }
+  };
+
+  const batchInFlight = batchProgress != null && batchProgress.done < batchProgress.total;
+
   return (
     <section>
       <PageHeader title="新闻标注" subtitle="价格异动窗口与候选新闻关联（未标注 / 已标注 上下分栏）" />
@@ -161,8 +237,22 @@ export function AnnotationsPage() {
       <section className="panel annotation-block">
         <div className="panel-head">
           <h2>未标注 ({groups.length})</h2>
-          <span className="muted-text small">连续异动会被聚合为一个事件，只标第一次；后续延伸窗口（↳）只展示不标注</span>
+          <div className="panel-controls">
+            <Button
+              kind="secondary"
+              onClick={() => void runBatchAutoAnnotate()}
+              disabled={!groups.length || batchInFlight}
+            >
+              <Layers size={16} />
+              {batchInFlight
+                ? `批量推理中 ${batchProgress!.done}/${batchProgress!.total}...`
+                : `批量自动标注 (${groups.length})`}
+            </Button>
+            <span className="muted-text small">同一份 system prompt 一次喂 ≤{AUTO_BATCH_CHUNK} 窗口，省 KV cache</span>
+          </div>
         </div>
+        <p className="muted-text small">连续异动会被聚合为一个事件，只标第一次；后续延伸窗口（↳）只展示不标注。批量自动标注后点击任一窗口即可看到 LLM 建议并保存。</p>
+        {batchError ? <ErrorState error={batchError} /> : null}
 
         {windowsQuery.isLoading ? <LoadingState /> :
          windowsQuery.error ? <ErrorState error={windowsQuery.error} /> :

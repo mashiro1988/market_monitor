@@ -242,6 +242,30 @@ export type AutoAnnotateResponse = {
   candidate_count: number;
 };
 
+export type AutoAnnotateBatchRequest = {
+  windows: AutoAnnotateRequest[];
+};
+
+export type AutoAnnotateBatchItem = {
+  symbol: string;
+  window_start_utc: string;
+  window_end_utc: string;
+  selected_news_ids: number[];
+  no_clear_news: boolean;
+  summary: string;
+  candidate_count: number;
+  candidate_news_ids: number[];
+};
+
+export type AutoAnnotateBatchResponse = {
+  results: AutoAnnotateBatchItem[];
+  reasoning: string;
+  model: string;
+  duration_seconds: number;
+  requested_count: number;
+  answered_count: number;
+};
+
 export type DeleteAnnotationResponse = {
   id: number;
   deleted: boolean;

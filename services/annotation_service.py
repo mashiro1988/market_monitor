@@ -18,6 +18,9 @@ from schemas.annotations import (
     AnnotationListItem,
     AnnotationResponse,
     AnnotationSymbol,
+    AutoAnnotateBatchItem,
+    AutoAnnotateBatchRequest,
+    AutoAnnotateBatchResponse,
     AutoAnnotateRequest,
     AutoAnnotateResponse,
     ContextNewsResponse,
@@ -56,6 +59,49 @@ AUTO_ANNOTATE_SYSTEM_PROMPT = """你是一名买方量化研究员，专门分�
   "summary": "不超过 80 字的因果归因结论"
 }
 """
+
+
+AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT = """你是一名买方量化研究员。你将一次性收到一组价格异动窗口及其各自的候选新闻列表，
+对**每个**窗口分别判断哪些新闻是因果触发。
+
+输入结构：
+{
+  "windows": [
+    {
+      "id": int,                                  // 窗口编号，必须在返回中按相同 id 引用
+      "symbol", "start_utc", "end_utc",
+      "threshold_pct", "price_start", "price_end", "change_pct",
+      "candidates": [{ "id": int, "time_bj", "source", "llm_score", ... }, ...]
+    },
+    ...
+  ]
+}
+
+判断原则与单窗口模式一致：
+- 优先选择窗口内或窗口开始前 0-15 分钟发生的新闻；窗口结束后的新闻仅当有"延后反应"的明确逻辑才选。
+- 优先选择 LLM 评分 ≥7 或源端 jin10 标注重要的新闻。
+- 选中的新闻必须与该 symbol 或其驱动因素（宏观、监管、流动性、地缘风险、行业事件）直接相关。
+- 仅做新闻 → 价格的归因。
+- 候选里没有明显因果时返回 no_clear_news=true，selected_news_ids=[]。
+
+每个 window 必须在输出 items 中**有且只有一项**，window_id 与输入的 id 严格对应。
+
+只返回 JSON：
+{
+  "items": [
+    {
+      "window_id": int,
+      "selected_news_ids": [int, ...],   // 只能引用对应 window 自己 candidates 列表里的 id
+      "no_clear_news": bool,
+      "summary": "不超过 80 字的归因结论"
+    },
+    ...
+  ]
+}
+"""
+
+# 一次批量调用最多塞 N 个窗口，避免上下文过长把 reasoning 时间和成本拉爆。
+AUTO_ANNOTATE_BATCH_LIMIT = 10
 
 
 def load_alert_price_rules() -> list[PriceRuleSchema]:
@@ -560,3 +606,233 @@ def auto_annotate(session: Session, request: AutoAnnotateRequest) -> AutoAnnotat
         duration_seconds=round(duration, 2),
         candidate_count=len(candidate_news),
     )
+
+
+def _build_auto_annotate_batch_user_payload(
+    session: Session,
+    windows: list[AutoAnnotateRequest],
+) -> tuple[str, list[dict], dict[int, list[int]]]:
+    """组装批量请求的 user 消息；同时返回每个 window 的 candidate id 列表（落库用）。
+
+    返回 (user_content, window_metas, candidate_ids_by_window_idx)。
+    window_metas 与 windows 索引对齐，记录 symbol / 时间 / 价格元数据，用于响应阶段回填。
+    """
+    payload_windows: list[dict] = []
+    window_metas: list[dict] = []
+    candidate_ids_by_window: dict[int, list[int]] = {}
+
+    for idx, w in enumerate(windows):
+        window_start = parse_datetime(w.window_start_utc)
+        window_end = parse_datetime(w.window_end_utc)
+        if window_start is None or window_end is None:
+            raise ValueError(f"窗口 {idx} 的 window_start_utc / window_end_utc 不能为空")
+
+        start_snapshot = _find_window_snapshot(session, w.symbol, window_start)
+        end_snapshot = _find_window_snapshot(session, w.symbol, window_end)
+
+        context_start = window_start - timedelta(minutes=CONTEXT_PRE_MINUTES_DEFAULT)
+        context_end = window_end + timedelta(minutes=CONTEXT_POST_MINUTES_DEFAULT)
+        candidate_news = (
+            session.query(NewsItem)
+            .filter(
+                NewsItem.source.in_(["jin10", "bloomberg"]),
+                NewsItem.timestamp >= context_start,
+                NewsItem.timestamp <= context_end,
+            )
+            .order_by(NewsItem.timestamp.asc())
+            .all()
+        )
+        candidate_ids_by_window[idx] = [int(row.id) for row in candidate_news]
+
+        candidates_payload = [
+            {
+                "id": row.id,
+                "time_bj": (row.timestamp + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M") if row.timestamp else None,
+                "source": row.source,
+                "llm_score": row.llm_importance,
+                "jin10_important": bool(row.importance) if row.source == "jin10" else None,
+                "title": (row.title or "")[:160],
+                "content": (row.content or "")[:300],
+            }
+            for row in candidate_news
+        ]
+
+        change_pct = None
+        if start_snapshot and end_snapshot and start_snapshot.price:
+            change_pct = (end_snapshot.price - start_snapshot.price) / abs(start_snapshot.price) * 100
+
+        payload_windows.append({
+            "id": idx,
+            "symbol": w.symbol,
+            "start_utc": w.window_start_utc,
+            "end_utc": w.window_end_utc,
+            "threshold_pct": w.threshold_pct,
+            "price_start": start_snapshot.price if start_snapshot else None,
+            "price_end": end_snapshot.price if end_snapshot else None,
+            "change_pct": change_pct,
+            "candidates": candidates_payload,
+        })
+        window_metas.append({
+            "symbol": w.symbol,
+            "window_start_utc": w.window_start_utc,
+            "window_end_utc": w.window_end_utc,
+            "candidate_count": len(candidate_news),
+        })
+
+    user_content = f"共 {len(payload_windows)} 个窗口。\n{json.dumps({'windows': payload_windows}, ensure_ascii=False)}"
+    return user_content, window_metas, candidate_ids_by_window
+
+
+def _parse_auto_annotate_batch_response(
+    raw: str,
+    valid_ids_by_window: dict[int, set[int]],
+) -> dict[int, tuple[list[int], bool, str]]:
+    """从 reasoner 返回的 JSON 解析 items，按 window_id 映射回去；过滤幻觉 id。"""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            raise ValueError(f"reasoner 批量返回非 JSON: {text[:200]}")
+        data = json.loads(match.group(0))
+
+    if not isinstance(data, dict):
+        raise ValueError(f"reasoner 批量返回顶层不是对象: {type(data)}")
+    items = data.get("items")
+    if not isinstance(items, list):
+        raise ValueError("reasoner 批量返回缺少 items 列表")
+
+    by_window: dict[int, tuple[list[int], bool, str]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            wid = int(item.get("window_id"))
+        except (TypeError, ValueError):
+            continue
+        valid_ids = valid_ids_by_window.get(wid)
+        if valid_ids is None:
+            continue
+        raw_ids = item.get("selected_news_ids") or []
+        selected: list[int] = []
+        if isinstance(raw_ids, list):
+            seen: set[int] = set()
+            for entry in raw_ids:
+                try:
+                    value = int(entry)
+                except (TypeError, ValueError):
+                    continue
+                if value in valid_ids and value not in seen:
+                    selected.append(value)
+                    seen.add(value)
+        no_clear_news = bool(item.get("no_clear_news"))
+        summary = (item.get("summary") or "")
+        if not isinstance(summary, str):
+            summary = str(summary)
+        by_window[wid] = (selected, no_clear_news, summary.strip()[:240])
+
+    return by_window
+
+
+def auto_annotate_batch(session: Session, request: AutoAnnotateBatchRequest) -> AutoAnnotateBatchResponse:
+    """**只调模型，不写库**。一次喂多个窗口给 reasoner，复用同一份 system prompt。
+    超过 AUTO_ANNOTATE_BATCH_LIMIT 个窗口时报错（前端应分片调用）。"""
+    windows = request.windows or []
+    if not windows:
+        raise ValueError("windows 不能为空")
+    if len(windows) > AUTO_ANNOTATE_BATCH_LIMIT:
+        raise ValueError(
+            f"批量自动标注一次最多 {AUTO_ANNOTATE_BATCH_LIMIT} 个窗口，收到 {len(windows)}；"
+            f"请前端分片调用"
+        )
+
+    user_content, window_metas, candidate_ids_by_window = _build_auto_annotate_batch_user_payload(session, windows)
+
+    logger.info(
+        f"[AutoAnnotateBatch] 调 DeepSeek {config.DEEPSEEK_REASONER_MODEL}，"
+        f"effort={config.DEEPSEEK_REASONER_EFFORT}，{len(windows)} 个窗口，"
+        f"总候选 {sum(m['candidate_count'] for m in window_metas)} 条"
+    )
+    content, reasoning, duration = _call_deepseek_reasoner_batch(user_content)
+
+    valid_ids_by_window = {idx: set(ids) for idx, ids in candidate_ids_by_window.items()}
+    parsed = _parse_auto_annotate_batch_response(content, valid_ids_by_window)
+
+    results: list[AutoAnnotateBatchItem] = []
+    for idx, meta in enumerate(window_metas):
+        # 模型可能漏给某个窗口；漏的视为 no_clear_news=true，summary 留空，
+        # 让前端 UI 提示用户检查/重新单独跑该窗口。
+        selected, no_clear_news, summary = parsed.get(idx, ([], True, ""))
+        results.append(AutoAnnotateBatchItem(
+            symbol=meta["symbol"],
+            window_start_utc=meta["window_start_utc"],
+            window_end_utc=meta["window_end_utc"],
+            selected_news_ids=selected,
+            no_clear_news=no_clear_news,
+            summary=summary,
+            candidate_count=meta["candidate_count"],
+            candidate_news_ids=candidate_ids_by_window[idx],
+        ))
+
+    logger.info(
+        f"[AutoAnnotateBatch] 完成，耗时 {duration:.1f}s，命中 {len(parsed)}/{len(windows)} 个窗口"
+    )
+
+    return AutoAnnotateBatchResponse(
+        results=results,
+        reasoning=reasoning,
+        model=config.DEEPSEEK_REASONER_MODEL,
+        duration_seconds=round(duration, 2),
+        requested_count=len(windows),
+        answered_count=len(parsed),
+    )
+
+
+def _call_deepseek_reasoner_batch(user_content: str) -> tuple[str, str, float]:
+    """与 _call_deepseek_reasoner 同样的 thinking 模式调用，但用批量 system prompt + 更大 max_tokens。"""
+    if not config.DEEPSEEK_API_KEY:
+        raise RuntimeError("DEEPSEEK_API_KEY 未配置，无法调用批量自动标注")
+
+    payload = {
+        "model": config.DEEPSEEK_REASONER_MODEL,
+        "messages": [
+            {"role": "system", "content": AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "thinking": {
+            "type": "enabled",
+            "reasoning_effort": config.DEEPSEEK_REASONER_EFFORT,
+        },
+        "response_format": {"type": "json_object"},
+        # 批量返回 N 项 + 思考量翻倍，给足生成空间；KV cache 让 prompt 部分几乎免费。
+        "max_tokens": 8000,
+    }
+    headers = {
+        "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    started = time.monotonic()
+    resp = requests.post(
+        DEEPSEEK_API_URL,
+        json=payload,
+        headers=headers,
+        timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_REASONER_READ_TIMEOUT),
+    )
+    duration = time.monotonic() - started
+
+    if resp.status_code >= 400:
+        preview = resp.text[:300].replace("\n", " ")
+        raise RuntimeError(f"DeepSeek 返回 {resp.status_code}: {preview}")
+
+    body = resp.json()
+    message = body["choices"][0].get("message", {})
+    content = (message.get("content") or "").strip()
+    reasoning = (message.get("reasoning_content") or "").strip()
+    if not content:
+        raise RuntimeError(f"DeepSeek 批量返回空 content（reasoning 预览: {reasoning[:200]}）")
+    return content, reasoning, duration

@@ -9,6 +9,8 @@ import type {
   AnnotationResponse,
   AnnotationSymbol,
   ApiErrorPayload,
+  AutoAnnotateBatchRequest,
+  AutoAnnotateBatchResponse,
   AutoAnnotateRequest,
   AutoAnnotateResponse,
   DeleteAnnotationResponse,
@@ -117,5 +119,7 @@ export const api = {
   deleteAnnotation: (id: number) =>
     request<DeleteAnnotationResponse>(`/annotations/${id}`, { method: "DELETE" }),
   autoAnnotate: (body: AutoAnnotateRequest) =>
-    request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) })
+    request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) }),
+  autoAnnotateBatch: (body: AutoAnnotateBatchRequest) =>
+    request<AutoAnnotateBatchResponse>("/annotations/auto-batch", { method: "POST", body: JSON.stringify(body) })
 };

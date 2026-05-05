@@ -20,6 +20,8 @@ from schemas.annotations import (
     AnnotationListItem,
     AnnotationResponse,
     AnnotationSymbol,
+    AutoAnnotateBatchRequest,
+    AutoAnnotateBatchResponse,
     AutoAnnotateRequest,
     AutoAnnotateResponse,
     ContextNewsResponse,
@@ -279,6 +281,16 @@ def delete_annotation(annotation_id: int, db: Session = Depends(get_db)) -> Dele
 def annotation_auto(request: AutoAnnotateRequest, db: Session = Depends(get_db)) -> AutoAnnotateResponse:
     try:
         return annotation_service.auto_annotate(db, request)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
+    except RuntimeError as exc:
+        raise ApiError("AUTO_ANNOTATE_FAILED", str(exc), status_code=502) from exc
+
+
+@router.post("/annotations/auto-batch", response_model=AutoAnnotateBatchResponse)
+def annotation_auto_batch(request: AutoAnnotateBatchRequest, db: Session = Depends(get_db)) -> AutoAnnotateBatchResponse:
+    try:
+        return annotation_service.auto_annotate_batch(db, request)
     except ValueError as exc:
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
     except RuntimeError as exc:
