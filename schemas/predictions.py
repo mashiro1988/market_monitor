@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from schemas.common import TimeFields
@@ -41,3 +43,25 @@ class PredictionFamily(BaseModel):
 class PredictionsResponse(BaseModel):
     markets: list[PredictionMarketSummary]
     latest_timestamp: TimeFields | None = None
+
+
+class TrackedMarketSchema(BaseModel):
+    id: int
+    kind: Literal["slug", "tag"]
+    identifier: str
+    display_name: str | None = None
+    enabled: bool
+    notes: str | None = None
+
+
+class TrackedMarketCreate(BaseModel):
+    kind: Literal["slug", "tag"]
+    identifier: str
+    display_name: str | None = None
+    notes: str | None = None
+
+
+class TrackedMarketUpdate(BaseModel):
+    enabled: bool | None = None
+    display_name: str | None = None
+    notes: str | None = None
