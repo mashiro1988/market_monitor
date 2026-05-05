@@ -4,7 +4,9 @@ import { CornerDownRight, Circle, Layers, RotateCcw, Save, Sparkles } from "luci
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
 
-const AUTO_BATCH_CHUNK = 10;  // 后端 AUTO_ANNOTATE_BATCH_LIMIT，前端分片大小一致
+// 比后端 AUTO_ANNOTATE_BATCH_LIMIT (10) 保守一档：5 个窗口 × thinking 模式总耗时
+// 通常 60-300s，留余地给 600s read_timeout。10 窗口曾经触发过浏览器/连接侧 "Failed to fetch"。
+const AUTO_BATCH_CHUNK = 5;
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
@@ -243,7 +245,10 @@ export function AnnotationsPage() {
     } catch (err) {
       setBatchError(err);
     } finally {
-      setBatchProgress((prev) => prev && prev.done >= prev.total ? null : prev);
+      // 不管成功 / 失败 / 中断，进度条都清掉，让按钮可以再次点击重试。
+      // 已经成功落入 batchByKey 的窗口下次会被 pendingForBatch 自动跳过——
+      // 用户重新点 batch 只会处理失败 / 未尝试的剩余部分。
+      setBatchProgress(null);
     }
   };
 
@@ -264,9 +269,10 @@ export function AnnotationsPage() {
         <TextInput label="标注人" value={labeler} onChange={setLabeler} placeholder="可留空" />
       </div>
 
+      {/* Section 1: 自动标注 —— LLM 触发按钮 + 当前窗口元信息 + 推理面板 */}
       <section className="panel annotation-block">
         <div className="panel-head">
-          <h2>未标注 ({groups.length})</h2>
+          <h2>自动标注</h2>
           <div className="annotation-actions">
             <Button
               kind="secondary"
@@ -291,91 +297,119 @@ export function AnnotationsPage() {
           </div>
         </div>
         <p className="muted-text small">
-          连续异动会被聚合为一个事件，只标第一次（↳ 续发窗口只展示不标）。候选新闻取窗口前 15 / 后 30 分钟。批量推理一次喂 ≤{AUTO_BATCH_CHUNK} 窗口共用 system prompt 省 KV cache，已推理过的窗口自动跳过。
+          批量推理一次喂 ≤{AUTO_BATCH_CHUNK} 窗口共用 system prompt 省 KV cache；已推理过的窗口自动跳过。失败时进度条会清空，重试只会处理剩余的。
         </p>
         {batchError ? <ErrorState error={batchError} /> : null}
+
+        {activeWindow ? (
+          <div className="active-window-meta">
+            <div className="metric-row">
+              <Stat label="窗口涨跌" value={`${activeWindow.change_pct > 0 ? "+" : ""}${activeWindow.change_pct.toFixed(2)}%`} tone={activeWindow.change_pct >= 0 ? "up" : "down"} />
+              <Stat label="起点价格" value={activeWindow.price_start.toLocaleString()} />
+              <Stat label="终点价格" value={activeWindow.price_end.toLocaleString()} />
+              <Stat label="窗口分钟" value={`${activeWindow.actual_window_minutes}m`} />
+            </div>
+            <p className="muted-text small">{activeWindow.window_start.timestamp_bj} 至 {activeWindow.window_end.timestamp_bj}</p>
+          </div>
+        ) : (
+          <p className="muted-text small">尚未选中窗口；从下方「未标注」事件列表里选一个查看候选新闻并标注。</p>
+        )}
+
+        {autoResult ? (
+          <details className="reasoning-block" open>
+            <summary>
+              <span className="reasoning-tag">推理结果</span>
+              <span>{autoResult.model} · {autoResult.duration_seconds.toFixed(1)}s · 看了 {autoResult.candidate_count} 条候选</span>
+            </summary>
+            {autoResult.summary ? <p className="reasoning-summary">{autoResult.summary}</p> : null}
+            {autoResult.reasoning ? (
+              <pre className="reasoning-content">{autoResult.reasoning}</pre>
+            ) : <p className="muted-text small">模型未返回 reasoning_content（thinking 模式可能未生效）。</p>}
+          </details>
+        ) : null}
+
+        {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
+      </section>
+
+      {/* Section 2: 未标注 —— 左右对称（待标注列表 + 候选新闻），下方表单 */}
+      <section className="panel annotation-block">
+        <div className="panel-head">
+          <h2>未标注 ({groups.length})</h2>
+          <span className="muted-text small">
+            连续异动会聚合为一个事件，只标第一次（↳ 续发窗口只展示不标）。候选新闻取窗口前 15 / 后 30 分钟。
+          </span>
+        </div>
 
         {windowsQuery.isLoading ? <LoadingState /> :
          windowsQuery.error ? <ErrorState error={windowsQuery.error} /> :
          !groups.length ? <EmptyState title="该回溯期内没有未标注的价格异动事件" /> : (
-          <div className="annotation-work">
-            <aside className="annotation-work-list">
-              <ul className="window-list">
-                {groups.map(({ primary, secondaries }) => {
-                  const key = windowKey(primary);
-                  const isActive = key === activeKey;
-                  const tone = primary.change_pct >= 0 ? "up" : "down";
-                  const sign = primary.change_pct > 0 ? "+" : "";
-                  return (
-                    <li key={key}>
-                      <button
-                        type="button"
-                        className={`window-item ${tone}${isActive ? " active" : ""}`}
-                        onClick={() => setActiveKey(key)}
-                      >
-                        <span className="window-item-icon"><Circle size={14} /></span>
-                        <span className="window-item-time">
-                          {primary.window_start.timestamp_bj?.slice(5, 16)} → {primary.window_end.timestamp_bj?.slice(11, 16)}
-                        </span>
-                        <span className="window-item-pct">
-                          {sign}{primary.change_pct.toFixed(2)}%
-                        </span>
-                      </button>
-                      {secondaries.length ? (
-                        <ul className="window-secondary-list">
-                          {secondaries.map((s) => {
-                            const sTone = s.change_pct >= 0 ? "up" : "down";
-                            const sSign = s.change_pct > 0 ? "+" : "";
-                            return (
-                              <li key={windowKey(s)}>
-                                <div className={`window-item secondary ${sTone}`} title="连续异动延伸窗口，已聚合到上方事件，不需单独标注">
-                                  <span className="window-item-icon"><CornerDownRight size={12} /></span>
-                                  <span className="window-item-time">
-                                    {s.window_end.timestamp_bj?.slice(11, 16)}
-                                  </span>
-                                  <span className="window-item-pct">
-                                    {sSign}{s.change_pct.toFixed(2)}%
-                                  </span>
-                                </div>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </aside>
+          <>
+            <div className="annotation-pair-grid">
+              <section className="annotation-pair-panel">
+                <header className="annotation-pair-panel-head">
+                  <span>待标注事件</span>
+                  <span>{groups.length} 条</span>
+                </header>
+                <div className="annotation-pair-panel-body">
+                  <ul className="window-list">
+                    {groups.map(({ primary, secondaries }) => {
+                      const key = windowKey(primary);
+                      const isActive = key === activeKey;
+                      const tone = primary.change_pct >= 0 ? "up" : "down";
+                      const sign = primary.change_pct > 0 ? "+" : "";
+                      return (
+                        <li key={key}>
+                          <button
+                            type="button"
+                            className={`window-item ${tone}${isActive ? " active" : ""}`}
+                            onClick={() => setActiveKey(key)}
+                          >
+                            <span className="window-item-icon"><Circle size={14} /></span>
+                            <span className="window-item-time">
+                              {primary.window_start.timestamp_bj?.slice(5, 16)} → {primary.window_end.timestamp_bj?.slice(11, 16)}
+                            </span>
+                            <span className="window-item-pct">
+                              {sign}{primary.change_pct.toFixed(2)}%
+                            </span>
+                          </button>
+                          {secondaries.length ? (
+                            <ul className="window-secondary-list">
+                              {secondaries.map((s) => {
+                                const sTone = s.change_pct >= 0 ? "up" : "down";
+                                const sSign = s.change_pct > 0 ? "+" : "";
+                                return (
+                                  <li key={windowKey(s)}>
+                                    <div className={`window-item secondary ${sTone}`} title="连续异动延伸窗口，已聚合到上方事件，不需单独标注">
+                                      <span className="window-item-icon"><CornerDownRight size={12} /></span>
+                                      <span className="window-item-time">
+                                        {s.window_end.timestamp_bj?.slice(11, 16)}
+                                      </span>
+                                      <span className="window-item-pct">
+                                        {sSign}{s.change_pct.toFixed(2)}%
+                                      </span>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </section>
 
-            <div className="annotation-work-detail">
-              {!activeWindow ? <EmptyState title="选择一个窗口" /> : (
-                <>
-                  <div className="metric-row">
-                    <Stat label="窗口涨跌" value={`${activeWindow.change_pct > 0 ? "+" : ""}${activeWindow.change_pct.toFixed(2)}%`} tone={activeWindow.change_pct >= 0 ? "up" : "down"} />
-                    <Stat label="起点价格" value={activeWindow.price_start.toLocaleString()} />
-                    <Stat label="终点价格" value={activeWindow.price_end.toLocaleString()} />
-                    <Stat label="窗口分钟" value={`${activeWindow.actual_window_minutes}m`} />
-                  </div>
-                  <p className="muted-text small">{activeWindow.window_start.timestamp_bj} 至 {activeWindow.window_end.timestamp_bj}</p>
-
-                  {autoResult ? (
-                    <details className="reasoning-block" open>
-                      <summary>
-                        <span className="reasoning-tag">推理结果</span>
-                        <span>{autoResult.model} · {autoResult.duration_seconds.toFixed(1)}s · 看了 {autoResult.candidate_count} 条候选</span>
-                      </summary>
-                      {autoResult.summary ? <p className="reasoning-summary">{autoResult.summary}</p> : null}
-                      {autoResult.reasoning ? (
-                        <pre className="reasoning-content">{autoResult.reasoning}</pre>
-                      ) : <p className="muted-text small">模型未返回 reasoning_content（thinking 模式可能未生效）。</p>}
-                    </details>
-                  ) : null}
-
-                  {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
-
-                  <h3 className="block-subhead">候选新闻</h3>
-                  {contextNews.isLoading ? <LoadingState /> :
+              <section className="annotation-pair-panel">
+                <header className="annotation-pair-panel-head">
+                  <span>候选新闻</span>
+                  <span>
+                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前15/后30 分钟`}
+                  </span>
+                </header>
+                <div className="annotation-pair-panel-body">
+                  {!activeWindow ? <EmptyState title="选择左侧窗口查看候选新闻" /> :
+                   contextNews.isLoading ? <LoadingState /> :
                    contextNews.error ? <ErrorState error={contextNews.error} /> : (
                     <DataTable<NewsItem>
                       rows={contextNews.data?.items ?? []}
@@ -389,28 +423,32 @@ export function AnnotationsPage() {
                       ]}
                     />
                   )}
-
-                  <div className="annotation-form-row">
-                    <label className="checkline">
-                      <input type="checkbox" checked={noClearNews} onChange={(event) => setNoClearNews(event.target.checked)} />
-                      没有明确新闻触发
-                    </label>
-                  </div>
-                  <label className="field full">
-                    <span>备注 / 因果归因</span>
-                    <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="自动标注后会自动填入 summary，可手动修改" />
-                  </label>
-                  <div className="annotation-save-row">
-                    <Button disabled={save.isPending} onClick={() => save.mutate()}>
-                      <Save size={16} />保存标注
-                    </Button>
-                    {save.data ? <div className="task-banner succeeded">已保存标注 #{save.data.id}</div> : null}
-                    {save.error ? <ErrorState error={save.error} /> : null}
-                  </div>
-                </>
-              )}
+                </div>
+              </section>
             </div>
-          </div>
+
+            {activeWindow ? (
+              <div className="annotation-save-block">
+                <div className="annotation-form-row">
+                  <label className="checkline">
+                    <input type="checkbox" checked={noClearNews} onChange={(event) => setNoClearNews(event.target.checked)} />
+                    没有明确新闻触发
+                  </label>
+                </div>
+                <label className="field full">
+                  <span>备注 / 因果归因</span>
+                  <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="自动标注后会自动填入 summary，可手动修改" />
+                </label>
+                <div className="annotation-save-row">
+                  <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                    <Save size={16} />保存标注
+                  </Button>
+                  {save.data ? <div className="task-banner succeeded">已保存标注 #{save.data.id}</div> : null}
+                  {save.error ? <ErrorState error={save.error} /> : null}
+                </div>
+              </div>
+            ) : null}
+          </>
         )}
       </section>
 

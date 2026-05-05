@@ -827,7 +827,7 @@ def _call_deepseek_reasoner_batch(user_content: str) -> tuple[str, str, float]:
         DEEPSEEK_API_URL,
         json=payload,
         headers=headers,
-        timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_REASONER_READ_TIMEOUT),
+        timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_REASONER_BATCH_READ_TIMEOUT),
     )
     duration = time.monotonic() - started
 

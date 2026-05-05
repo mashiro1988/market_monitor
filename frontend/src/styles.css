@@ -543,31 +543,69 @@ code {
   flex: 0 0 auto;
 }
 
-.annotation-work {
+/* Section 2 的左右对称栅格：左 = 待标注事件列表，右 = 候选新闻表。
+   两侧共享同一外观（背景 + 边框 + 圆角 + 头/体结构）和同一 max-height，
+   视觉上等高、对称。 */
+.annotation-pair-grid {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.4fr);
   gap: 18px;
-  align-items: start;
-  /* 超宽屏上把整体宽度锁住，避免右栏的候选新闻表稀松成一片 */
+  align-items: stretch;
   max-width: 1440px;
 }
 
-.annotation-work-list {
+.annotation-pair-panel {
+  display: flex;
+  flex-direction: column;
   background: var(--panel-2);
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  padding: 10px;
-  max-height: 720px;
-  overflow-y: auto;
+  max-height: 540px;
+  overflow: hidden;
 }
 
-.annotation-work-list .window-list {
+.annotation-pair-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.annotation-pair-panel-head > span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.annotation-pair-panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+}
+
+/* 在等高外壳里，window-list 自身不再需要 max-height */
+.annotation-pair-panel-body .window-list {
   max-height: none;
 }
 
-.annotation-work-detail {
+/* DataTable 在 panel-body 内部时去掉外层 border（panel-body 已经有了）*/
+.annotation-pair-panel-body .table-wrap {
+  border: 0;
+  border-radius: 0;
+}
+
+.active-window-meta {
   display: grid;
-  gap: 12px;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.annotation-save-block {
+  margin-top: 18px;
+  display: grid;
+  gap: 10px;
 }
 
 /* 未标注 panel-head 的 LLM 行动按钮组合（批量 + 当前窗口）。两个按钮挨在一起，
@@ -633,12 +671,12 @@ code {
 }
 
 @media (max-width: 1080px) {
-  .annotation-work {
+  .annotation-pair-grid {
     grid-template-columns: 1fr;
   }
 
-  .annotation-work-list {
-    max-height: 220px;
+  .annotation-pair-panel {
+    max-height: 360px;
   }
 }
 
