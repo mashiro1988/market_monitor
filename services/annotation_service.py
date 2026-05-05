@@ -30,7 +30,7 @@ from schemas.annotations import (
 from services.news_service import to_news_schema
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
-TARGET_PRICE_SYMBOLS = ["BTC/USDT", "ETH/USDT", "NQ=F"]
+TARGET_PRICE_SYMBOLS = ["BTC/USDT", "NQ=F"]
 
 # 每个标注窗口前后取的候选新闻范围：向前 15 分钟，向后 30 分钟。
 # 与 upsert_annotation 写入 context_start / context_end 的偏移保持一致。
