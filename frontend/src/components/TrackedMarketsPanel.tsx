@@ -10,6 +10,17 @@ const kindOptions = [
   { label: "Tag (家族 / 自动发现)", value: "tag" }
 ];
 
+function extractSlug(input: string): string {
+  const trimmed = input.trim();
+  const urlMatch = trimmed.match(/polymarket\.com\/(?:event|market)\/([\w-]+)/i);
+  if (urlMatch) return urlMatch[1];
+  return trimmed;
+}
+
+function looksLikeQuestion(input: string): boolean {
+  return /\s/.test(input) || input.includes("?") || input.includes("？");
+}
+
 export function TrackedMarketsPanel() {
   const queryClient = useQueryClient();
   const list = useQuery({
@@ -21,21 +32,24 @@ export function TrackedMarketsPanel() {
   const [identifier, setIdentifier] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: (resolvedId: string) =>
       api.createPredictionTracked({
         kind: kind as "slug" | "tag",
-        identifier: identifier.trim(),
+        identifier: resolvedId,
         display_name: displayName.trim() || null
       }),
-    onSuccess: () => {
+    onSuccess: (row) => {
+      setSuccessMsg(`已添加 ${row.kind}: ${row.identifier}`);
+      setErrorMsg("");
       setIdentifier("");
       setDisplayName("");
-      setErrorMsg("");
       queryClient.invalidateQueries({ queryKey: ["prediction-tracked"] });
     },
     onError: (err) => {
+      setSuccessMsg("");
       if (err instanceof ApiError) {
         setErrorMsg(err.payload.message || "添加失败");
       } else {
@@ -43,6 +57,19 @@ export function TrackedMarketsPanel() {
       }
     }
   });
+
+  const submit = () => {
+    const resolved = kind === "slug" ? extractSlug(identifier) : identifier.trim();
+    if (!resolved) {
+      setErrorMsg("请输入 slug 或 tag");
+      return;
+    }
+    if (kind === "slug" && looksLikeQuestion(resolved)) {
+      setErrorMsg("看起来是市场标题，不是 slug。请到该市场的 Polymarket 页面，复制 URL 末尾那一段（如 fed-decision-in-june-825）。");
+      return;
+    }
+    create.mutate(resolved);
+  };
 
   const toggle = useMutation({
     mutationFn: (row: TrackedMarket) =>
@@ -55,9 +82,6 @@ export function TrackedMarketsPanel() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prediction-tracked"] })
   });
 
-  const trimmedId = identifier.trim();
-  const submitDisabled = !trimmedId || create.isPending;
-
   return (
     <details className="panel tracked-panel">
       <summary>
@@ -68,9 +92,13 @@ export function TrackedMarketsPanel() {
       <div className="tracked-add-row">
         <SelectControl label="类型" value={kind} onChange={setKind} options={kindOptions} />
         <TextInput
-          label={kind === "slug" ? "slug" : "tag"}
+          label={kind === "slug" ? "slug 或 Polymarket URL" : "tag"}
           value={identifier}
-          onChange={setIdentifier}
+          onChange={(v) => {
+            setIdentifier(v);
+            setErrorMsg("");
+            setSuccessMsg("");
+          }}
           placeholder={kind === "slug" ? "fed-decision-in-june-825" : "fed"}
         />
         <TextInput
@@ -79,11 +107,17 @@ export function TrackedMarketsPanel() {
           onChange={setDisplayName}
           placeholder="2026 年 6 月 FOMC"
         />
-        <Button onClick={() => create.mutate()} disabled={submitDisabled}>
+        <Button onClick={submit} disabled={create.isPending}>
           {create.isPending ? "添加中..." : "添加"}
         </Button>
       </div>
+      {kind === "slug" ? (
+        <div className="muted-text small">
+          slug 来自 Polymarket 市场页 URL 末尾，例如 <code>polymarket.com/event/<strong>fed-decision-in-june-825</strong></code>。可以直接粘贴整个 URL，会自动提取。
+        </div>
+      ) : null}
       {errorMsg ? <div className="state-view error">{errorMsg}</div> : null}
+      {successMsg ? <div className="state-view success-text">{successMsg}</div> : null}
 
       {list.isLoading ? (
         <LoadingState />

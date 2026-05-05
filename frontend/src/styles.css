@@ -1202,6 +1202,12 @@ code {
   flex: 1;
 }
 
+.success-text {
+  color: var(--up);
+  border-color: rgba(94, 234, 212, 0.36);
+  background: rgba(94, 234, 212, 0.06);
+}
+
 @media (max-width: 1080px) {
   .prediction-grid {
     grid-template-columns: 1fr;
