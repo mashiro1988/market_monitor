@@ -47,7 +47,10 @@ class NewsPriceAnnotation(Base):
     price_start = Column(Float, nullable=True)
     price_end = Column(Float, nullable=True)
     change_pct = Column(Float, nullable=True)
-    causal_news_ids = Column(Text, nullable=True)        # JSON 数组，元素为 news_items.id
+    causal_news_ids = Column(Text, nullable=True)        # JSON 数组，元素为 news_items.id（人工最终选定）
+    candidate_news_ids = Column(Text, nullable=True)     # JSON 数组：标注时整个 context 窗口里的全部候选新闻 ID（含负样本，训练用）
+    auto_reasoning = Column(Text, nullable=True)         # DeepSeek auto-annotate 的 reasoning_content 全文；纯人工标注则 NULL
+    auto_summary = Column(Text, nullable=True)           # DeepSeek auto-annotate 的 summary 原文（与人改后的 notes 区分）
     no_clear_news = Column(Boolean, nullable=False, default=False)
     notes = Column(Text, nullable=True)
     labeler = Column(String(80), nullable=True)

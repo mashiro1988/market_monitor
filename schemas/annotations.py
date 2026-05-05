@@ -29,6 +29,8 @@ class PriceWindowSchema(BaseModel):
     price_start: float
     price_end: float
     change_pct: float
+    annotation_id: int | None = None  # 已标注则为对应 NewsPriceAnnotation.id
+    is_primary: bool = True            # 连续异动 run 的第一个为 True；后续延伸窗口为 False，不可被标注
 
 
 class AnnotationCreateRequest(BaseModel):
@@ -40,6 +42,11 @@ class AnnotationCreateRequest(BaseModel):
     no_clear_news: bool = False
     notes: str | None = None
     labeler: str | None = None
+    # 训练用：标注当时这个 context 窗口里的全部候选新闻 ID（含未选中的，作负样本）。
+    candidate_news_ids: list[int] | None = None
+    # 自动标注流程：LLM 原始推理 + 摘要（与人审后的 notes 分开存）；纯人工标注则两者都为 None。
+    auto_reasoning: str | None = None
+    auto_summary: str | None = None
 
 
 class AnnotationResponse(BaseModel):
@@ -49,3 +56,68 @@ class AnnotationResponse(BaseModel):
 
 class ContextNewsResponse(BaseModel):
     items: list[NewsItemSchema]
+
+
+class AnnotationDetail(BaseModel):
+    """已标注窗口的完整信息，给前端 view 模式 / 撤销使用。"""
+    id: int
+    symbol: str
+    asset_class: str | None
+    window_start: TimeFields
+    window_end: TimeFields
+    context_start: TimeFields
+    context_end: TimeFields
+    threshold_pct: float | None
+    price_start: float | None
+    price_end: float | None
+    change_pct: float | None
+    selected_news_ids: list[int] = Field(default_factory=list)
+    selected_news: list[NewsItemSchema] = Field(default_factory=list)
+    candidate_news_ids: list[int] = Field(default_factory=list)
+    no_clear_news: bool = False
+    notes: str | None = None
+    labeler: str | None = None
+    auto_reasoning: str | None = None
+    auto_summary: str | None = None
+    created_at: TimeFields
+    updated_at: TimeFields
+
+
+class AutoAnnotateRequest(BaseModel):
+    """前端请求自动标注：传窗口（symbol + start + end + threshold），后端拉候选新闻并跑 reasoner。"""
+    symbol: str
+    window_start_utc: str
+    window_end_utc: str
+    threshold_pct: float
+
+
+class AutoAnnotateResponse(BaseModel):
+    """自动标注返回：建议的 selected_news_ids + 推理过程 + 摘要。**不写库**，由前端 review 后调 POST /api/annotations 落库。"""
+    selected_news_ids: list[int] = Field(default_factory=list)
+    no_clear_news: bool = False
+    summary: str = ""
+    reasoning: str = ""  # DeepSeek 的 message.reasoning_content
+    model: str
+    duration_seconds: float
+    candidate_count: int  # 模型看了多少条候选新闻
+
+
+class DeleteAnnotationResponse(BaseModel):
+    id: int
+    deleted: bool = True
+
+
+class AnnotationListItem(BaseModel):
+    """已标注列表的轻量行，不包含完整 selected_news（用 GET /api/annotations/{id} 拉详情）。"""
+    id: int
+    symbol: str
+    asset_class: str | None
+    window_start: TimeFields
+    window_end: TimeFields
+    change_pct: float | None
+    no_clear_news: bool
+    selected_count: int
+    labeler: str | None
+    notes: str | None
+    created_at: TimeFields
+    updated_at: TimeFields

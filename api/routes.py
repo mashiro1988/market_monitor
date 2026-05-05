@@ -16,9 +16,14 @@ from models.price import PriceSnapshot
 from schemas.alerts import AlertLogSchema, AlertRuleSchema, AlertTestResponse, AlertWebhookStatus
 from schemas.annotations import (
     AnnotationCreateRequest,
+    AnnotationDetail,
+    AnnotationListItem,
     AnnotationResponse,
     AnnotationSymbol,
+    AutoAnnotateRequest,
+    AutoAnnotateResponse,
     ContextNewsResponse,
+    DeleteAnnotationResponse,
     PriceRuleSchema,
     PriceWindowSchema,
 )
@@ -227,10 +232,13 @@ def annotation_windows(
 def annotation_context_news(
     window_start_utc: str,
     window_end_utc: str,
-    minutes: int = 30,
+    pre_minutes: int = 15,
+    post_minutes: int = 30,
     db: Session = Depends(get_db),
 ) -> ContextNewsResponse:
-    return annotation_service.load_context_news_for_window(db, window_start_utc, window_end_utc, minutes)
+    return annotation_service.load_context_news_for_window(
+        db, window_start_utc, window_end_utc, pre_minutes, post_minutes
+    )
 
 
 @router.post("/annotations", response_model=AnnotationResponse)
@@ -239,3 +247,39 @@ def annotations(request: AnnotationCreateRequest, db: Session = Depends(get_db))
         return annotation_service.upsert_annotation(db, request)
     except ValueError as exc:
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
+
+
+@router.get("/annotations", response_model=list[AnnotationListItem])
+def annotation_list(
+    symbol: str | None = None,
+    hours: int = 72,
+    db: Session = Depends(get_db),
+) -> list[AnnotationListItem]:
+    return annotation_service.list_annotations(db, symbol, hours)
+
+
+@router.get("/annotations/{annotation_id}", response_model=AnnotationDetail)
+def annotation_detail(annotation_id: int, db: Session = Depends(get_db)) -> AnnotationDetail:
+    try:
+        return annotation_service.get_annotation_detail(db, annotation_id)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_NOT_FOUND", str(exc), status_code=404) from exc
+
+
+@router.delete("/annotations/{annotation_id}", response_model=DeleteAnnotationResponse)
+def delete_annotation(annotation_id: int, db: Session = Depends(get_db)) -> DeleteAnnotationResponse:
+    try:
+        deleted_id = annotation_service.delete_annotation(db, annotation_id)
+        return DeleteAnnotationResponse(id=deleted_id, deleted=True)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_NOT_FOUND", str(exc), status_code=404) from exc
+
+
+@router.post("/annotations/auto", response_model=AutoAnnotateResponse)
+def annotation_auto(request: AutoAnnotateRequest, db: Session = Depends(get_db)) -> AutoAnnotateResponse:
+    try:
+        return annotation_service.auto_annotate(db, request)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
+    except RuntimeError as exc:
+        raise ApiError("AUTO_ANNOTATE_FAILED", str(exc), status_code=502) from exc
