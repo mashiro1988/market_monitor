@@ -545,13 +545,13 @@ code {
 
 /* Section 2 的左右对称栅格：左 = 待标注事件列表，右 = 候选新闻表。
    两侧共享同一外观（背景 + 边框 + 圆角 + 头/体结构）和同一 max-height，
-   视觉上等高、对称。 */
+   视觉上等高、对称。整体铺满整个 panel 宽度，与下方「已标注」的全宽 DataTable
+   保持一致，避免上下两段宽度断层。 */
 .annotation-pair-grid {
   display: grid;
   grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.4fr);
   gap: 18px;
   align-items: stretch;
-  max-width: 1440px;
 }
 
 .annotation-pair-panel {
