@@ -29,6 +29,7 @@ def create_tables():
     import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _ensure_sqlite_schema()
+    seed_tracked_markets()
 
 
 def _ensure_sqlite_schema():
@@ -66,6 +67,44 @@ def _ensure_sqlite_schema():
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_price_annotations ADD COLUMN {column_name} {column_type}"))
+
+
+def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: list[str] | None = None):
+    """从给定 slug/tag 列表 upsert tracked_markets。已存在的 (kind, identifier) 行跳过，
+    不覆盖用户已修改的 enabled / display_name。
+    """
+    from models.tracked_market import TrackedMarket
+    import config
+
+    if slugs is None:
+        slugs = list(config.POLYMARKET.get("tracked_slugs", []))
+    if tags is None:
+        tags = list(config.POLYMARKET.get("tracked_tags", []))
+
+    own_session = session is None
+    if own_session:
+        session = SessionLocal()
+
+    try:
+        existing = {
+            (row.kind, row.identifier)
+            for row in session.query(TrackedMarket.kind, TrackedMarket.identifier).all()
+        }
+        for slug in slugs:
+            slug = (slug or "").strip()
+            if slug and ("slug", slug) not in existing:
+                session.add(TrackedMarket(kind="slug", identifier=slug, enabled=True))
+        for tag in tags:
+            tag = (tag or "").strip()
+            if tag and ("tag", tag) not in existing:
+                session.add(TrackedMarket(kind="tag", identifier=tag, enabled=True))
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        if own_session:
+            session.close()
 
 
 def get_session():
