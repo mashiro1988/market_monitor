@@ -7,12 +7,16 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from models.prediction import PredictionMarket
+from models.tracked_market import TrackedMarket
 from schemas.predictions import (
     PredictionFamily,
     PredictionFamilySeries,
     PredictionMarketSummary,
     PredictionRow,
     PredictionsResponse,
+    TrackedMarketCreate,
+    TrackedMarketSchema,
+    TrackedMarketUpdate,
 )
 from services.time_utils import timestamp_pair, utc_now_naive
 
@@ -105,6 +109,24 @@ def classify_market_family(question: str) -> dict | None:
     if "unrestricted shipping through hormuz in april" in q:
         return {"id": "hormuz_normalization", "name": "霍尔木兹海峡通行恢复", "label": "Unrestricted in April", "order": 4.1}
 
+    match = re.search(r"will wti crude oil.*?hit \((high|low)\) \$([0-9]+) in ([a-z]+)", q)
+    if match:
+        side, price_str, month = match.group(1), match.group(2), match.group(3).title()
+        price = int(price_str)
+        if side == "high":
+            return {
+                "id": f"wti_high_{month.lower()}",
+                "name": f"WTI 原油 {month} 触及上沿",
+                "label": f"≥${price}",
+                "order": float(price),
+            }
+        return {
+            "id": f"wti_low_{month.lower()}",
+            "name": f"WTI 原油 {month} 触及下沿",
+            "label": f"≤${price}",
+            "order": float(price),
+        }
+
     return None
 
 
@@ -180,3 +202,73 @@ def get_market_history(session: Session, market_id: str, hours: int = 24) -> lis
         if row.market_id == market_id
     ]
     return [_row_schema(row) for row in rows]
+
+
+def _tracked_to_schema(row: TrackedMarket) -> TrackedMarketSchema:
+    return TrackedMarketSchema(
+        id=row.id,
+        kind=row.kind,
+        identifier=row.identifier,
+        display_name=row.display_name,
+        enabled=row.enabled,
+        notes=row.notes,
+    )
+
+
+def list_tracked_markets(session: Session) -> list[TrackedMarketSchema]:
+    rows = (
+        session.query(TrackedMarket)
+        .order_by(TrackedMarket.kind, TrackedMarket.identifier)
+        .all()
+    )
+    return [_tracked_to_schema(r) for r in rows]
+
+
+def create_tracked_market(session: Session, payload: TrackedMarketCreate) -> TrackedMarketSchema:
+    identifier = (payload.identifier or "").strip()
+    if not identifier:
+        raise ValueError("identifier empty")
+
+    exists = (
+        session.query(TrackedMarket)
+        .filter(TrackedMarket.kind == payload.kind, TrackedMarket.identifier == identifier)
+        .first()
+    )
+    if exists:
+        raise ValueError("duplicate")
+
+    row = TrackedMarket(
+        kind=payload.kind,
+        identifier=identifier,
+        display_name=(payload.display_name or "").strip() or None,
+        notes=(payload.notes or "").strip() or None,
+        enabled=True,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _tracked_to_schema(row)
+
+
+def update_tracked_market(session: Session, tracked_id: int, payload: TrackedMarketUpdate) -> TrackedMarketSchema | None:
+    row = session.query(TrackedMarket).filter(TrackedMarket.id == tracked_id).first()
+    if row is None:
+        return None
+    if payload.enabled is not None:
+        row.enabled = payload.enabled
+    if payload.display_name is not None:
+        row.display_name = payload.display_name.strip() or None
+    if payload.notes is not None:
+        row.notes = payload.notes.strip() or None
+    session.commit()
+    session.refresh(row)
+    return _tracked_to_schema(row)
+
+
+def delete_tracked_market(session: Session, tracked_id: int) -> bool:
+    row = session.query(TrackedMarket).filter(TrackedMarket.id == tracked_id).first()
+    if row is None:
+        return False
+    session.delete(row)
+    session.commit()
+    return True

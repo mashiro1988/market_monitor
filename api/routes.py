@@ -33,7 +33,14 @@ from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
 from schemas.news import NewsResponse, NewsSourceMeta
 from schemas.onchain import OnchainDataset
-from schemas.predictions import PredictionFamily, PredictionRow, PredictionsResponse
+from schemas.predictions import (
+    PredictionFamily,
+    PredictionRow,
+    PredictionsResponse,
+    TrackedMarketCreate,
+    TrackedMarketSchema,
+    TrackedMarketUpdate,
+)
 from schemas.tasks import TaskStatus
 from services import alerts_service, annotation_service, market_service, news_service, onchain_service, prediction_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
@@ -172,6 +179,37 @@ def predictions(hours: int = 24, search: str | None = None, db: Session = Depend
 @router.get("/predictions/families", response_model=list[PredictionFamily])
 def prediction_families(hours: int = 24, search: str | None = None, db: Session = Depends(get_db)) -> list[PredictionFamily]:
     return prediction_service.get_prediction_families(db, hours=hours, search=search)
+
+
+@router.get("/predictions/tracked", response_model=list[TrackedMarketSchema])
+def list_tracked(db: Session = Depends(get_db)) -> list[TrackedMarketSchema]:
+    return prediction_service.list_tracked_markets(db)
+
+
+@router.post("/predictions/tracked", response_model=TrackedMarketSchema)
+def create_tracked(payload: TrackedMarketCreate, db: Session = Depends(get_db)) -> TrackedMarketSchema:
+    try:
+        return prediction_service.create_tracked_market(db, payload)
+    except ValueError as e:
+        if str(e) == "duplicate":
+            raise ApiError(code="DUPLICATE", message="已存在相同的 kind+identifier", status_code=409)
+        raise ApiError(code="INVALID", message=str(e), status_code=400)
+
+
+@router.patch("/predictions/tracked/{tracked_id}", response_model=TrackedMarketSchema)
+def update_tracked(tracked_id: int, payload: TrackedMarketUpdate, db: Session = Depends(get_db)) -> TrackedMarketSchema:
+    result = prediction_service.update_tracked_market(db, tracked_id, payload)
+    if result is None:
+        raise ApiError(code="NOT_FOUND", message="未找到", status_code=404)
+    return result
+
+
+@router.delete("/predictions/tracked/{tracked_id}")
+def delete_tracked(tracked_id: int, db: Session = Depends(get_db)) -> dict:
+    ok = prediction_service.delete_tracked_market(db, tracked_id)
+    if not ok:
+        raise ApiError(code="NOT_FOUND", message="未找到", status_code=404)
+    return {"ok": True}
 
 
 @router.get("/predictions/{market_id}/history", response_model=list[PredictionRow])
