@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CornerDownRight, Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
 
 // 实测 5 窗口 × reasoning_effort=max 经常把 max_tokens 预算用完导致空 content（模型
-// 还在思考没产出 JSON），所以再保守一档到 3。后端 AUTO_ANNOTATE_BATCH_LIMIT 仍是 10，
+// 还在思考没产出 JSON），所以再保守一档到 3。后端 AUTO_ANNOTATE_BATCH_LIMIT 仍是 10,
 // 是给 API 留的硬上限，不是日常工况。
 const AUTO_BATCH_CHUNK = 3;
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
@@ -22,24 +22,59 @@ function windowKey(w: PriceWindow): string {
   return `${w.symbol}|${w.window_start.timestamp_utc}|${w.window_end.timestamp_utc}`;
 }
 
+// sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（勾选/no_clear_news/notes）
+// + 当前选中窗口 + 标注人。切到别的页面再回来不会丢；标注保存成功后该 key 会被清理。
+// 不持久化 hours/symbol：那些是浏览偏好，下一次会话默认值更合理。
+const STORAGE_KEY = "annotations.session.v1";
+
+type StoredState = {
+  batchByKey: [string, AutoAnnotateBatchItem][];
+  batchMeta: { reasoning: string; model: string; duration_seconds: number } | null;
+  labeler: string;
+  activeKey: string;
+};
+
+function loadStored(): Partial<StoredState> {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<StoredState>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function arraysEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 export function AnnotationsPage() {
   const queryClient = useQueryClient();
+  // 仅在 mount 时读一次 sessionStorage，避免 useState lazy initializer 被多次评估。
+  const initialStored = useRef<Partial<StoredState>>(loadStored()).current;
+
   const [hours, setHours] = useState("72");
   const [symbol, setSymbol] = useState("");
-  const [activeKey, setActiveKey] = useState<string>("");
+  const [activeKey, setActiveKey] = useState<string>(initialStored.activeKey ?? "");
 
   // 编辑表单状态
   const [selectedNews, setSelectedNews] = useState<number[]>([]);
   const [noClearNews, setNoClearNews] = useState(false);
   const [notes, setNotes] = useState("");
-  const [labeler, setLabeler] = useState("");
+  const [labeler, setLabeler] = useState(initialStored.labeler ?? "");
   const [autoResult, setAutoResult] = useState<AutoAnnotateResponse | null>(null);
 
   // 批量自动标注的结果缓存。Key = windowKey(window)。一次「批量自动标注」可能产生多片
   // batch 调用（每片 ≤10 窗口），每个窗口的结果按 key 暂存，等用户点中某个窗口时回填表单。
-  const [batchByKey, setBatchByKey] = useState<Map<string, AutoAnnotateBatchItem>>(new Map());
+  // 用户的手动修改（勾选/no_clear_news/notes）也会写回到这里，作为 in-progress 单一来源。
+  const [batchByKey, setBatchByKey] = useState<Map<string, AutoAnnotateBatchItem>>(
+    () => new Map(initialStored.batchByKey ?? [])
+  );
   // 当前/最近一次批量调用的全局元数据（reasoning + 模型名 + 总耗时），用于附给每个窗口的 autoResult。
-  const [batchMeta, setBatchMeta] = useState<{ reasoning: string; model: string; duration_seconds: number } | null>(null);
+  const [batchMeta, setBatchMeta] = useState<{ reasoning: string; model: string; duration_seconds: number } | null>(
+    initialStored.batchMeta ?? null
+  );
   // 批处理进度：{ done, total } 用来显示「3/12」之类的状态。
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [batchError, setBatchError] = useState<unknown>(null);
@@ -159,6 +194,13 @@ export function AnnotationsPage() {
         duration_seconds: batchMeta.duration_seconds,
         candidate_count: cached.candidate_count
       });
+    } else if (cached) {
+      // 缓存里有但没 batchMeta（重新加载页面后 batchMeta 也持久化了，正常路径会走上面分支；
+      // 这里是兜底：纯人工编辑过的窗口没有 AI 元数据，但表单内容还是要还原）
+      setSelectedNews(cached.selected_news_ids);
+      setNoClearNews(cached.no_clear_news);
+      setNotes(cached.summary);
+      setAutoResult(null);
     } else {
       setSelectedNews([]);
       setNoClearNews(false);
@@ -166,6 +208,53 @@ export function AnnotationsPage() {
       setAutoResult(null);
     }
   }, [activeKey, batchByKey, batchMeta]);
+
+  // 用户对当前窗口的勾选 / no_clear_news / notes 改动写回 batchByKey，让其成为 in-progress 单一来源。
+  // 内置幂等：值未变时早退避免与上面 hydrate 形成循环。
+  useEffect(() => {
+    if (!activeKey || !activeWindow) return;
+    setBatchByKey((prev) => {
+      const existing = prev.get(activeKey);
+      const sameSelected = existing
+        ? arraysEqual(existing.selected_news_ids, selectedNews)
+        : selectedNews.length === 0;
+      const sameNoClear = (existing?.no_clear_news ?? false) === noClearNews;
+      const sameSummary = (existing?.summary ?? "") === notes;
+      if (existing && sameSelected && sameNoClear && sameSummary) return prev;
+      // 没 existing + 用户也没动过 → 不创建空 entry
+      if (!existing && !selectedNews.length && !noClearNews && !notes) return prev;
+
+      const next = new Map(prev);
+      next.set(activeKey, {
+        symbol: activeWindow.symbol,
+        window_start_utc: activeWindow.window_start.timestamp_utc!,
+        window_end_utc: activeWindow.window_end.timestamp_utc!,
+        selected_news_ids: selectedNews,
+        no_clear_news: noClearNews,
+        summary: notes,
+        reasoning: existing?.reasoning ?? "",
+        candidate_count: existing?.candidate_count ?? 0,
+        candidate_news_ids: existing?.candidate_news_ids ?? []
+      });
+      return next;
+    });
+  }, [activeKey, activeWindow, selectedNews, noClearNews, notes]);
+
+  // 把 batchByKey / batchMeta / labeler / activeKey 持久化到 sessionStorage。
+  // 任一变化都重写一次（小数据量，开销可忽略）。
+  useEffect(() => {
+    try {
+      const data: StoredState = {
+        batchByKey: Array.from(batchByKey.entries()),
+        batchMeta,
+        labeler,
+        activeKey
+      };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      // sessionStorage 满 / disabled 时静默失败
+    }
+  }, [batchByKey, batchMeta, labeler, activeKey]);
 
   const save = useMutation({
     mutationFn: () => api.saveAnnotation({
@@ -184,6 +273,14 @@ export function AnnotationsPage() {
       auto_summary: autoResult?.summary ?? null
     }),
     onSuccess: () => {
+      // 已落库 → 从 in-progress 缓存里清掉，避免下次回到该 symbol 时还显示已经保存过的草稿
+      const savedKey = activeKey;
+      setBatchByKey((prev) => {
+        if (!prev.has(savedKey)) return prev;
+        const next = new Map(prev);
+        next.delete(savedKey);
+        return next;
+      });
       void queryClient.invalidateQueries({ queryKey: ["annotation-windows"] });
       void queryClient.invalidateQueries({ queryKey: ["annotation-list"] });
     }
