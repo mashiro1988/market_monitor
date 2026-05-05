@@ -296,24 +296,7 @@ export function AnnotationsPage() {
             </Button>
           </div>
         </div>
-        <p className="muted-text small">
-          批量推理一次喂 ≤{AUTO_BATCH_CHUNK} 窗口共用 system prompt 省 KV cache；已推理过的窗口自动跳过。失败时进度条会清空，重试只会处理剩余的。
-        </p>
         {batchError ? <ErrorState error={batchError} /> : null}
-
-        {activeWindow ? (
-          <div className="active-window-meta">
-            <div className="metric-row">
-              <Stat label="窗口涨跌" value={`${activeWindow.change_pct > 0 ? "+" : ""}${activeWindow.change_pct.toFixed(2)}%`} tone={activeWindow.change_pct >= 0 ? "up" : "down"} />
-              <Stat label="起点价格" value={activeWindow.price_start.toLocaleString()} />
-              <Stat label="终点价格" value={activeWindow.price_end.toLocaleString()} />
-              <Stat label="窗口分钟" value={`${activeWindow.actual_window_minutes}m`} />
-            </div>
-            <p className="muted-text small">{activeWindow.window_start.timestamp_bj} 至 {activeWindow.window_end.timestamp_bj}</p>
-          </div>
-        ) : (
-          <p className="muted-text small">尚未选中窗口；从下方「未标注」事件列表里选一个查看候选新闻并标注。</p>
-        )}
 
         {autoResult ? (
           <details className="reasoning-block" open>
@@ -357,12 +340,14 @@ export function AnnotationsPage() {
                       const isActive = key === activeKey;
                       const tone = primary.change_pct >= 0 ? "up" : "down";
                       const sign = primary.change_pct > 0 ? "+" : "";
+                      const priceTitle = `${primary.price_start.toLocaleString()} → ${primary.price_end.toLocaleString()}`;
                       return (
                         <li key={key}>
                           <button
                             type="button"
                             className={`window-item ${tone}${isActive ? " active" : ""}`}
                             onClick={() => setActiveKey(key)}
+                            title={priceTitle}
                           >
                             <span className="window-item-icon"><Circle size={14} /></span>
                             <span className="window-item-time">

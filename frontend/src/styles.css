@@ -596,12 +596,6 @@ code {
   border-radius: 0;
 }
 
-.active-window-meta {
-  display: grid;
-  gap: 8px;
-  margin: 12px 0 4px;
-}
-
 .annotation-save-block {
   margin-top: 18px;
   display: grid;
