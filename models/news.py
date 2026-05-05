@@ -12,7 +12,7 @@ class NewsItem(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime, nullable=False)
-    source = Column(String(50), nullable=False)         # jin10, bloomberg
+    source = Column(String(50), nullable=False)         # 取值见 config.NEWS_SOURCES（如 jin10、cnbc）
     source_id = Column(String(100), nullable=True)      # 源端原始ID，用于告警标记和追踪
     title = Column(String(500), nullable=False)
     content = Column(Text, nullable=True)

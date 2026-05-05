@@ -403,11 +403,13 @@ export function AnnotationsPage() {
                     <span>备注 / 因果归因</span>
                     <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="自动标注后会自动填入 summary，可手动修改" />
                   </label>
-                  <Button disabled={save.isPending} onClick={() => save.mutate()}>
-                    <Save size={16} />保存标注
-                  </Button>
-                  {save.data ? <div className="task-banner succeeded">已保存标注 #{save.data.id}</div> : null}
-                  {save.error ? <ErrorState error={save.error} /> : null}
+                  <div className="annotation-save-row">
+                    <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                      <Save size={16} />保存标注
+                    </Button>
+                    {save.data ? <div className="task-banner succeeded">已保存标注 #{save.data.id}</div> : null}
+                    {save.error ? <ErrorState error={save.error} /> : null}
+                  </div>
                 </>
               )}
             </div>

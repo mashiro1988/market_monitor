@@ -175,12 +175,15 @@ NEWS_SOURCES = {
         "enabled": True,
         "language": "zh",
     },
-    "bloomberg": {
+    # CNBC Top News：全球突发 + 财经为主，每日数十条新增，覆盖 Fed / 监管 / 公司事件 / 地缘等。
+    # 比之前用的 Bloomberg RSS 稳定，且非加密专项。
+    # 备选 feed（按 id 切换）：100003114=Top News, 15839069=Markets, 19834094=Investing。
+    "cnbc": {
         "enabled": True,
         "type": "rss",
         "language": "en",
-        "url": "https://feeds.bloomberg.com/markets/news.rss",
-        "name": "Bloomberg",
+        "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "name": "CNBC",
     },
 }
 

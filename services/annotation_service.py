@@ -37,6 +37,12 @@ TARGET_PRICE_SYMBOLS = ["BTC/USDT", "ETH/USDT", "NQ=F"]
 CONTEXT_PRE_MINUTES_DEFAULT = 15
 CONTEXT_POST_MINUTES_DEFAULT = 30
 
+
+def _annotation_news_sources() -> list[str]:
+    """标注上下文 / 自动标注 候选新闻的源白名单——只读取在 `config.NEWS_SOURCES` 里启用的。
+    切换 / 增减英文源（CNBC / Reuters 等）时只改 config，不动业务代码。"""
+    return [k for k, v in config.NEWS_SOURCES.items() if v.get("enabled")]
+
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 
 AUTO_ANNOTATE_SYSTEM_PROMPT = """你是一名买方量化研究员，专门分析单一资产在短时间窗口内的价格异动是否由特定新闻事件触发。
@@ -247,7 +253,7 @@ def load_context_news(session: Session, context_start: datetime, context_end: da
     rows = (
         session.query(NewsItem)
         .filter(
-            NewsItem.source.in_(["jin10", "bloomberg"]),
+            NewsItem.source.in_(_annotation_news_sources()),
             NewsItem.timestamp >= context_start,
             NewsItem.timestamp <= context_end,
         )
@@ -556,7 +562,7 @@ def auto_annotate(session: Session, request: AutoAnnotateRequest) -> AutoAnnotat
     candidate_news = (
         session.query(NewsItem)
         .filter(
-            NewsItem.source.in_(["jin10", "bloomberg"]),
+            NewsItem.source.in_(_annotation_news_sources()),
             NewsItem.timestamp >= context_start,
             NewsItem.timestamp <= context_end,
         )
@@ -569,7 +575,7 @@ def auto_annotate(session: Session, request: AutoAnnotateRequest) -> AutoAnnotat
         return AutoAnnotateResponse(
             selected_news_ids=[],
             no_clear_news=True,
-            summary="窗口前后没有可见的 jin10 / bloomberg 新闻，无法归因。",
+            summary="窗口前后没有可见的候选新闻，无法归因。",
             reasoning="",
             model=config.DEEPSEEK_REASONER_MODEL,
             duration_seconds=0.0,
@@ -635,7 +641,7 @@ def _build_auto_annotate_batch_user_payload(
         candidate_news = (
             session.query(NewsItem)
             .filter(
-                NewsItem.source.in_(["jin10", "bloomberg"]),
+                NewsItem.source.in_(_annotation_news_sources()),
                 NewsItem.timestamp >= context_start,
                 NewsItem.timestamp <= context_end,
             )

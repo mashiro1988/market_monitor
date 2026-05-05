@@ -533,6 +533,14 @@ code {
 
 .annotation-block .panel-head {
   margin-bottom: 12px;
+  justify-content: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.annotation-block .panel-head h2 {
+  flex: 0 0 auto;
 }
 
 .annotation-work {
@@ -581,6 +589,19 @@ code {
   gap: 16px;
   flex-wrap: wrap;
   margin-top: 4px;
+}
+
+.annotation-save-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.annotation-save-row .task-banner {
+  margin: 0;
+  padding: 6px 12px;
 }
 
 .up-text {
