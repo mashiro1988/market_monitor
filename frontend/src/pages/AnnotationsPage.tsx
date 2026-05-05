@@ -153,7 +153,8 @@ export function AnnotationsPage() {
         selected_news_ids: cached.selected_news_ids,
         no_clear_news: cached.no_clear_news,
         summary: cached.summary,
-        reasoning: batchMeta.reasoning,  // 批量共享同一段 reasoning_content
+        // 优先用本窗口结构化输出里的 reasoning；为空时退回到整批 thinking trace（debug 用）
+        reasoning: cached.reasoning || batchMeta.reasoning,
         model: batchMeta.model,
         duration_seconds: batchMeta.duration_seconds,
         candidate_count: cached.candidate_count
@@ -219,6 +220,7 @@ export function AnnotationsPage() {
             selected_news_ids: result.selected_news_ids,
             no_clear_news: result.no_clear_news,
             summary: result.summary,
+            reasoning: result.reasoning,  // 单窗口直接拿 DeepSeek thinking 全文做该窗口 reasoning
             candidate_count: result.candidate_count,
             candidate_news_ids: []  // 单窗口接口未返回 candidate_news_ids，留空；保存时前端从 contextNews 重算
           });
