@@ -282,19 +282,25 @@ export function AnnotationsPage() {
   }, [activeKey, activeWindow, selectedNews, noClearNews, notes]);
 
   // 把 batchByKey / batchMeta / labeler / activeKey 持久化到 sessionStorage。
-  // 任一变化都重写一次（小数据量，开销可忽略）。
+  // **必须 debounce** —— reasoning 能有几 KB，每次 JSON.stringify + sessionStorage.setItem 是
+  // 同步阻塞操作（~1-3ms）。在 textarea 里快速打字时，每个 keystroke 触发 write-back → batchByKey
+  // 变化 → 这个 effect 跑一次，累积起来卡主线程，导致输入跟不上、textarea 抖动。
+  // 等用户停止操作 300ms 再写，正常 idle 状态下感受不到延迟。
   useEffect(() => {
-    try {
-      const data: StoredState = {
-        batchByKey: Array.from(batchByKey.entries()),
-        batchMeta,
-        labeler,
-        activeKey
-      };
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch {
-      // sessionStorage 满 / disabled 时静默失败
-    }
+    const timer = setTimeout(() => {
+      try {
+        const data: StoredState = {
+          batchByKey: Array.from(batchByKey.entries()),
+          batchMeta,
+          labeler,
+          activeKey
+        };
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      } catch {
+        // sessionStorage 满 / disabled 时静默失败
+      }
+    }, 300);
+    return () => clearTimeout(timer);
   }, [batchByKey, batchMeta, labeler, activeKey]);
 
   const save = useMutation({
