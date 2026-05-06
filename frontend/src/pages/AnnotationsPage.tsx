@@ -178,34 +178,49 @@ export function AnnotationsPage() {
   });
 
   // 切换窗口时：如果该窗口在批量结果缓存里有，回填表单和 autoResult；否则清空。
+  // 关键：每个 setter 都用幂等更新（值未变就返回 prev），让 React 通过 Object.is 跳过 re-render。
+  // 否则用户每次改动 → write-back 写 batchByKey → 本 effect 重跑 → autoResult 新对象 → 整个推理面板
+  // 子树多余 re-render → 视觉抖动。
   useEffect(() => {
     const cached = batchByKey.get(activeKey);
     if (cached && batchMeta) {
-      setSelectedNews(cached.selected_news_ids);
-      setNoClearNews(cached.no_clear_news);
-      setNotes(cached.summary);
-      setAutoResult({
-        selected_news_ids: cached.selected_news_ids,
-        no_clear_news: cached.no_clear_news,
-        summary: cached.summary,
-        // 优先用本窗口结构化输出里的 reasoning；为空时退回到整批 thinking trace（debug 用）
-        reasoning: cached.reasoning || batchMeta.reasoning,
-        model: batchMeta.model,
-        duration_seconds: batchMeta.duration_seconds,
-        candidate_count: cached.candidate_count
+      setSelectedNews((prev) => arraysEqual(prev, cached.selected_news_ids) ? prev : cached.selected_news_ids);
+      setNoClearNews((prev) => prev === cached.no_clear_news ? prev : cached.no_clear_news);
+      setNotes((prev) => prev === cached.summary ? prev : cached.summary);
+      setAutoResult((prev) => {
+        const expectedReasoning = cached.reasoning || batchMeta.reasoning;
+        if (
+          prev &&
+          prev.reasoning === expectedReasoning &&
+          prev.model === batchMeta.model &&
+          prev.candidate_count === cached.candidate_count &&
+          prev.duration_seconds === batchMeta.duration_seconds
+        ) {
+          return prev;  // AI 元数据未变 → 不创建新对象，不触发 re-render
+        }
+        return {
+          selected_news_ids: cached.selected_news_ids,
+          no_clear_news: cached.no_clear_news,
+          summary: cached.summary,
+          // 优先用本窗口结构化输出里的 reasoning；为空时退回到整批 thinking trace（debug 用）
+          reasoning: expectedReasoning,
+          model: batchMeta.model,
+          duration_seconds: batchMeta.duration_seconds,
+          candidate_count: cached.candidate_count
+        };
       });
     } else if (cached) {
       // 缓存里有但没 batchMeta（重新加载页面后 batchMeta 也持久化了，正常路径会走上面分支；
       // 这里是兜底：纯人工编辑过的窗口没有 AI 元数据，但表单内容还是要还原）
-      setSelectedNews(cached.selected_news_ids);
-      setNoClearNews(cached.no_clear_news);
-      setNotes(cached.summary);
-      setAutoResult(null);
+      setSelectedNews((prev) => arraysEqual(prev, cached.selected_news_ids) ? prev : cached.selected_news_ids);
+      setNoClearNews((prev) => prev === cached.no_clear_news ? prev : cached.no_clear_news);
+      setNotes((prev) => prev === cached.summary ? prev : cached.summary);
+      setAutoResult((prev) => prev === null ? prev : null);
     } else {
-      setSelectedNews([]);
-      setNoClearNews(false);
-      setNotes("");
-      setAutoResult(null);
+      setSelectedNews((prev) => prev.length === 0 ? prev : []);
+      setNoClearNews((prev) => prev === false ? prev : false);
+      setNotes((prev) => prev === "" ? prev : "");
+      setAutoResult((prev) => prev === null ? prev : null);
     }
   }, [activeKey, batchByKey, batchMeta]);
 
