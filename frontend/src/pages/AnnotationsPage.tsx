@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CornerDownRight, Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
@@ -48,6 +48,32 @@ function arraysEqual(a: number[], b: number[]): boolean {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
 }
+
+// 拆出 reasoning panel 作为独立 memo 组件，让 AnnotationsPage 父级因任何无关 state（hover、切换品种、
+// 表单输入）re-render 时，只要 props 引用没变，这块就不重新渲染。reasoning <pre> 内容可能很长，
+// 让它频繁参与父级 reconciliation 是抖动主因之一。
+type ReasoningPanelProps = {
+  model: string;
+  duration_seconds: number;
+  candidate_count: number;
+  summary: string;
+  reasoning: string;
+};
+
+const ReasoningPanel = memo(function ReasoningPanel({ model, duration_seconds, candidate_count, summary, reasoning }: ReasoningPanelProps) {
+  return (
+    <details className="reasoning-block" open>
+      <summary>
+        <span className="reasoning-tag">推理结果</span>
+        <span>{model} · {duration_seconds.toFixed(1)}s · 看了 {candidate_count} 条候选</span>
+      </summary>
+      {summary ? <p className="reasoning-summary">{summary}</p> : null}
+      {reasoning ? (
+        <pre className="reasoning-content">{reasoning}</pre>
+      ) : <p className="muted-text small">模型未返回 reasoning_content（thinking 模式可能未生效）。</p>}
+    </details>
+  );
+});
 
 export function AnnotationsPage() {
   const queryClient = useQueryClient();
@@ -399,6 +425,32 @@ export function AnnotationsPage() {
 
   const batchInFlight = batchProgress != null && batchProgress.done < batchProgress.total;
 
+  // 候选新闻表 columns：必须 useMemo，否则父级每次 re-render（hover、textarea 输入等）都新建
+  // columns 数组 + 新 cell 闭包，DataTable 收到新 props → 整张表 + 每个 checkbox 全部重渲，
+  // 是抖动主因之二。toggleNews 用 useCallback 保持稳定；columns 只在 selectedNews 变化时重建（
+  // 此时 checkbox 的 checked 也确实需要更新，是必要的重建）。
+  const toggleNews = useCallback((id: number, checked: boolean) => {
+    setSelectedNews((ids) => checked ? [...ids, id] : ids.filter((x) => x !== id));
+  }, []);
+
+  const newsColumns = useMemo(() => [
+    {
+      key: "select",
+      header: "选择",
+      cell: (row: NewsItem) => (
+        <input
+          type="checkbox"
+          checked={selectedNews.includes(row.id)}
+          onChange={(event) => toggleNews(row.id, event.target.checked)}
+        />
+      )
+    },
+    { key: "time", header: "时间", cell: (row: NewsItem) => row.timestamp_bj?.slice(5, 16) },
+    { key: "source", header: "来源", cell: (row: NewsItem) => row.source },
+    { key: "score", header: "LLM", cell: (row: NewsItem) => row.llm_importance ?? "—" },
+    { key: "title", header: "标题", cell: (row: NewsItem) => row.title }
+  ], [selectedNews, toggleNews]);
+
   return (
     <section>
       <PageHeader title="新闻标注" subtitle="价格异动窗口与候选新闻关联（未标注 / 已标注 上下分栏）" />
@@ -444,16 +496,13 @@ export function AnnotationsPage() {
         {batchError ? <ErrorState error={batchError} /> : null}
 
         {autoResult ? (
-          <details className="reasoning-block" open>
-            <summary>
-              <span className="reasoning-tag">推理结果</span>
-              <span>{autoResult.model} · {autoResult.duration_seconds.toFixed(1)}s · 看了 {autoResult.candidate_count} 条候选</span>
-            </summary>
-            {autoResult.summary ? <p className="reasoning-summary">{autoResult.summary}</p> : null}
-            {autoResult.reasoning ? (
-              <pre className="reasoning-content">{autoResult.reasoning}</pre>
-            ) : <p className="muted-text small">模型未返回 reasoning_content（thinking 模式可能未生效）。</p>}
-          </details>
+          <ReasoningPanel
+            model={autoResult.model}
+            duration_seconds={autoResult.duration_seconds}
+            candidate_count={autoResult.candidate_count}
+            summary={autoResult.summary}
+            reasoning={autoResult.reasoning}
+          />
         ) : null}
 
         {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
@@ -544,13 +593,7 @@ export function AnnotationsPage() {
                     <DataTable<NewsItem>
                       rows={contextNews.data?.items ?? []}
                       empty="窗口前 15 / 后 30 分钟没有候选新闻"
-                      columns={[
-                        { key: "select", header: "选择", cell: (row) => <input type="checkbox" checked={selectedNews.includes(row.id)} onChange={(event) => setSelectedNews((ids) => event.target.checked ? [...ids, row.id] : ids.filter((id) => id !== row.id))} /> },
-                        { key: "time", header: "时间", cell: (row) => row.timestamp_bj?.slice(5, 16) },
-                        { key: "source", header: "来源", cell: (row) => row.source },
-                        { key: "score", header: "LLM", cell: (row) => row.llm_importance ?? "—" },
-                        { key: "title", header: "标题", cell: (row) => row.title }
-                      ]}
+                      columns={newsColumns}
                     />
                   )}
                 </div>
