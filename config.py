@@ -232,7 +232,7 @@ ALERT_RULES = [
     {
         "name": "btc_price_spike",
         "rule_type": "price_change",
-        "params": {"symbol": "BTC/USDT", "threshold_pct": 0.3, "window_minutes": 15},
+        "params": {"symbol": "BTC/USDT", "threshold_pct": 0.5, "window_minutes": 15},
         "channels": ["wechat_work"],
         "cooldown_minutes": 0,
         "enabled": True,

@@ -281,6 +281,7 @@ export type AutoAnnotateBatchItem = {
   selected_news_ids: number[];
   no_clear_news: boolean;
   summary: string;
+  reasoning: string;  // 该窗口专属 reasoning（来自结构化 JSON），与 batch.reasoning（DeepSeek thinking）不同
   candidate_count: number;
   candidate_news_ids: number[];
 };

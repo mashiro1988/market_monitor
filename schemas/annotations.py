@@ -115,14 +115,15 @@ class AutoAnnotateBatchItem(BaseModel):
     selected_news_ids: list[int] = Field(default_factory=list)
     no_clear_news: bool = False
     summary: str = ""
+    reasoning: str = ""  # 模型对该窗口的逐条解释（来自结构化 JSON，不是 message.reasoning_content）
     candidate_count: int = 0
     candidate_news_ids: list[int] = Field(default_factory=list)
 
 
 class AutoAnnotateBatchResponse(BaseModel):
-    """一次批量调用返回 N 个窗口的结果 + 一份全局 reasoning_content。"""
+    """一次批量调用返回 N 个窗口的结果 + 一份全局 reasoning_content（DeepSeek thinking 思考过程，可选展示）。"""
     results: list[AutoAnnotateBatchItem] = Field(default_factory=list)
-    reasoning: str = ""  # 整批共用一段 reasoning_content（窗口间穿插，按训练样本视角附给每个窗口）
+    reasoning: str = ""  # DeepSeek message.reasoning_content，整批 N 个窗口共享，仅作 debug
     model: str
     duration_seconds: float
     requested_count: int  # 请求传入的窗口数

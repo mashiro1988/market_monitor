@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CornerDownRight, Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
 
 // 实测 5 窗口 × reasoning_effort=max 经常把 max_tokens 预算用完导致空 content（模型
-// 还在思考没产出 JSON），所以再保守一档到 3。后端 AUTO_ANNOTATE_BATCH_LIMIT 仍是 10，
+// 还在思考没产出 JSON），所以再保守一档到 3。后端 AUTO_ANNOTATE_BATCH_LIMIT 仍是 10,
 // 是给 API 留的硬上限，不是日常工况。
 const AUTO_BATCH_CHUNK = 3;
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
@@ -22,24 +22,85 @@ function windowKey(w: PriceWindow): string {
   return `${w.symbol}|${w.window_start.timestamp_utc}|${w.window_end.timestamp_utc}`;
 }
 
+// sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（勾选/no_clear_news/notes）
+// + 当前选中窗口 + 标注人。切到别的页面再回来不会丢；标注保存成功后该 key 会被清理。
+// 不持久化 hours/symbol：那些是浏览偏好，下一次会话默认值更合理。
+const STORAGE_KEY = "annotations.session.v1";
+
+type StoredState = {
+  batchByKey: [string, AutoAnnotateBatchItem][];
+  batchMeta: { reasoning: string; model: string; duration_seconds: number } | null;
+  labeler: string;
+  activeKey: string;
+};
+
+function loadStored(): Partial<StoredState> {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<StoredState>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function arraysEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+// 拆出 reasoning panel 作为独立 memo 组件，让 AnnotationsPage 父级因任何无关 state（hover、切换品种、
+// 表单输入）re-render 时，只要 props 引用没变，这块就不重新渲染。reasoning <pre> 内容可能很长，
+// 让它频繁参与父级 reconciliation 是抖动主因之一。
+type ReasoningPanelProps = {
+  model: string;
+  duration_seconds: number;
+  candidate_count: number;
+  summary: string;
+  reasoning: string;
+};
+
+const ReasoningPanel = memo(function ReasoningPanel({ model, duration_seconds, candidate_count, summary, reasoning }: ReasoningPanelProps) {
+  return (
+    <details className="reasoning-block" open>
+      <summary>
+        <span className="reasoning-tag">推理结果</span>
+        <span>{model} · {duration_seconds.toFixed(1)}s · 看了 {candidate_count} 条候选</span>
+      </summary>
+      {summary ? <p className="reasoning-summary">{summary}</p> : null}
+      {reasoning ? (
+        <pre className="reasoning-content">{reasoning}</pre>
+      ) : <p className="muted-text small">模型未返回 reasoning_content（thinking 模式可能未生效）。</p>}
+    </details>
+  );
+});
+
 export function AnnotationsPage() {
   const queryClient = useQueryClient();
+  // 仅在 mount 时读一次 sessionStorage，避免 useState lazy initializer 被多次评估。
+  const initialStored = useRef<Partial<StoredState>>(loadStored()).current;
+
   const [hours, setHours] = useState("72");
   const [symbol, setSymbol] = useState("");
-  const [activeKey, setActiveKey] = useState<string>("");
+  const [activeKey, setActiveKey] = useState<string>(initialStored.activeKey ?? "");
 
   // 编辑表单状态
   const [selectedNews, setSelectedNews] = useState<number[]>([]);
   const [noClearNews, setNoClearNews] = useState(false);
   const [notes, setNotes] = useState("");
-  const [labeler, setLabeler] = useState("");
+  const [labeler, setLabeler] = useState(initialStored.labeler ?? "");
   const [autoResult, setAutoResult] = useState<AutoAnnotateResponse | null>(null);
 
   // 批量自动标注的结果缓存。Key = windowKey(window)。一次「批量自动标注」可能产生多片
   // batch 调用（每片 ≤10 窗口），每个窗口的结果按 key 暂存，等用户点中某个窗口时回填表单。
-  const [batchByKey, setBatchByKey] = useState<Map<string, AutoAnnotateBatchItem>>(new Map());
+  // 用户的手动修改（勾选/no_clear_news/notes）也会写回到这里，作为 in-progress 单一来源。
+  const [batchByKey, setBatchByKey] = useState<Map<string, AutoAnnotateBatchItem>>(
+    () => new Map(initialStored.batchByKey ?? [])
+  );
   // 当前/最近一次批量调用的全局元数据（reasoning + 模型名 + 总耗时），用于附给每个窗口的 autoResult。
-  const [batchMeta, setBatchMeta] = useState<{ reasoning: string; model: string; duration_seconds: number } | null>(null);
+  const [batchMeta, setBatchMeta] = useState<{ reasoning: string; model: string; duration_seconds: number } | null>(
+    initialStored.batchMeta ?? null
+  );
   // 批处理进度：{ done, total } 用来显示「3/12」之类的状态。
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [batchError, setBatchError] = useState<unknown>(null);
@@ -143,28 +204,104 @@ export function AnnotationsPage() {
   });
 
   // 切换窗口时：如果该窗口在批量结果缓存里有，回填表单和 autoResult；否则清空。
+  // 关键：每个 setter 都用幂等更新（值未变就返回 prev），让 React 通过 Object.is 跳过 re-render。
+  // 否则用户每次改动 → write-back 写 batchByKey → 本 effect 重跑 → autoResult 新对象 → 整个推理面板
+  // 子树多余 re-render → 视觉抖动。
   useEffect(() => {
     const cached = batchByKey.get(activeKey);
     if (cached && batchMeta) {
-      setSelectedNews(cached.selected_news_ids);
-      setNoClearNews(cached.no_clear_news);
-      setNotes(cached.summary);
-      setAutoResult({
-        selected_news_ids: cached.selected_news_ids,
-        no_clear_news: cached.no_clear_news,
-        summary: cached.summary,
-        reasoning: batchMeta.reasoning,  // 批量共享同一段 reasoning_content
-        model: batchMeta.model,
-        duration_seconds: batchMeta.duration_seconds,
-        candidate_count: cached.candidate_count
+      setSelectedNews((prev) => arraysEqual(prev, cached.selected_news_ids) ? prev : cached.selected_news_ids);
+      setNoClearNews((prev) => prev === cached.no_clear_news ? prev : cached.no_clear_news);
+      setNotes((prev) => prev === cached.summary ? prev : cached.summary);
+      setAutoResult((prev) => {
+        const expectedReasoning = cached.reasoning || batchMeta.reasoning;
+        if (
+          prev &&
+          prev.reasoning === expectedReasoning &&
+          prev.model === batchMeta.model &&
+          prev.candidate_count === cached.candidate_count &&
+          prev.duration_seconds === batchMeta.duration_seconds
+        ) {
+          return prev;  // AI 元数据未变 → 不创建新对象，不触发 re-render
+        }
+        return {
+          selected_news_ids: cached.selected_news_ids,
+          no_clear_news: cached.no_clear_news,
+          summary: cached.summary,
+          // 优先用本窗口结构化输出里的 reasoning；为空时退回到整批 thinking trace（debug 用）
+          reasoning: expectedReasoning,
+          model: batchMeta.model,
+          duration_seconds: batchMeta.duration_seconds,
+          candidate_count: cached.candidate_count
+        };
       });
+    } else if (cached) {
+      // 缓存里有但没 batchMeta（重新加载页面后 batchMeta 也持久化了，正常路径会走上面分支；
+      // 这里是兜底：纯人工编辑过的窗口没有 AI 元数据，但表单内容还是要还原）
+      setSelectedNews((prev) => arraysEqual(prev, cached.selected_news_ids) ? prev : cached.selected_news_ids);
+      setNoClearNews((prev) => prev === cached.no_clear_news ? prev : cached.no_clear_news);
+      setNotes((prev) => prev === cached.summary ? prev : cached.summary);
+      setAutoResult((prev) => prev === null ? prev : null);
     } else {
-      setSelectedNews([]);
-      setNoClearNews(false);
-      setNotes("");
-      setAutoResult(null);
+      setSelectedNews((prev) => prev.length === 0 ? prev : []);
+      setNoClearNews((prev) => prev === false ? prev : false);
+      setNotes((prev) => prev === "" ? prev : "");
+      setAutoResult((prev) => prev === null ? prev : null);
     }
   }, [activeKey, batchByKey, batchMeta]);
+
+  // 用户对当前窗口的勾选 / no_clear_news / notes 改动写回 batchByKey，让其成为 in-progress 单一来源。
+  // 内置幂等：值未变时早退避免与上面 hydrate 形成循环。
+  useEffect(() => {
+    if (!activeKey || !activeWindow) return;
+    setBatchByKey((prev) => {
+      const existing = prev.get(activeKey);
+      const sameSelected = existing
+        ? arraysEqual(existing.selected_news_ids, selectedNews)
+        : selectedNews.length === 0;
+      const sameNoClear = (existing?.no_clear_news ?? false) === noClearNews;
+      const sameSummary = (existing?.summary ?? "") === notes;
+      if (existing && sameSelected && sameNoClear && sameSummary) return prev;
+      // 没 existing + 用户也没动过 → 不创建空 entry
+      if (!existing && !selectedNews.length && !noClearNews && !notes) return prev;
+
+      const next = new Map(prev);
+      next.set(activeKey, {
+        symbol: activeWindow.symbol,
+        window_start_utc: activeWindow.window_start.timestamp_utc!,
+        window_end_utc: activeWindow.window_end.timestamp_utc!,
+        selected_news_ids: selectedNews,
+        no_clear_news: noClearNews,
+        summary: notes,
+        reasoning: existing?.reasoning ?? "",
+        candidate_count: existing?.candidate_count ?? 0,
+        candidate_news_ids: existing?.candidate_news_ids ?? []
+      });
+      return next;
+    });
+  }, [activeKey, activeWindow, selectedNews, noClearNews, notes]);
+
+  // 把 batchByKey / batchMeta / labeler / activeKey 持久化到 sessionStorage。
+  // **必须 debounce** —— reasoning 能有几 KB，每次 JSON.stringify + sessionStorage.setItem 是
+  // 同步阻塞操作（~1-3ms）。在 textarea 里快速打字时，每个 keystroke 触发 write-back → batchByKey
+  // 变化 → 这个 effect 跑一次，累积起来卡主线程，导致输入跟不上、textarea 抖动。
+  // 等用户停止操作 300ms 再写，正常 idle 状态下感受不到延迟。
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const data: StoredState = {
+          batchByKey: Array.from(batchByKey.entries()),
+          batchMeta,
+          labeler,
+          activeKey
+        };
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      } catch {
+        // sessionStorage 满 / disabled 时静默失败
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [batchByKey, batchMeta, labeler, activeKey]);
 
   const save = useMutation({
     mutationFn: () => api.saveAnnotation({
@@ -183,6 +320,14 @@ export function AnnotationsPage() {
       auto_summary: autoResult?.summary ?? null
     }),
     onSuccess: () => {
+      // 已落库 → 从 in-progress 缓存里清掉，避免下次回到该 symbol 时还显示已经保存过的草稿
+      const savedKey = activeKey;
+      setBatchByKey((prev) => {
+        if (!prev.has(savedKey)) return prev;
+        const next = new Map(prev);
+        next.delete(savedKey);
+        return next;
+      });
       void queryClient.invalidateQueries({ queryKey: ["annotation-windows"] });
       void queryClient.invalidateQueries({ queryKey: ["annotation-list"] });
     }
@@ -219,6 +364,7 @@ export function AnnotationsPage() {
             selected_news_ids: result.selected_news_ids,
             no_clear_news: result.no_clear_news,
             summary: result.summary,
+            reasoning: result.reasoning,  // 单窗口直接拿 DeepSeek thinking 全文做该窗口 reasoning
             candidate_count: result.candidate_count,
             candidate_news_ids: []  // 单窗口接口未返回 candidate_news_ids，留空；保存时前端从 contextNews 重算
           });
@@ -285,6 +431,32 @@ export function AnnotationsPage() {
 
   const batchInFlight = batchProgress != null && batchProgress.done < batchProgress.total;
 
+  // 候选新闻表 columns：必须 useMemo，否则父级每次 re-render（hover、textarea 输入等）都新建
+  // columns 数组 + 新 cell 闭包，DataTable 收到新 props → 整张表 + 每个 checkbox 全部重渲，
+  // 是抖动主因之二。toggleNews 用 useCallback 保持稳定；columns 只在 selectedNews 变化时重建（
+  // 此时 checkbox 的 checked 也确实需要更新，是必要的重建）。
+  const toggleNews = useCallback((id: number, checked: boolean) => {
+    setSelectedNews((ids) => checked ? [...ids, id] : ids.filter((x) => x !== id));
+  }, []);
+
+  const newsColumns = useMemo(() => [
+    {
+      key: "select",
+      header: "选择",
+      cell: (row: NewsItem) => (
+        <input
+          type="checkbox"
+          checked={selectedNews.includes(row.id)}
+          onChange={(event) => toggleNews(row.id, event.target.checked)}
+        />
+      )
+    },
+    { key: "time", header: "时间", cell: (row: NewsItem) => row.timestamp_bj?.slice(5, 16) },
+    { key: "source", header: "来源", cell: (row: NewsItem) => row.source },
+    { key: "score", header: "LLM", cell: (row: NewsItem) => row.llm_importance ?? "—" },
+    { key: "title", header: "标题", cell: (row: NewsItem) => row.title }
+  ], [selectedNews, toggleNews]);
+
   return (
     <section>
       <PageHeader title="新闻标注" subtitle="价格异动窗口与候选新闻关联（未标注 / 已标注 上下分栏）" />
@@ -330,16 +502,13 @@ export function AnnotationsPage() {
         {batchError ? <ErrorState error={batchError} /> : null}
 
         {autoResult ? (
-          <details className="reasoning-block" open>
-            <summary>
-              <span className="reasoning-tag">推理结果</span>
-              <span>{autoResult.model} · {autoResult.duration_seconds.toFixed(1)}s · 看了 {autoResult.candidate_count} 条候选</span>
-            </summary>
-            {autoResult.summary ? <p className="reasoning-summary">{autoResult.summary}</p> : null}
-            {autoResult.reasoning ? (
-              <pre className="reasoning-content">{autoResult.reasoning}</pre>
-            ) : <p className="muted-text small">模型未返回 reasoning_content（thinking 模式可能未生效）。</p>}
-          </details>
+          <ReasoningPanel
+            model={autoResult.model}
+            duration_seconds={autoResult.duration_seconds}
+            candidate_count={autoResult.candidate_count}
+            summary={autoResult.summary}
+            reasoning={autoResult.reasoning}
+          />
         ) : null}
 
         {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
@@ -430,13 +599,7 @@ export function AnnotationsPage() {
                     <DataTable<NewsItem>
                       rows={contextNews.data?.items ?? []}
                       empty="窗口前 15 / 后 30 分钟没有候选新闻"
-                      columns={[
-                        { key: "select", header: "选择", cell: (row) => <input type="checkbox" checked={selectedNews.includes(row.id)} onChange={(event) => setSelectedNews((ids) => event.target.checked ? [...ids, row.id] : ids.filter((id) => id !== row.id))} /> },
-                        { key: "time", header: "时间", cell: (row) => row.timestamp_bj?.slice(5, 16) },
-                        { key: "source", header: "来源", cell: (row) => row.source },
-                        { key: "score", header: "LLM", cell: (row) => row.llm_importance ?? "—" },
-                        { key: "title", header: "标题", cell: (row) => row.title }
-                      ]}
+                      columns={newsColumns}
                     />
                   )}
                 </div>

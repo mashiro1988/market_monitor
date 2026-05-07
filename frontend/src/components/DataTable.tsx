@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { EmptyState } from "./StateViews";
 
 export type Column<T> = {
@@ -8,7 +8,7 @@ export type Column<T> = {
   className?: string;
 };
 
-export function DataTable<T>({ columns, rows, empty = "暂无数据" }: { columns: Column<T>[]; rows: T[]; empty?: string }) {
+function DataTableInner<T>({ columns, rows, empty = "暂无数据" }: { columns: Column<T>[]; rows: T[]; empty?: string }) {
   if (!rows.length) {
     return <EmptyState title={empty} />;
   }
@@ -35,3 +35,7 @@ export function DataTable<T>({ columns, rows, empty = "暂无数据" }: { column
     </div>
   );
 }
+
+// memo 化：父级因 hover、textarea 输入等无关 state re-render 时，只要 columns/rows/empty 三个 prop
+// 引用不变，DataTable 就跳过 re-render。配合调用方用 useMemo 稳定 columns，能消除候选新闻表的抖动。
+export const DataTable = memo(DataTableInner) as typeof DataTableInner;
