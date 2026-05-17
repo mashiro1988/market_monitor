@@ -548,13 +548,34 @@ def start_scheduler():
         scheduler.shutdown()
 
 
+def refresh_sectors_cli():
+    """强制刷新 CMC 板块映射缓存（python run.py refresh-sectors）。
+
+    无视 7 天 TTL，直接重新拉一遍白名单内所有板块的成分币。
+    ~2 分钟（CMC 限速 + 白名单约 45 个板块 × 2.5s）。
+    编辑 config.SECTOR_WHITELIST 后必须跑一次。
+    """
+    from database import create_tables, SessionLocal
+    from services import cmc_client
+
+    create_tables()
+    session = SessionLocal()
+    try:
+        logger.info("强制刷新 CMC 板块映射...")
+        result = cmc_client.refresh_categories(force=True, session=session)
+        logger.info(f"完成: {result}")
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Investment Agent - 宏观市场监控系统")
     parser.add_argument(
         "action",
         nargs="?",
-        choices=["app", "api-dev", "frontend-build", "setup", "schedule", "scan"],
-        help="操作: app(仪表板), api-dev(API开发服务), frontend-build(构建前端), setup(初始化DB), schedule(定时扫描), scan(单次扫描)",
+        choices=["app", "api-dev", "frontend-build", "setup", "schedule", "scan", "refresh-sectors"],
+        help="操作: app(仪表板), api-dev(API开发服务), frontend-build(构建前端), setup(初始化DB), "
+             "schedule(定时扫描), scan(单次扫描), refresh-sectors(强制刷新 CMC 板块映射)",
     )
     args = parser.parse_args()
 
@@ -608,6 +629,7 @@ def execute(action: str):
         "setup": setup_database,
         "schedule": start_scheduler,
         "scan": run_scan_once,
+        "refresh-sectors": refresh_sectors_cli,
     }
     fn = dispatch.get(action)
     if fn:
