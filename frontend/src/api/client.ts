@@ -21,6 +21,8 @@ import type {
   NewsResponse,
   NewsSourceMeta,
   Page,
+  SectorLeaderboardResponse,
+  SectorTokensResponse,
   PredictionFamily,
   PredictionRow,
   PredictionsResponse,
@@ -139,5 +141,9 @@ export const api = {
   autoAnnotate: (body: AutoAnnotateRequest) =>
     request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) }),
   autoAnnotateBatch: (body: AutoAnnotateBatchRequest) =>
-    request<AutoAnnotateBatchResponse>("/annotations/auto-batch", { method: "POST", body: JSON.stringify(body) })
+    request<AutoAnnotateBatchResponse>("/annotations/auto-batch", { method: "POST", body: JSON.stringify(body) }),
+  // 板块轮动
+  sectorLeaderboard: () => request<SectorLeaderboardResponse>("/sectors/leaderboard"),
+  sectorTokens: (category: string) =>
+    request<SectorTokensResponse>(`/sectors/${encodeURIComponent(category)}/tokens`)
 };

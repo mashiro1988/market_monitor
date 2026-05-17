@@ -1219,3 +1219,9 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+/* === 板块轮动颜色 (复用 --up / --down / --muted) === */
+.ret-up   { color: var(--up); }
+.ret-down { color: var(--down); }
+.ret-flat { color: var(--muted); }
+.muted    { color: var(--muted); }

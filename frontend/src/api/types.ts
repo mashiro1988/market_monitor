@@ -334,3 +334,38 @@ export type AnnotationResponse = {
   id: number;
   saved: boolean;
 };
+
+// ============================================================
+// 板块轮动（Phase 1 of remote_data_integration）
+// ============================================================
+export type SectorLeaderboardRow = {
+  category: string;
+  group: string | null;
+  token_count: number;
+  ret_1h: number | null;
+  ret_24h: number | null;
+  ret_168h: number | null;
+  ret_720h: number | null;
+};
+
+export type SectorLeaderboardResponse = {
+  snapshot_at: TimeFields | null;
+  rows: SectorLeaderboardRow[];
+};
+
+export type SectorTokenRow = {
+  symbol: string;
+  binance_symbol: string;
+  market: "spot" | "swap";
+  ret_1h: number | null;
+  ret_24h: number | null;
+  ret_168h: number | null;
+  ret_720h: number | null;
+};
+
+export type SectorTokensResponse = {
+  category: string;
+  group: string | null;
+  snapshot_at: TimeFields | null;
+  tokens: SectorTokenRow[];
+};
