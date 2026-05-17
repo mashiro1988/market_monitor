@@ -35,7 +35,10 @@ from services import remote_fs
 # 配置
 # ============================================================
 # 该值用于 APScheduler IntervalTrigger 注册 cycle 频率（api/app.py + run.py 里读）。
-POLL_INTERVAL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "60"))
+# Phase 1 拉的 dataset 全是小时级（BMAC 30m 偏移每小时 :30 写一次 pivot），
+# 5 min 一查足够，最差延迟 5 min 拿到新数据 —— 跟 1h 周期相比可忽略。
+# Phase 4 加入 5min 粒度的 focal symbol candles 时再考虑给那批 dataset 单独提速。
+POLL_INTERVAL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "300"))
 REMOTE_OFFSET = os.getenv("REMOTE_OFFSET", "30m")  # BMAC 的 hour offset 子目录
 
 
