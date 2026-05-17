@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -65,6 +66,39 @@ def _start_background_scheduler() -> BackgroundScheduler:
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] startup backfill failed: {}", exc)
 
+    def sector_scan_cycle() -> None:
+        """读本地 cache + DB 板块映射 -> 算板块涨跌入库。
+        不进 fast_scan,因为节奏不一样(板块 1h, fast_scan 5min)且锁分离避免阻塞。
+        """
+        try:
+            from scanners.sector_scanner import SectorScanner
+
+            stats = SectorScanner().scan()
+            logger.info("[FastAPI Scheduler] sector_scan finished: {}", stats)
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] sector_scan failed: {}", exc)
+
+    def cmc_bootstrap() -> None:
+        """启动后异步检查 CMC 板块映射是否过期(7 天 TTL),过期了就刷新。
+        作为 date trigger 一次性 job,不阻塞 lifespan。首次启动大概 2 分钟。
+        """
+        try:
+            from database import SessionLocal
+            from services import cmc_client
+
+            session = SessionLocal()
+            try:
+                if cmc_client.needs_refresh(session):
+                    logger.info("[FastAPI Scheduler] cmc_bootstrap: 板块映射过期/为空,开始刷新...")
+                    result = cmc_client.refresh_categories(session=session)
+                    logger.info("[FastAPI Scheduler] cmc_bootstrap done: {}", result)
+                else:
+                    logger.info("[FastAPI Scheduler] cmc_bootstrap: 板块映射仍在 TTL 内,跳过")
+            finally:
+                session.close()
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] cmc_bootstrap failed: {}", exc)
+
     price_interval = max(1, int(config.SCAN_INTERVALS.get("price", 5)))
     scheduler.add_job(
         scan_cycle,
@@ -90,6 +124,25 @@ def _start_background_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+    # 板块扫描:每小时 :32 跑(BMAC 30m 偏移在 :30 落 .ready,留 2 min 给 remote_puller 拉完)。
+    # 自己的 max_instances=1 -> 锁分离,跟 scan_cycle 并行也 OK。
+    scheduler.add_job(
+        sector_scan_cycle,
+        CronTrigger(minute=32),
+        id="sector_scan_cycle",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # CMC 板块映射启动检查:lifespan 起来后 10s 跑一次。如果 TTL 过期会触发刷新(~2min)。
+    scheduler.add_job(
+        cmc_bootstrap,
+        "date",
+        run_date=datetime.now(timezone.utc) + timedelta(seconds=10),
+        id="cmc_bootstrap",
+        replace_existing=True,
+        max_instances=1,
+    )
     scheduler.start()
     return scheduler
 
@@ -103,9 +156,21 @@ def create_app(enable_scheduler: bool = True) -> FastAPI:
         if enable_scheduler:
             scheduler_holder["scheduler"] = _start_background_scheduler()
             logger.info("[FastAPI] background scheduler started")
+            # 远程数据 puller 守护线程,独立于 APScheduler,有自己的 60s 轮询节奏。
+            try:
+                from services.remote_puller import start_puller
+                start_puller()
+            except Exception as exc:
+                logger.warning("[FastAPI] remote_puller 启动失败({}); "
+                               "板块数据将停留在上一次缓存", exc)
         try:
             yield
         finally:
+            try:
+                from services.remote_puller import stop_puller
+                stop_puller()
+            except Exception:
+                pass
             scheduler = scheduler_holder.get("scheduler")
             if scheduler:
                 scheduler.shutdown(wait=False)

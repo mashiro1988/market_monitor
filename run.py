@@ -394,8 +394,9 @@ def run_startup_backfill_once():
 
 
 def start_scheduler():
-    """启动 5 分钟频率定时扫描 + 每小时摘要"""
+    """启动 5 分钟频率定时扫描 + 每小时摘要 + 板块管道（puller + sector_scan + cmc_bootstrap）"""
     from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
     from database import create_tables
 
@@ -440,6 +441,34 @@ def start_scheduler():
         except Exception as e:
             logger.error(f"[Scheduler] 启动回补失败: {e}")
 
+    def sector_scan_cycle():
+        """板块扫描周期：读本地 BMAC 缓存 + DB 板块映射 → 算板块涨跌入库。
+        独立 max_instances=1 锁，跟 5min 主扫描并行也不互斥。"""
+        try:
+            from scanners.sector_scanner import SectorScanner
+            stats = SectorScanner().scan()
+            logger.info(f"[Scheduler] 板块扫描完成: {stats}")
+        except Exception as e:
+            logger.error(f"[Scheduler] 板块扫描异常: {e}")
+
+    def cmc_bootstrap():
+        """启动 10s 后检查 CMC 板块映射是否过期，过期则刷新（~2min）。"""
+        try:
+            from database import SessionLocal
+            from services import cmc_client
+            session = SessionLocal()
+            try:
+                if cmc_client.needs_refresh(session):
+                    logger.info("[Scheduler] CMC 板块映射过期/为空，开始刷新...")
+                    result = cmc_client.refresh_categories(session=session)
+                    logger.info(f"[Scheduler] CMC 板块刷新完成: {result}")
+                else:
+                    logger.info("[Scheduler] CMC 板块映射仍在 TTL 内，跳过")
+            finally:
+                session.close()
+        except Exception as e:
+            logger.error(f"[Scheduler] CMC bootstrap 失败: {e}")
+
     # 添加5分钟扫描任务
     price_interval = max(1, int(config.SCAN_INTERVALS.get("price", 5)))
     first_scan_time = next_aligned_run_time(price_interval)
@@ -472,7 +501,34 @@ def start_scheduler():
         coalesce=True,
     )
 
+    # 板块扫描：每小时 :32 跑（BMAC 30m 偏移在 :30 落 .ready，留 2 min 给 remote_puller 拉完）
+    scheduler.add_job(
+        sector_scan_cycle,
+        CronTrigger(minute=32),
+        id="sector_scan_cycle",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # CMC 板块映射启动检查（10s 后跑一次，过期会触发刷新 ~2min）
+    scheduler.add_job(
+        cmc_bootstrap,
+        "date",
+        run_date=datetime.now(timezone.utc) + timedelta(seconds=10),
+        id="cmc_bootstrap",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     scheduler.start()
+
+    # 启动 remote_puller 守护线程（不在 scheduler 里，自己 60s 轮询）
+    try:
+        from services.remote_puller import start_puller
+        start_puller()
+    except Exception as e:
+        logger.warning(f"[Scheduler] remote_puller 启动失败: {e}；板块数据将停留在缓存")
 
     logger.info(
         f"[Scheduler] 定时扫描已启动（每 {price_interval} 分钟），"
@@ -484,6 +540,11 @@ def start_scheduler():
             time.sleep(60)
     except KeyboardInterrupt:
         logger.info("停止定时扫描器...")
+        try:
+            from services.remote_puller import stop_puller
+            stop_puller()
+        except Exception:
+            pass
         scheduler.shutdown()
 
 
