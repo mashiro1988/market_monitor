@@ -40,6 +40,16 @@ frontend/vite.config.d.ts
 # ===== Local skill copies / scratch =====
 building-a-project-map/
 
+# ===== Remote data integration (本地缓存 / 一次性研究产物 / 待整合素材) =====
+data/remote_cache/
+Pending_functions/
+scripts/probe_*.py
+scripts/probe_*.txt
+scripts/try_shim_load.py
+scripts/inspect_factors*.py
+scripts/fetch_realtime_src.py
+scripts/server_src/
+
 # ===== 个人工作笔记 / 项目地图 (本地自用，不入库) =====
 AGENTS.md
 ARCHITECTURE.md
