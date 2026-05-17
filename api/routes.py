@@ -41,8 +41,9 @@ from schemas.predictions import (
     TrackedMarketSchema,
     TrackedMarketUpdate,
 )
+from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, market_service, news_service, onchain_service, prediction_service, task_service
+from services import alerts_service, annotation_service, market_service, news_service, onchain_service, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -338,3 +339,18 @@ def annotation_auto_batch(request: AutoAnnotateBatchRequest, db: Session = Depen
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
     except RuntimeError as exc:
         raise ApiError("AUTO_ANNOTATE_FAILED", str(exc), status_code=502) from exc
+
+
+# ============================================================
+# 板块轮动（Phase 1）
+# ============================================================
+@router.get("/sectors/leaderboard", response_model=SectorLeaderboardResponse)
+def sectors_leaderboard(db: Session = Depends(get_db)) -> SectorLeaderboardResponse:
+    """最新一次 sector_scan 的所有板块聚合，按 24h 涨跌降序。"""
+    return sector_service.get_leaderboard(db)
+
+
+@router.get("/sectors/{category}/tokens", response_model=SectorTokensResponse)
+def sectors_tokens(category: str, db: Session = Depends(get_db)) -> SectorTokensResponse:
+    """某板块下所有 symbol 的当前涨跌（从本地 pivot 缓存现算）。"""
+    return sector_service.get_sector_tokens(db, category)
