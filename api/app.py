@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -66,17 +65,16 @@ def _start_background_scheduler() -> BackgroundScheduler:
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] startup backfill failed: {}", exc)
 
-    def sector_scan_cycle() -> None:
-        """读本地 cache + DB 板块映射 -> 算板块涨跌入库。
-        不进 fast_scan,因为节奏不一样(板块 1h, fast_scan 5min)且锁分离避免阻塞。
+    def remote_data_cycle() -> None:
+        """远程数据周期: pull -> sector_scan -> (phase 4: factor_compute).
+        跟 fast_scan / hourly_summary 各自的锁并行，跟自己 max_instances=1 串行。
         """
         try:
-            from scanners.sector_scanner import SectorScanner
-
-            stats = SectorScanner().scan()
-            logger.info("[FastAPI Scheduler] sector_scan finished: {}", stats)
+            from services.remote_puller import run_remote_data_cycle
+            stats = run_remote_data_cycle()
+            logger.info("[FastAPI Scheduler] remote_data_cycle finished: {}", stats)
         except Exception as exc:
-            logger.exception("[FastAPI Scheduler] sector_scan failed: {}", exc)
+            logger.exception("[FastAPI Scheduler] remote_data_cycle failed: {}", exc)
 
     def cmc_bootstrap() -> None:
         """启动后异步检查 CMC 板块映射是否过期(7 天 TTL),过期了就刷新。
@@ -124,12 +122,15 @@ def _start_background_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
-    # 板块扫描:每小时 :32 跑(BMAC 30m 偏移在 :30 落 .ready,留 2 min 给 remote_puller 拉完)。
-    # 自己的 max_instances=1 -> 锁分离,跟 scan_cycle 并行也 OK。
+    # 远程数据周期: pull (SFTP) -> sector_scan -> (phase 4) factor_compute.
+    # 60s 跑一次,跟 scan_cycle (5min) / hourly_summary (1h) 用各自 max_instances=1 锁并行.
+    # 串行结构内部保证 sector_scan 总能看到刚拉下来的 pivot.
+    from services.remote_puller import POLL_INTERVAL_SECONDS as REMOTE_DATA_CYCLE_SEC
     scheduler.add_job(
-        sector_scan_cycle,
-        CronTrigger(minute=32),
-        id="sector_scan_cycle",
+        remote_data_cycle,
+        IntervalTrigger(seconds=REMOTE_DATA_CYCLE_SEC,
+                        start_date=datetime.now(timezone.utc) + timedelta(seconds=2)),
+        id="remote_data_cycle",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -156,21 +157,9 @@ def create_app(enable_scheduler: bool = True) -> FastAPI:
         if enable_scheduler:
             scheduler_holder["scheduler"] = _start_background_scheduler()
             logger.info("[FastAPI] background scheduler started")
-            # 远程数据 puller 守护线程,独立于 APScheduler,有自己的 60s 轮询节奏。
-            try:
-                from services.remote_puller import start_puller
-                start_puller()
-            except Exception as exc:
-                logger.warning("[FastAPI] remote_puller 启动失败({}); "
-                               "板块数据将停留在上一次缓存", exc)
         try:
             yield
         finally:
-            try:
-                from services.remote_puller import stop_puller
-                stop_puller()
-            except Exception:
-                pass
             scheduler = scheduler_holder.get("scheduler")
             if scheduler:
                 scheduler.shutdown(wait=False)

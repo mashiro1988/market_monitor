@@ -1,26 +1,27 @@
-"""远程数据 puller 守护线程。
+"""远程数据周期 (remote_data_cycle) 的实现。
 
-跑一个后台线程,每 60s 轮询 BMAC 服务器的 .ready flag。
-发现某 dataset 的 cutoff 比上次记录的新 -> 拉对应 pkl 到 data/remote_cache/。
+整个"远程数据相关的工作"被打包成一个 APScheduler job:
+  pull (SFTP) -> sector_scan -> (phase 4: factor_compute)
+都依赖 puller 拉到的新文件，所以串行跑在同一个 job 内。这个 job 跟 fast_scan /
+hourly_summary / 其它 job 用各自的 max_instances=1 锁并行执行，彼此不阻塞。
 
-为什么独立线程,不进 fast_scan 主循环:
-- 解耦网络耗时和扫描节奏。SFTP 卡 30s 不应该让 5min 告警停摆。
-- 不同 dataset 节奏不一样(pivot 1h, exginfo 几乎不变),专门的轮询比塞进 5min 浪费。
-- 失败降级自然:拉不到就用上一次的 cache,scanner 一直能跑。
+为什么不用独立守护线程:
+- 多一个线程多一份生命周期管理（start/stop/锁）。
+- APScheduler 已经在管所有 job，统一 lifecycle 更简单。
+- sector_scan 和 factor_compute 都是 puller 的下游，串行跑更直观。
+- 测试时直接调函数就行，不用 spin 起线程。
 
-Phase 1 拉的 dataset(够板块计算 + symbol 映射):
+Phase 1 拉的 dataset（够板块计算 + symbol 映射）:
 - preprocess_1h_resample/{offset}/market_pivot_spot_{year}.pkl
 - preprocess_1h_resample/{offset}/market_pivot_swap_{year}.pkl
 - exginfo/spot_swap_matches.pkl
 
-后续 phase 加入按需订阅币的 binance_swap_1h_resample/{offset}/{SYMBOL}USDT.pkl
-和 binance_swap_5m/{SYMBOL}/{YYYYMM}.pkl。
+Phase 4 会在同一个 cycle 末尾加 factor_compute（按需订阅币的 1h candle + 因子）。
 """
 from __future__ import annotations
 
 import os
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,17 +34,13 @@ from services import remote_fs
 # ============================================================
 # 配置
 # ============================================================
+# 该值用于 APScheduler IntervalTrigger 注册 cycle 频率（api/app.py + run.py 里读）。
 POLL_INTERVAL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "60"))
 REMOTE_OFFSET = os.getenv("REMOTE_OFFSET", "30m")  # BMAC 的 hour offset 子目录
 
 
 # ============================================================
 # 待拉数据集声明
-# ----------------
-# 每条:
-#   ready_dir       : 服务器上放 .ready 的目录(相对 REMOTE_DATA_ROOT)
-#   ready_prefix    : .ready 文件名前缀,find_latest_ready 用
-#   resolve_pkl_rel : (cutoff_ts: int) -> 待拉 pkl 的相对路径
 # ============================================================
 @dataclass
 class DatasetSpec:
@@ -89,13 +86,13 @@ PHASE1_DATASETS: list[DatasetSpec] = [
     ),
 ]
 
-# 拉到这些 dataset 后,立刻触发 sector_scan 把 DB 同步上去.
-# 让 leaderboard (读 DB) 跟 token 钻取 (读 pivot) 的 snapshot_at 永远在同一秒.
+# 拉到这些 dataset 后，触发下游的 sector_scan。
+# Phase 4 会再加一组对应 factor_compute 的 dataset 名。
 PIVOT_DATASETS_TRIGGERING_SCAN = {"market_pivot_spot", "market_pivot_swap"}
 
 
 # ============================================================
-# 运行状态
+# 运行状态（供 /status / 监控读）
 # ============================================================
 @dataclass
 class DatasetStatus:
@@ -108,93 +105,84 @@ class DatasetStatus:
 
 @dataclass
 class PullerStatus:
-    started_at: Optional[datetime] = None  # UTC naive
-    last_tick_at: Optional[datetime] = None
-    tick_count: int = 0
+    last_cycle_at: Optional[datetime] = None
+    cycle_count: int = 0
     datasets: dict[str, DatasetStatus] = field(default_factory=dict)
 
 
 # ============================================================
-# Puller
+# RemotePuller — 状态容器 + cycle 入口
 # ============================================================
 class RemotePuller:
-    """守护线程封装。模块级单例 _puller 由 get_puller() 暴露。"""
+    """状态容器。
+    cycle() 是 APScheduler job 入口；并发安全靠 APScheduler 的
+    max_instances=1 保证（cycle 永远不会并行自己）。
+    status() 给 API/监控用，因可能从其它线程调用，加锁保护读。
+    """
 
-    def __init__(self, datasets: list[DatasetSpec], poll_interval: int = POLL_INTERVAL_SECONDS):
+    def __init__(self, datasets: list[DatasetSpec]):
         self._datasets = datasets
-        self._poll_interval = poll_interval
-        self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-        self._status = PullerStatus(datasets={d.name: DatasetStatus(name=d.name) for d in datasets})
+        self._status = PullerStatus(
+            datasets={d.name: DatasetStatus(name=d.name) for d in datasets}
+        )
         self._status_lock = threading.Lock()
 
-    # ---- 生命周期 ----
-    def start(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
-            logger.debug("remote_puller 已运行,start() 忽略")
-            return
-        self._stop_event.clear()
-        self._status.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        self._thread = threading.Thread(target=self._run_loop, name="remote-puller", daemon=True)
-        self._thread.start()
-        logger.info("remote_puller 启动 (poll={}s, offset={})", self._poll_interval, REMOTE_OFFSET)
+    # ---- 入口 ----
+    def cycle(self) -> dict:
+        """跑一轮 pull → 下游处理（sector_scan，将来 factor_compute）。
 
-    def stop(self, timeout: float = 5.0) -> None:
-        if self._thread is None:
-            return
-        logger.info("remote_puller 停止中...")
-        self._stop_event.set()
-        self._thread.join(timeout=timeout)
-        if self._thread.is_alive():
-            logger.warning("remote_puller 线程未在 {}s 内退出", timeout)
-        self._thread = None
-
-    # ---- 主循环 ----
-    def _run_loop(self) -> None:
-        # 启动后先跑一次,不要等 60s
-        self._tick()
-        while not self._stop_event.is_set():
-            # wait() 会在 stop_event 被 set 时立刻返回 True
-            if self._stop_event.wait(timeout=self._poll_interval):
-                break
-            self._tick()
-
-    def _tick(self) -> None:
+        返回 stats dict 供日志/测试用。
+        异常都被吞掉（防止一次失败让整个 job 死掉），通过 status() 暴露错误。
+        """
         with self._status_lock:
-            self._status.tick_count += 1
-            self._status.last_tick_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            self._status.cycle_count += 1
+            self._status.last_cycle_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        stats: dict = {"pulled": [], "errors": []}
         pivot_was_updated = False
+
+        # 1) 顺序拉每个 dataset
         for spec in self._datasets:
             try:
                 pulled = self._pull_if_newer(spec)
-                if pulled and spec.name in PIVOT_DATASETS_TRIGGERING_SCAN:
-                    pivot_was_updated = True
+                if pulled:
+                    stats["pulled"].append(spec.name)
+                    if spec.name in PIVOT_DATASETS_TRIGGERING_SCAN:
+                        pivot_was_updated = True
             except Exception as exc:
-                # 永远不抛出 -- 让 puller 下一轮继续
                 logger.exception("dataset {} 拉取异常: {}", spec.name, exc)
+                stats["errors"].append(spec.name)
                 with self._status_lock:
                     ds = self._status.datasets[spec.name]
                     ds.last_error = repr(exc)
                     ds.consecutive_errors += 1
 
-        # pivot 有更新 -> 同步触发 sector_scan, 让 DB 立刻反映最新 pivot
+        # 2) 下游：板块计算（pivot 有新数据才跑）
         if pivot_was_updated:
-            self._trigger_sector_scan()
+            stats["sector_scan"] = self._run_sector_scan()
 
-    def _trigger_sector_scan(self) -> None:
-        """拉到新 pivot 后跑一次 SectorScanner.scan(), 同步写 sector_returns."""
+        # 3) 下游（Phase 4 占位）：单币因子计算
+        # if any pulled in PER_SYMBOL_DATASETS_TRIGGERING_FACTOR:
+        #     stats["factor_compute"] = self._run_factor_compute()
+
+        return stats
+
+    # ---- 下游 ----
+    def _run_sector_scan(self) -> dict:
+        """拉到新 pivot 后跑 SectorScanner.scan() 同步写 sector_returns。"""
         try:
-            # 延迟 import 避免循环依赖 (scanners.sector_scanner -> services.sector_service
-            # -> services.remote_fs 之类的链)
+            # 延迟 import 避免循环依赖
             from scanners.sector_scanner import SectorScanner
             result = SectorScanner().scan()
-            logger.info("post-pull sector_scan: {}", result)
+            logger.info("remote_data_cycle 触发 sector_scan: {}", result)
+            return result
         except Exception as exc:
-            logger.exception("post-pull sector_scan 失败: {}", exc)
+            logger.exception("sector_scan 失败: {}", exc)
+            return {"error": repr(exc)}
 
+    # ---- 拉取单个 dataset ----
     def _pull_if_newer(self, spec: DatasetSpec) -> bool:
-        """拉取 spec 对应的 pkl 如果有新 cutoff. 返回 True 仅当实际下载了新文件."""
+        """拉取 spec 对应的 pkl 如果有新 cutoff。返回 True 仅当实际下载了新文件。"""
         # 1) 找最新 .ready cutoff
         result = remote_fs.find_latest_ready(spec.ready_dir, spec.ready_prefix)
         if result is None:
@@ -208,9 +196,9 @@ class RemotePuller:
             last = ds.last_cutoff_ts
 
         if last is not None and cutoff_ts <= last:
-            return False  # 不新, 跳过
+            return False  # 不新，跳过
 
-        # 3) 触发拉取(remote_fs.pull 自己还会做 mtime/size 二次校验)
+        # 3) 触发拉取（remote_fs.pull 自己还会做 mtime/size 二次校验）
         pkl_rel = spec.resolve_pkl_rel(cutoff_ts)
         local = remote_fs.pull(pkl_rel)
         if local is None:
@@ -237,28 +225,22 @@ class RemotePuller:
     # ---- 公共查询 ----
     def status(self) -> PullerStatus:
         with self._status_lock:
-            # 浅拷贝就够,DatasetStatus 是 frozen 风格
             return PullerStatus(
-                started_at=self._status.started_at,
-                last_tick_at=self._status.last_tick_at,
-                tick_count=self._status.tick_count,
+                last_cycle_at=self._status.last_cycle_at,
+                cycle_count=self._status.cycle_count,
                 datasets={k: DatasetStatus(**v.__dict__) for k, v in self._status.datasets.items()},
             )
 
-    def force_tick(self) -> None:
-        """手动触发一次拉取(同步,在调用线程跑)。供 CLI / API 调试用。"""
-        self._tick()
-
 
 # ============================================================
-# 模块单例
+# 模块单例 + 顶层入口
 # ============================================================
 _puller: Optional[RemotePuller] = None
 _puller_lock = threading.Lock()
 
 
 def get_puller() -> RemotePuller:
-    """获取全局唯一 puller 实例。"""
+    """获取全局唯一 RemotePuller 实例。"""
     global _puller
     with _puller_lock:
         if _puller is None:
@@ -266,15 +248,13 @@ def get_puller() -> RemotePuller:
         return _puller
 
 
-def start_puller() -> None:
-    """启动 puller(若未启动)。供 FastAPI lifespan 调用。"""
-    get_puller().start()
+def run_remote_data_cycle() -> dict:
+    """APScheduler job 入口：跑一轮远程数据周期（pull → 下游处理）。
 
-
-def stop_puller() -> None:
-    """停止 puller。供 FastAPI lifespan shutdown 调用。"""
-    if _puller is not None:
-        _puller.stop()
+    由 IntervalTrigger(seconds=POLL_INTERVAL_SECONDS) 定时驱动，
+    max_instances=1 + coalesce=True 保证不会自我重叠。
+    """
+    return get_puller().cycle()
 
 
 def get_status() -> PullerStatus:

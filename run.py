@@ -394,9 +394,8 @@ def run_startup_backfill_once():
 
 
 def start_scheduler():
-    """启动 5 分钟频率定时扫描 + 每小时摘要 + 板块管道（puller + sector_scan + cmc_bootstrap）"""
+    """启动 5 分钟频率定时扫描 + 每小时摘要 + remote_data_cycle + cmc_bootstrap"""
     from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
     from database import create_tables
 
@@ -441,15 +440,15 @@ def start_scheduler():
         except Exception as e:
             logger.error(f"[Scheduler] 启动回补失败: {e}")
 
-    def sector_scan_cycle():
-        """板块扫描周期：读本地 BMAC 缓存 + DB 板块映射 → 算板块涨跌入库。
-        独立 max_instances=1 锁，跟 5min 主扫描并行也不互斥。"""
+    def remote_data_cycle():
+        """远程数据周期: pull (SFTP) → sector_scan → (phase 4) factor_compute。
+        60s 频率，跟 5min 主扫描用各自 max_instances=1 锁并行。"""
         try:
-            from scanners.sector_scanner import SectorScanner
-            stats = SectorScanner().scan()
-            logger.info(f"[Scheduler] 板块扫描完成: {stats}")
+            from services.remote_puller import run_remote_data_cycle
+            stats = run_remote_data_cycle()
+            logger.info(f"[Scheduler] remote_data_cycle 完成: {stats}")
         except Exception as e:
-            logger.error(f"[Scheduler] 板块扫描异常: {e}")
+            logger.error(f"[Scheduler] remote_data_cycle 异常: {e}")
 
     def cmc_bootstrap():
         """启动 10s 后检查 CMC 板块映射是否过期，过期则刷新（~2min）。"""
@@ -501,11 +500,13 @@ def start_scheduler():
         coalesce=True,
     )
 
-    # 板块扫描：每小时 :32 跑（BMAC 30m 偏移在 :30 落 .ready，留 2 min 给 remote_puller 拉完）
+    # 远程数据周期：60s 跑一次 pull → sector_scan → (phase 4) factor_compute
+    from services.remote_puller import POLL_INTERVAL_SECONDS as REMOTE_DATA_CYCLE_SEC
     scheduler.add_job(
-        sector_scan_cycle,
-        CronTrigger(minute=32),
-        id="sector_scan_cycle",
+        remote_data_cycle,
+        IntervalTrigger(seconds=REMOTE_DATA_CYCLE_SEC,
+                        start_date=datetime.now(timezone.utc) + timedelta(seconds=2)),
+        id="remote_data_cycle",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -523,13 +524,6 @@ def start_scheduler():
 
     scheduler.start()
 
-    # 启动 remote_puller 守护线程（不在 scheduler 里，自己 60s 轮询）
-    try:
-        from services.remote_puller import start_puller
-        start_puller()
-    except Exception as e:
-        logger.warning(f"[Scheduler] remote_puller 启动失败: {e}；板块数据将停留在缓存")
-
     logger.info(
         f"[Scheduler] 定时扫描已启动（每 {price_interval} 分钟），"
         f"首次扫描: {first_scan_time.astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')} 北京时间；"
@@ -540,11 +534,6 @@ def start_scheduler():
             time.sleep(60)
     except KeyboardInterrupt:
         logger.info("停止定时扫描器...")
-        try:
-            from services.remote_puller import stop_puller
-            stop_puller()
-        except Exception:
-            pass
         scheduler.shutdown()
 
 
