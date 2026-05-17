@@ -12,6 +12,7 @@ binance 的 "ETHUSDT" 标准化回 "ETH" 后 JOIN。
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -34,6 +35,13 @@ _DETAIL_URL = "/v1/cryptocurrency/category"
 # 接受的 symbol 形态：纯大写字母 + 数字（避免乱码/中文/特殊字符）。
 _SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,15}$")
 
+# CMC API 在国内可直连，且走代理（Clash 等）容易在长会话里掐掉 SSL。
+# 默认 bypass 代理；若用户在墙外或要强行走代理，设 CMC_USE_PROXY=1。
+_CMC_USE_PROXY = os.getenv("CMC_USE_PROXY", "0").strip().lower() in {"1", "true", "yes", "on"}
+# 重试参数（SSL 抖动、Clash 抽风、5xx 等都重试）
+_RETRY_MAX_ATTEMPTS = 3
+_RETRY_BASE_BACKOFF = 2.0  # 秒；第 N 次重试 sleep base * 2^N
+
 
 def _headers() -> dict[str, str]:
     if not config.CMC_API_KEY:
@@ -43,17 +51,65 @@ def _headers() -> dict[str, str]:
     return {"Accepts": "application/json", "X-CMC_PRO_API_KEY": config.CMC_API_KEY}
 
 
+def _request_proxies() -> Optional[dict]:
+    """除非显式 opt-in（CMC_USE_PROXY=1），都直连 CMC。"""
+    if _CMC_USE_PROXY:
+        return config.proxies() or None
+    return None  # requests 用 None 表示用环境默认（PROXY/HTTP_PROXY env 也忽略走系统默认；
+    # 但 config.py 在代理不可用时已经清空 *_PROXY env 了；当代理可用时 env 是被设了的，
+    # 所以这里要更显式地 bypass — 见下面 trust_env=False 处理）
+
+
 def _get(path: str, params: Optional[dict] = None, *, timeout: float = 30.0) -> dict:
     url = config.CMC_API_BASE_URL.rstrip("/") + path
-    resp = requests.get(url, headers=_headers(), params=params or {}, timeout=timeout,
-                        proxies=config.proxies() or None)
-    resp.raise_for_status()
-    data = resp.json()
-    status = data.get("status", {})
-    err_code = status.get("error_code", 0)
-    if err_code:
-        raise RuntimeError(f"CMC API 错误 {err_code}: {status.get('error_message')}")
-    return data
+    last_exc: Exception | None = None
+    for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+        try:
+            # 用 Session + trust_env=False 强制忽略环境 HTTP_PROXY/HTTPS_PROXY
+            # （config.PROXY 启用时会把这些 env 写上，我们要绕过）。
+            session = requests.Session()
+            session.trust_env = False
+            resp = session.get(
+                url,
+                headers=_headers(),
+                params=params or {},
+                timeout=timeout,
+                proxies=_request_proxies(),  # None = 直连
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            status = data.get("status", {})
+            err_code = status.get("error_code", 0)
+            if err_code:
+                raise RuntimeError(f"CMC API 错误 {err_code}: {status.get('error_message')}")
+            return data
+        except (requests.exceptions.SSLError,
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.exceptions.ChunkedEncodingError) as exc:
+            last_exc = exc
+            if attempt < _RETRY_MAX_ATTEMPTS:
+                backoff = _RETRY_BASE_BACKOFF * (2 ** (attempt - 1))
+                logger.warning("CMC {} 第 {} 次失败 ({}), {:.1f}s 后重试",
+                               path, attempt, type(exc).__name__, backoff)
+                time.sleep(backoff)
+                continue
+            raise
+        except requests.exceptions.HTTPError as exc:
+            # 5xx 也重试；4xx 直接抛
+            status_code = exc.response.status_code if exc.response is not None else 0
+            if 500 <= status_code < 600 and attempt < _RETRY_MAX_ATTEMPTS:
+                last_exc = exc
+                backoff = _RETRY_BASE_BACKOFF * (2 ** (attempt - 1))
+                logger.warning("CMC {} 返回 {} 第 {} 次, {:.1f}s 后重试",
+                               path, status_code, attempt, backoff)
+                time.sleep(backoff)
+                continue
+            raise
+    # 不可达，循环里要么 return 要么 raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("CMC _get unreachable")
 
 
 # ============================================================
