@@ -6,6 +6,7 @@ from models.news import NewsItem, NewsPriceAnnotation
 from models.prediction import PredictionMarket
 from models.alert_log import AlertLog
 from models.tracked_market import TrackedMarket
+from models.sector import CmcSymbolCategory, SectorReturn
 
 
 def create_all_tables(engine):

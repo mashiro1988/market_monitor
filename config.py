@@ -302,6 +302,93 @@ DATA_SOURCES = {
 }
 
 # ============================================================
+# 远程数据源（BMAC SFTP）配置
+# ============================================================
+# 仅声明默认值，实际值从 .env 读取。具体含义见 docs/specs/remote_data_integration.md §5。
+REMOTE_DATA_ROOT = os.getenv("REMOTE_DATA_ROOT", "/root/data_center/data/").rstrip("/") + "/"
+LOCAL_CACHE_DIR = os.getenv("LOCAL_CACHE_DIR", "data/remote_cache")
+REMOTE_OFFSET = os.getenv("REMOTE_OFFSET", "30m")
+REMOTE_PULLER_POLL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "60"))
+
+# ============================================================
+# CoinMarketCap 板块分类配置
+# ============================================================
+CMC_API_KEY = os.getenv("CMC_API_KEY", "")
+CMC_API_BASE_URL = os.getenv("CMC_API_BASE_URL", "https://pro-api.coinmarketcap.com")
+CMC_CACHE_TTL_DAYS = int(os.getenv("CMC_CACHE_TTL_DAYS", "7"))
+# CMC 限速 ~30 调用/分钟，请求间隔 2.5s 保险
+CMC_REQUEST_INTERVAL_SECONDS = float(os.getenv("CMC_REQUEST_INTERVAL_SECONDS", "2.5"))
+
+# 板块白名单：大组名 → 该组下关心的 CMC category 名（精确匹配 CMC 的 category.name 字段）。
+# 起步版 ~50 个板块，按需增删。改完用 `python run.py refresh-sectors` 强制刷新本地缓存。
+# 详见 docs/specs/remote_data_integration.md 附录 A。
+SECTOR_WHITELIST: dict[str, list[str]] = {
+    "公链龙头": [
+        "Layer 1", "Smart Contracts",
+        "Ethereum Ecosystem", "Solana Ecosystem", "BNB Chain Ecosystem",
+        "Avalanche Ecosystem", "TRON Ecosystem",
+    ],
+    "L2 / 扩容": [
+        "Layer 2", "Rollups", "Modular Blockchain",
+    ],
+    "DeFi": [
+        "Decentralized Exchange (DEX) Token", "Lending & Borrowing", "Yield Farming",
+        "Liquid Staking Derivatives", "Derivatives", "Perp DEX coins",
+    ],
+    "AI 板块": [
+        "AI & Big Data", "AI Agents", "AI Memes", "AI Agent Launchpad",
+    ],
+    "Meme 主流": [
+        "Memes", "Cat-Themed",
+        "Four.Meme Ecosystem", "Pump Fun Ecosystem",
+    ],
+    "RWA": [
+        "Real World Assets Protocols", "Tokenized Stock",
+        "xStocks Ecosystem", "Tokenized Gold",
+    ],
+    "GameFi / 元宇宙": [
+        "Gaming", "Metaverse", "Play To Earn",
+    ],
+    "隐私": [
+        "Privacy",
+    ],
+    "DePIN / 存储": [
+        "DePIN", "Filesharing", "Storage",
+    ],
+    "体育 / IP": [
+        "Sports", "Soccer",
+    ],
+    "稳定币 / 收益": [
+        "Stablecoin", "Algorithmic Stablecoin",
+    ],
+    "聪明钱组合": [
+        "a16z Portfolio", "Multicoin Capital Portfolio", "Paradigm Portfolio",
+        "Coinbase Ventures Portfolio",
+    ],
+    "新币 / 上币事件": [
+        "Binance Launchpool", "Binance HODLer Airdrops",
+    ],
+}
+
+
+def all_whitelisted_cmc_categories() -> list[str]:
+    """扁平化 SECTOR_WHITELIST 拿到所有 CMC category 名称（去重保序）。"""
+    seen: dict[str, None] = {}
+    for group_cats in SECTOR_WHITELIST.values():
+        for name in group_cats:
+            seen.setdefault(name)
+    return list(seen.keys())
+
+
+def cmc_category_to_group(name: str) -> str | None:
+    """给定一个 CMC category name，返回它所属的中文大组名；不在白名单内返回 None。"""
+    for group, cats in SECTOR_WHITELIST.items():
+        if name in cats:
+            return group
+    return None
+
+
+# ============================================================
 # 数据清理配置
 # ============================================================
 DATA_RETENTION = {
