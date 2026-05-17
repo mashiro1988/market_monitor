@@ -89,6 +89,10 @@ PHASE1_DATASETS: list[DatasetSpec] = [
     ),
 ]
 
+# 拉到这些 dataset 后,立刻触发 sector_scan 把 DB 同步上去.
+# 让 leaderboard (读 DB) 跟 token 钻取 (读 pivot) 的 snapshot_at 永远在同一秒.
+PIVOT_DATASETS_TRIGGERING_SCAN = {"market_pivot_spot", "market_pivot_swap"}
+
 
 # ============================================================
 # 运行状态
@@ -160,9 +164,12 @@ class RemotePuller:
             self._status.tick_count += 1
             self._status.last_tick_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        pivot_was_updated = False
         for spec in self._datasets:
             try:
-                self._pull_if_newer(spec)
+                pulled = self._pull_if_newer(spec)
+                if pulled and spec.name in PIVOT_DATASETS_TRIGGERING_SCAN:
+                    pivot_was_updated = True
             except Exception as exc:
                 # 永远不抛出 -- 让 puller 下一轮继续
                 logger.exception("dataset {} 拉取异常: {}", spec.name, exc)
@@ -171,12 +178,28 @@ class RemotePuller:
                     ds.last_error = repr(exc)
                     ds.consecutive_errors += 1
 
-    def _pull_if_newer(self, spec: DatasetSpec) -> None:
+        # pivot 有更新 -> 同步触发 sector_scan, 让 DB 立刻反映最新 pivot
+        if pivot_was_updated:
+            self._trigger_sector_scan()
+
+    def _trigger_sector_scan(self) -> None:
+        """拉到新 pivot 后跑一次 SectorScanner.scan(), 同步写 sector_returns."""
+        try:
+            # 延迟 import 避免循环依赖 (scanners.sector_scanner -> services.sector_service
+            # -> services.remote_fs 之类的链)
+            from scanners.sector_scanner import SectorScanner
+            result = SectorScanner().scan()
+            logger.info("post-pull sector_scan: {}", result)
+        except Exception as exc:
+            logger.exception("post-pull sector_scan 失败: {}", exc)
+
+    def _pull_if_newer(self, spec: DatasetSpec) -> bool:
+        """拉取 spec 对应的 pkl 如果有新 cutoff. 返回 True 仅当实际下载了新文件."""
         # 1) 找最新 .ready cutoff
         result = remote_fs.find_latest_ready(spec.ready_dir, spec.ready_prefix)
         if result is None:
             logger.debug("dataset {} 暂无 .ready", spec.name)
-            return
+            return False
         ready_name, cutoff_ts = result
 
         # 2) 跟内存里上次记录比较
@@ -185,7 +208,7 @@ class RemotePuller:
             last = ds.last_cutoff_ts
 
         if last is not None and cutoff_ts <= last:
-            return  # 不新, 跳过
+            return False  # 不新, 跳过
 
         # 3) 触发拉取(remote_fs.pull 自己还会做 mtime/size 二次校验)
         pkl_rel = spec.resolve_pkl_rel(cutoff_ts)
@@ -197,7 +220,7 @@ class RemotePuller:
                 ds = self._status.datasets[spec.name]
                 ds.last_error = "pull returned None"
                 ds.consecutive_errors += 1
-            return
+            return False
 
         # 4) 记录成功
         with self._status_lock:
@@ -209,6 +232,7 @@ class RemotePuller:
         logger.info("dataset {} 已更新到 cutoff={} ({})",
                     spec.name, cutoff_ts,
                     datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat())
+        return True
 
     # ---- 公共查询 ----
     def status(self) -> PullerStatus:

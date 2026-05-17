@@ -20,11 +20,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import config
-from models.sector import CmcSymbolCategory
+from models.sector import CmcSymbolCategory, SectorReturn
 from scanners.sector_scanner import (
     RETURN_LOOKBACKS,
     _compute_returns_for_close,
-    compute_all_sector_returns,
     normalize_pivot_symbol,
 )
 from schemas.sectors import (
@@ -76,40 +75,55 @@ def _load_pivot_cached(market: str) -> Optional[dict]:
 
 
 # ============================================================
-# 板块榜单（live 计算，不读 DB —— 跟 token 钻取 snapshot 一致）
+# 板块榜单（读 sector_returns 表，由 remote_puller 在拉到新 pivot 后立即触发写入）
 # ============================================================
 def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
-    """从本地 pivot 缓存 live 算所有板块的等权聚合，按 ret_24h 降序（NaN 末尾）。
+    """返回最新 snapshot 的所有 sector_returns 行，按 ret_24h 降序（NaN 末尾）。
 
-    **不读 sector_returns 表**（虽然 sector_scanner 会写入，但只用于 phase 2 告警 +
-    历史趋势查询，不喂 UI）。这样保证：leaderboard 的 snapshot_at 跟同一会话里
-    /api/sectors/{cat}/tokens 的 snapshot_at 永远一致 —— 不会出现"板块 1h 是几小时前的，
-    token 1h 是 live"的错位。
+    sector_returns 的写入由两条触发路径保证新鲜:
+    1. **post-pull 同步触发**（主路径）: remote_puller 拉到新 pivot 后立刻跑 scanner.
+       DB 跟 pivot cache 的最新 bar 几乎实时对齐（差不到 1 秒）。
+    2. **小时 cron 兜底**（CronTrigger(minute=32)）: 主触发失败时由此修复.
+
+    /api/sectors/{cat}/tokens 仍然从 pivot 现算，但因为 (1) 几乎在 pull 完成的同一秒
+    就让 DB 同步了，两者 snapshot_at 在绝大多数时刻是一致的（除非用户恰好在 pull
+    过程中那 5-30s 窗口里拿到不一致的快照）。
     """
-    result = compute_all_sector_returns(session, use_pivot_cache=True)
+    latest_snap = session.execute(
+        select(SectorReturn.snapshot_at)
+        .order_by(SectorReturn.snapshot_at.desc())
+        .limit(1)
+    ).scalar()
+
+    if latest_snap is None:
+        return SectorLeaderboardResponse(snapshot_at=None, rows=[])
+
+    rows = session.execute(
+        select(SectorReturn).where(SectorReturn.snapshot_at == latest_snap)
+    ).scalars().all()
 
     # 排序：24h 降序，NaN 排末尾
-    def _sort_key(a) -> tuple[int, float]:
-        val = a.ret_24h
+    def _sort_key(r: SectorReturn) -> tuple[int, float]:
+        val = r.ret_24h
         if val is None:
             return (1, 0.0)
         return (0, -val)
 
-    aggregates_sorted = sorted(result.aggregates, key=_sort_key)
+    rows_sorted = sorted(rows, key=_sort_key)
 
     return SectorLeaderboardResponse(
-        snapshot_at=timestamp_pair(result.snapshot_at) if result.snapshot_at else None,
+        snapshot_at=timestamp_pair(latest_snap),
         rows=[
             SectorLeaderboardRow(
-                category=a.category,
-                group=a.group_name,
-                token_count=a.token_count,
-                ret_1h=a.ret_1h,
-                ret_24h=a.ret_24h,
-                ret_168h=a.ret_168h,
-                ret_720h=a.ret_720h,
+                category=r.category,
+                group=r.group_name,
+                token_count=r.token_count,
+                ret_1h=r.ret_1h,
+                ret_24h=r.ret_24h,
+                ret_168h=r.ret_168h,
+                ret_720h=r.ret_720h,
             )
-            for a in aggregates_sorted
+            for r in rows_sorted
         ],
     )
 
