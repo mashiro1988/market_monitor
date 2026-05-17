@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from loguru import logger
@@ -34,12 +34,12 @@ from services import remote_fs
 # ============================================================
 # 配置
 # ============================================================
-# 该值用于 APScheduler IntervalTrigger 注册 cycle 频率（api/app.py + run.py 里读）。
-# Phase 1 拉的 dataset 全是小时级（BMAC 30m 偏移每小时 :30 写一次 pivot,
-# exginfo 几乎不变），所以 1h 轮询完全够用 —— 最差延迟 1h 拿到新数据,
-# 跟 1h 数据周期对齐没有任何信息损失。
-# Phase 4 加 5min 粒度 focal symbol candle 时,要么降这个数到 60s,
-# 要么给 DatasetSpec 加 per-dataset poll_interval 字段做差异化轮询。
+# APScheduler IntervalTrigger 注册的 cycle 频率(api/app.py + run.py 里读).
+# 这是 **最快** 的 dataset 节奏 —— 每次 cycle 时,每个 dataset 各自看自己的
+# poll_interval_seconds,只有过期的才真去查 .ready/拉文件.
+# Phase 1 全部 hourly,所以 cycle 间隔也是 1h,跟 dataset 节奏对齐.
+# Phase 4 加 5min focal candle 后,把这个降到 300s,5min dataset 每次都查,
+# hourly dataset 每 12 次 cycle 才会被检查.
 POLL_INTERVAL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "3600"))
 REMOTE_OFFSET = os.getenv("REMOTE_OFFSET", "30m")  # BMAC 的 hour offset 子目录
 
@@ -53,6 +53,9 @@ class DatasetSpec:
     ready_dir: str
     ready_prefix: str
     resolve_pkl_rel: callable  # type: ignore[type-arg]
+    # 该 dataset 自己的轮询节奏(秒). cycle() 内部用这个判断是否到了下次该检查的时间.
+    # 默认 1h, hourly pivot 完全合适. Phase 4 的 5min focal candle 应该填 300.
+    poll_interval_seconds: int = 3600
 
 
 def _market_pivot_spot_pkl(cutoff_ts: int) -> str:
@@ -76,18 +79,21 @@ PHASE1_DATASETS: list[DatasetSpec] = [
         ready_dir=f"preprocess_1h_resample/{REMOTE_OFFSET}/",
         ready_prefix="market_pivot_spot",
         resolve_pkl_rel=_market_pivot_spot_pkl,
+        poll_interval_seconds=3600,  # BMAC 每小时 :30 写一次
     ),
     DatasetSpec(
         name="market_pivot_swap",
         ready_dir=f"preprocess_1h_resample/{REMOTE_OFFSET}/",
         ready_prefix="market_pivot_swap",
         resolve_pkl_rel=_market_pivot_swap_pkl,
+        poll_interval_seconds=3600,
     ),
     DatasetSpec(
         name="spot_swap_matches",
         ready_dir="exginfo/",
         ready_prefix="spot_swap_matches",
         resolve_pkl_rel=_spot_swap_matches_pkl,
+        poll_interval_seconds=86400,  # symbol 映射几乎不变, 一天一次足够
     ),
 ]
 
@@ -131,6 +137,11 @@ class RemotePuller:
             datasets={d.name: DatasetStatus(name=d.name) for d in datasets}
         )
         self._status_lock = threading.Lock()
+        # 每个 dataset 自己的"下次允许检查时间"。第一次启动时全为空 => 立即检查。
+        # 之后每次检查（无论拉到没拉到）都按 spec.poll_interval_seconds 推后。
+        self._next_check_at: dict[str, Optional[datetime]] = {
+            d.name: None for d in datasets
+        }
 
     # ---- 入口 ----
     def cycle(self) -> dict:
@@ -143,11 +154,20 @@ class RemotePuller:
             self._status.cycle_count += 1
             self._status.last_cycle_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        stats: dict = {"pulled": [], "errors": []}
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        stats: dict = {"pulled": [], "errors": [], "skipped_not_due": []}
         pivot_was_updated = False
 
-        # 1) 顺序拉每个 dataset
+        # 1) 顺序看每个 dataset, 只有到期的才检查
         for spec in self._datasets:
+            next_at = self._next_check_at.get(spec.name)
+            if next_at is not None and next_at > now:
+                stats["skipped_not_due"].append(spec.name)
+                continue
+
+            # 推后下次检查时间, 不管这次有没有拉到都按节奏走
+            self._next_check_at[spec.name] = now + timedelta(seconds=spec.poll_interval_seconds)
+
             try:
                 pulled = self._pull_if_newer(spec)
                 if pulled:
