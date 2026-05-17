@@ -20,10 +20,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import config
-from models.sector import CmcSymbolCategory, SectorReturn
+from models.sector import CmcSymbolCategory
 from scanners.sector_scanner import (
     RETURN_LOOKBACKS,
     _compute_returns_for_close,
+    compute_all_sector_returns,
     normalize_pivot_symbol,
 )
 from schemas.sectors import (
@@ -75,45 +76,40 @@ def _load_pivot_cached(market: str) -> Optional[dict]:
 
 
 # ============================================================
-# 板块榜单
+# 板块榜单（live 计算，不读 DB —— 跟 token 钻取 snapshot 一致）
 # ============================================================
 def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
-    """返回最新 snapshot 的所有 sector_returns 行，按 ret_24h 降序（NaN 末尾）。"""
-    latest_snap = session.execute(
-        select(SectorReturn.snapshot_at)
-        .order_by(SectorReturn.snapshot_at.desc())
-        .limit(1)
-    ).scalar()
+    """从本地 pivot 缓存 live 算所有板块的等权聚合，按 ret_24h 降序（NaN 末尾）。
 
-    if latest_snap is None:
-        return SectorLeaderboardResponse(snapshot_at=None, rows=[])
-
-    rows = session.execute(
-        select(SectorReturn).where(SectorReturn.snapshot_at == latest_snap)
-    ).scalars().all()
+    **不读 sector_returns 表**（虽然 sector_scanner 会写入，但只用于 phase 2 告警 +
+    历史趋势查询，不喂 UI）。这样保证：leaderboard 的 snapshot_at 跟同一会话里
+    /api/sectors/{cat}/tokens 的 snapshot_at 永远一致 —— 不会出现"板块 1h 是几小时前的，
+    token 1h 是 live"的错位。
+    """
+    result = compute_all_sector_returns(session, use_pivot_cache=True)
 
     # 排序：24h 降序，NaN 排末尾
-    def _sort_key(r: SectorReturn) -> tuple[int, float]:
-        val = r.ret_24h
+    def _sort_key(a) -> tuple[int, float]:
+        val = a.ret_24h
         if val is None:
             return (1, 0.0)
         return (0, -val)
 
-    rows_sorted = sorted(rows, key=_sort_key)
+    aggregates_sorted = sorted(result.aggregates, key=_sort_key)
 
     return SectorLeaderboardResponse(
-        snapshot_at=timestamp_pair(latest_snap),
+        snapshot_at=timestamp_pair(result.snapshot_at) if result.snapshot_at else None,
         rows=[
             SectorLeaderboardRow(
-                category=r.category,
-                group=r.group_name,
-                token_count=r.token_count,
-                ret_1h=r.ret_1h,
-                ret_24h=r.ret_24h,
-                ret_168h=r.ret_168h,
-                ret_720h=r.ret_720h,
+                category=a.category,
+                group=a.group_name,
+                token_count=a.token_count,
+                ret_1h=a.ret_1h,
+                ret_24h=a.ret_24h,
+                ret_168h=a.ret_168h,
+                ret_720h=a.ret_720h,
             )
-            for r in rows_sorted
+            for a in aggregates_sorted
         ],
     )
 

@@ -3,6 +3,10 @@
 读取本地 cache 里的 BMAC pivot pkl（spot/swap），结合 cmc_symbol_categories 表的
 symbol→板块映射，算各板块等权平均涨跌（1h/24h/168h/720h），写 sector_returns 表。
 
+公共计算函数 `compute_all_sector_returns()` 被 SectorScanner（持久化用）和
+sector_service.get_leaderboard（live 读取用）共享，确保 UI 永远和 token 钻取
+来自同一份 pivot —— 不会出现"leaderboard 是 2 小时前 snapshot，token 是 live"的错位。
+
 约定：
 - 一行 = 一个 (snapshot_at, CMC category) — 同一 snapshot_at 一次 scan 写 N 行
 - snapshot_at = pivot 的最新 candle_begin_time（UTC naive）
@@ -14,6 +18,7 @@ symbol→板块映射，算各板块等权平均涨跌（1h/24h/168h/720h），�
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -150,6 +155,155 @@ def _compute_returns_for_close(close_df: pd.DataFrame) -> tuple[Optional[datetim
 
 
 # ============================================================
+# 公共计算（被 scanner 持久化路径 + service live 读取路径共享）
+# ============================================================
+@dataclass
+class SectorAggregate:
+    """单个板块的等权聚合结果。"""
+    category: str
+    group_name: Optional[str]
+    token_count: int
+    ret_1h: Optional[float]
+    ret_24h: Optional[float]
+    ret_168h: Optional[float]
+    ret_720h: Optional[float]
+
+
+@dataclass
+class SectorComputeResult:
+    snapshot_at: Optional[datetime]
+    aggregates: list[SectorAggregate]
+    active_symbols: int
+    considered_cats: int
+    skipped_thin: list[str]
+    skipped_reason: Optional[str] = None  # 失败时填
+
+
+def _load_per_symbol_returns(
+    *,
+    use_pivot_cache: bool = False,
+) -> tuple[Optional[datetime], dict[str, dict[str, float]]]:
+    """加载 spot + swap pivot，算每个规范化 symbol 的多周期涨跌（现货优先）。
+
+    Args:
+        use_pivot_cache: True 时调 sector_service._load_pivot_cached（mtime 缓存，
+                         供 live 读取路径用以避免每次反序列化）；False 时调
+                         _load_pivot（无缓存，更适合定时 scanner，每次都用最新文件）
+
+    Returns:
+        (snapshot_at, {normalized_symbol: {ret_1h: float, ...}})
+    """
+    if use_pivot_cache:
+        # 延迟 import 避免循环 (sector_service 导入了 sector_scanner)
+        from services.sector_service import _load_pivot_cached as _loader
+    else:
+        _loader = _load_pivot
+
+    spot_pivot = _loader("spot")
+    swap_pivot = _loader("swap")
+    if spot_pivot is None and swap_pivot is None:
+        return None, {}
+
+    snapshot_at: Optional[datetime] = None
+    spot_returns: dict[str, dict[str, float]] = {}
+    swap_returns: dict[str, dict[str, float]] = {}
+
+    if spot_pivot is not None:
+        s_at, spot_returns = _compute_returns_for_close(spot_pivot["close"])
+        snapshot_at = s_at
+    if swap_pivot is not None:
+        s_at, swap_returns = _compute_returns_for_close(swap_pivot["close"])
+        if snapshot_at is None or (s_at is not None and s_at > snapshot_at):
+            snapshot_at = s_at
+
+    # 规范化 + 合并（spot 覆盖 swap）
+    sym_to_returns: dict[str, dict[str, float]] = {}
+    for col, rets in swap_returns.items():
+        nsym = normalize_pivot_symbol(col)
+        if nsym:
+            sym_to_returns[nsym] = rets
+    for col, rets in spot_returns.items():
+        nsym = normalize_pivot_symbol(col)
+        if nsym:
+            sym_to_returns[nsym] = rets
+
+    return snapshot_at, sym_to_returns
+
+
+def compute_all_sector_returns(
+    session: Session, *, use_pivot_cache: bool = False
+) -> SectorComputeResult:
+    """对当前本地 pivot + DB 板块映射做完整的板块聚合计算（不写 DB）。
+
+    被两边共用:
+    - SectorScanner.scan() 调，拿到结果后写 DB
+    - sector_service.get_leaderboard() 调，拿到结果直接序列化给前端
+    保证两者用同一份 pivot 算出同一个 snapshot_at + 同一组聚合数。
+    """
+    snapshot_at, sym_to_returns = _load_per_symbol_returns(use_pivot_cache=use_pivot_cache)
+
+    if snapshot_at is None:
+        return SectorComputeResult(
+            snapshot_at=None, aggregates=[], active_symbols=0,
+            considered_cats=0, skipped_thin=[], skipped_reason="no_pivot",
+        )
+    if not sym_to_returns:
+        return SectorComputeResult(
+            snapshot_at=snapshot_at, aggregates=[], active_symbols=0,
+            considered_cats=0, skipped_thin=[], skipped_reason="no_symbols",
+        )
+
+    cat_to_syms = cmc_client.load_category_to_symbols(session)
+    if not cat_to_syms:
+        return SectorComputeResult(
+            snapshot_at=snapshot_at, aggregates=[], active_symbols=len(sym_to_returns),
+            considered_cats=0, skipped_thin=[], skipped_reason="no_mapping",
+        )
+
+    whitelist = set(config.all_whitelisted_cmc_categories())
+    aggregates: list[SectorAggregate] = []
+    considered_cats = 0
+    skipped_thin: list[str] = []
+
+    for category, cmc_symbols in sorted(cat_to_syms.items()):
+        if category not in whitelist:
+            continue
+        considered_cats += 1
+        matched = cmc_symbols & sym_to_returns.keys()
+        if len(matched) < MIN_TOKENS_PER_SECTOR:
+            skipped_thin.append(f"{category}({len(matched)})")
+            continue
+        agg: dict[str, list[float]] = {k: [] for k in RETURN_LOOKBACKS}
+        for sym in matched:
+            rets = sym_to_returns[sym]
+            for ret_name in RETURN_LOOKBACKS:
+                if ret_name in rets:
+                    agg[ret_name].append(rets[ret_name])
+        means: dict[str, Optional[float]] = {
+            ret_name: (round(sum(values) / len(values), 4) if values else None)
+            for ret_name, values in agg.items()
+        }
+        aggregates.append(SectorAggregate(
+            category=category,
+            group_name=config.cmc_category_to_group(category),
+            token_count=len(matched),
+            ret_1h=means["ret_1h"],
+            ret_24h=means["ret_24h"],
+            ret_168h=means["ret_168h"],
+            ret_720h=means["ret_720h"],
+        ))
+
+    return SectorComputeResult(
+        snapshot_at=snapshot_at,
+        aggregates=aggregates,
+        active_symbols=len(sym_to_returns),
+        considered_cats=considered_cats,
+        skipped_thin=skipped_thin,
+        skipped_reason=None,
+    )
+
+
+# ============================================================
 # Scanner 主类
 # ============================================================
 class SectorScanner:
@@ -160,129 +314,51 @@ class SectorScanner:
 
     def scan(self) -> dict:
         """跑一次完整扫描。返回 stats dict。"""
-        # 1. 加载本地 cache 的两份 pivot
-        spot_pivot = _load_pivot("spot")
-        swap_pivot = _load_pivot("swap")
-
-        if spot_pivot is None and swap_pivot is None:
-            logger.warning("sector_scan 跳过：spot / swap pivot 都没拉到")
-            return {"sectors_written": 0, "skipped_reason": "no_pivot"}
-
-        # 2. 从 close 算每 symbol 多周期涨跌
-        spot_returns: dict[str, dict[str, float]] = {}
-        swap_returns: dict[str, dict[str, float]] = {}
-        snapshot_at: Optional[datetime] = None
-
-        if spot_pivot is not None:
-            s_at, spot_returns = _compute_returns_for_close(spot_pivot["close"])
-            snapshot_at = s_at
-        if swap_pivot is not None:
-            s_at, swap_returns = _compute_returns_for_close(swap_pivot["close"])
-            # 选 spot 与 swap 中较新的 snapshot_at（应该一致，但保险）
-            if snapshot_at is None or (s_at is not None and s_at > snapshot_at):
-                snapshot_at = s_at
-
-        if snapshot_at is None:
-            logger.warning("sector_scan 跳过：pivot 是空的")
-            return {"sectors_written": 0, "skipped_reason": "empty_pivot"}
-
-        # 3. 把 pivot 的 symbol 列规范化（pivot_col → normalized_symbol → returns）
-        #    现货优先：若 spot 有 X 也算了，swap 也有 X 也算了，最终用 spot 的
-        sym_to_returns: dict[str, dict[str, float]] = {}
-        for col, rets in swap_returns.items():
-            nsym = normalize_pivot_symbol(col)
-            if not nsym:
-                continue
-            sym_to_returns[nsym] = rets
-        # spot 覆盖 swap（spot 优先）
-        for col, rets in spot_returns.items():
-            nsym = normalize_pivot_symbol(col)
-            if not nsym:
-                continue
-            sym_to_returns[nsym] = rets
-
-        if not sym_to_returns:
-            logger.warning("sector_scan 跳过：规范化后无可用 symbol")
-            return {"sectors_written": 0, "skipped_reason": "no_symbols"}
-
-        # 4. 读 cmc 板块映射
         own_session = self._injected_session is None
         session = self._injected_session or SessionLocal()
         try:
-            cat_to_syms = cmc_client.load_category_to_symbols(session)
-            if not cat_to_syms:
-                logger.warning("sector_scan 跳过：cmc_symbol_categories 表为空，"
-                               "先跑 python run.py refresh-sectors")
-                return {"sectors_written": 0, "skipped_reason": "no_mapping"}
+            result = compute_all_sector_returns(session, use_pivot_cache=False)
 
-            # 5. 只算白名单内的板块（cat_to_syms 已经只包含白名单刷新过的板块；
-            #    但白名单可能更新后还没刷，这里再做一次保险过滤）
-            whitelist = set(config.all_whitelisted_cmc_categories())
+            if result.skipped_reason:
+                logger.warning("sector_scan 跳过: {}", result.skipped_reason)
+                return {"sectors_written": 0, "skipped_reason": result.skipped_reason}
 
-            # 6. 对每个板块算等权平均
-            rows_to_write: list[SectorReturn] = []
-            considered_cats = 0
-            skipped_thin: list[str] = []
-
-            for category, cmc_symbols in sorted(cat_to_syms.items()):
-                if category not in whitelist:
-                    continue
-                considered_cats += 1
-
-                # 交集：CMC 列出 ∩ BMAC pivot 实际有数据
-                matched = cmc_symbols & sym_to_returns.keys()
-                if len(matched) < MIN_TOKENS_PER_SECTOR:
-                    skipped_thin.append(f"{category}({len(matched)})")
-                    continue
-
-                # 等权平均（pandas 向量化也行，但行数小直接 Python 算更清晰）
-                agg: dict[str, list[float]] = {k: [] for k in RETURN_LOOKBACKS}
-                for sym in matched:
-                    rets = sym_to_returns[sym]
-                    for ret_name in RETURN_LOOKBACKS:
-                        if ret_name in rets:
-                            agg[ret_name].append(rets[ret_name])
-
-                means: dict[str, Optional[float]] = {}
-                for ret_name, values in agg.items():
-                    means[ret_name] = (
-                        round(sum(values) / len(values), 4) if values else None
-                    )
-
-                rows_to_write.append(SectorReturn(
-                    snapshot_at=snapshot_at,
-                    category=category,
-                    group_name=config.cmc_category_to_group(category),
-                    token_count=len(matched),
-                    ret_1h=means["ret_1h"],
-                    ret_24h=means["ret_24h"],
-                    ret_168h=means["ret_168h"],
-                    ret_720h=means["ret_720h"],
-                ))
-
-            # 7. 写库：先删同 snapshot_at 的旧行（处理重跑），再写新行
-            if rows_to_write:
-                session.execute(
-                    delete(SectorReturn).where(SectorReturn.snapshot_at == snapshot_at)
+            # 写库：先删同 snapshot_at 的旧行（处理重跑），再写新行
+            rows = [
+                SectorReturn(
+                    snapshot_at=result.snapshot_at,
+                    category=a.category,
+                    group_name=a.group_name,
+                    token_count=a.token_count,
+                    ret_1h=a.ret_1h,
+                    ret_24h=a.ret_24h,
+                    ret_168h=a.ret_168h,
+                    ret_720h=a.ret_720h,
                 )
-                session.add_all(rows_to_write)
+                for a in result.aggregates
+            ]
+            if rows:
+                session.execute(
+                    delete(SectorReturn).where(SectorReturn.snapshot_at == result.snapshot_at)
+                )
+                session.add_all(rows)
                 session.commit()
 
             logger.info(
-                "sector_scan 完成: snapshot_at={} 写 {} 板块（白名单 {}/{} 命中, "
+                "sector_scan 完成: snapshot_at={} 写 {} 板块（考虑 {}/{}, "
                 "活跃 symbol 不足跳过 {}）",
-                snapshot_at, len(rows_to_write), considered_cats, len(whitelist),
-                len(skipped_thin),
+                result.snapshot_at, len(rows), result.considered_cats,
+                len(config.all_whitelisted_cmc_categories()), len(result.skipped_thin),
             )
-            if skipped_thin:
-                logger.debug("token<{} 跳过: {}", MIN_TOKENS_PER_SECTOR, skipped_thin)
+            if result.skipped_thin:
+                logger.debug("token<{} 跳过: {}", MIN_TOKENS_PER_SECTOR, result.skipped_thin)
 
             return {
-                "snapshot_at": snapshot_at,
-                "sectors_written": len(rows_to_write),
-                "considered_cats": considered_cats,
-                "skipped_thin": len(skipped_thin),
-                "active_symbols": len(sym_to_returns),
+                "snapshot_at": result.snapshot_at,
+                "sectors_written": len(rows),
+                "considered_cats": result.considered_cats,
+                "skipped_thin": len(result.skipped_thin),
+                "active_symbols": result.active_symbols,
             }
         except Exception:
             if own_session:
