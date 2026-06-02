@@ -333,7 +333,7 @@ SECTOR_WHITELIST: dict[str, list[str]] = {
     ],
     "DeFi": [
         "Decentralized Exchange (DEX) Token", "Lending & Borrowing", "Yield Farming",
-        "Liquid Staking Derivatives", "Derivatives", "Perp DEX coins",
+        "Liquid Staking Derivatives", "Derivatives", "Perpetuals",
     ],
     "AI 板块": [
         "AI & Big Data", "AI Agents", "AI Memes", "AI Agent Launchpad",
