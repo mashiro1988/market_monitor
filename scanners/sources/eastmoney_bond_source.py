@@ -127,7 +127,9 @@ class EastmoneyBondQuoteSource(BaseSource):
         # 找不到基线快照。改用 scan_time 后每 5m 都会落一条新 snapshot（价格不变时
         # change_pct = 0%），让窗口对比始终有 baseline。
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        proxies = config.proxies()
+        # 东方财富是境内行情源；push2.eastmoney.com 会拒绝境外代理出口 IP，
+        # 因此强制直连、绕开全局代理（值设 None 会把环境变量里的代理也一并清除）。
+        proxies = {"http": None, "https": None}
         for symbol, info in self.bond_quotes.items():
             secid = info.get("secid")
             if not secid:
@@ -164,7 +166,8 @@ class EastmoneyBondQuoteSource(BaseSource):
             probes = list(self.bond_quotes.values())
             if not probes:
                 return False
-            proxies = config.proxies()
+            # 同 fetch()：境内源强制直连，绕开全局代理。
+            proxies = {"http": None, "https": None}
             response = requests.get(
                 self.URL,
                 params={"secid": probes[0].get("secid"), "fields": self.FIELDS},
