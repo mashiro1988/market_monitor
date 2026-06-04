@@ -32,6 +32,7 @@ frontend/vite.config.d.ts
 
 # ===== IDE / AI tooling (本地自用，不入库) =====
 .claude/
+.codex_tmp/
 .vscode/
 .idea/
 *.swp
