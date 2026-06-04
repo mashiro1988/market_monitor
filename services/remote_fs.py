@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import shutil
 import stat
 import sys
 import threading
@@ -131,6 +132,13 @@ def _connect_kwargs() -> dict:
 REMOTE_DATA_ROOT: str = os.getenv("REMOTE_DATA_ROOT", "/root/data_center/data/").rstrip("/") + "/"
 LOCAL_CACHE_DIR: Path = Path(os.getenv("LOCAL_CACHE_DIR", "data/remote_cache")).resolve()
 SFTP_READ_TIMEOUT: float = float(os.getenv("REMOTE_READ_TIMEOUT", "30"))
+
+# 数据后端：'sftp'（默认，连远程 BMAC）| 'local'（直接读同机产出目录，无 SSH/凭据）
+REMOTE_BACKEND: str = os.getenv("REMOTE_BACKEND", "sftp").strip().lower()
+
+
+def _is_local_backend() -> bool:
+    return REMOTE_BACKEND == "local"
 
 
 # ============================================================
@@ -288,6 +296,16 @@ def list_dir(remote_path: str) -> list[tuple[str, int, float]]:
     """列目录。返回 [(filename, size, mtime), ...]。
     paramiko 对某些服务器/路径在 listdir_attr 上不接受 trailing slash，统一去掉。"""
     cleaned = remote_path.rstrip("/") or "/"
+    if _is_local_backend():
+        local_entries: list[tuple[str, int, float]] = []
+        with os.scandir(cleaned) as it:
+            for entry in it:
+                try:
+                    st = entry.stat()
+                except OSError:
+                    continue
+                local_entries.append((entry.name, int(st.st_size), float(st.st_mtime)))
+        return local_entries
     with _session.sftp() as sftp:
         entries = []
         for attr in sftp.listdir_attr(cleaned):
@@ -297,6 +315,12 @@ def list_dir(remote_path: str) -> list[tuple[str, int, float]]:
 
 def stat_remote(remote_path: str) -> Optional[tuple[int, float]]:
     """返回 (size, mtime)。文件不存在返回 None。"""
+    if _is_local_backend():
+        try:
+            st = os.stat(remote_path)
+            return (int(st.st_size), float(st.st_mtime))
+        except FileNotFoundError:
+            return None
     try:
         with _session.sftp() as sftp:
             attr = sftp.stat(remote_path)
@@ -358,6 +382,23 @@ def _atomic_write_from_sftp(sftp, remote_path: str, local_path: Path) -> None:
         raise
 
 
+def _atomic_copy_local(src_path: str, local_path: Path) -> None:
+    """本地后端：把 src_path 原子拷到 local_path（先写 .tmp 再 os.replace）。
+    与 _atomic_write_from_sftp 同样的原子语义，只是源在本地盘。
+    """
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = local_path.with_suffix(local_path.suffix + ".tmp")
+    try:
+        shutil.copy2(src_path, str(tmp))
+        os.replace(tmp, local_path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def pull(remote_rel_path: str, local_name: Optional[str] = None, *, force: bool = False) -> Optional[Path]:
     """拉一个远程文件到本地缓存。
 
@@ -391,14 +432,17 @@ def pull(remote_rel_path: str, local_name: Optional[str] = None, *, force: bool 
         if entry and entry.size == size and entry.mtime == mtime and local_path.exists():
             return local_path
 
-    # 3) 拉
-    logger.info("拉取远程文件: {} → {} ({} bytes)", remote_full, local_path.name, size)
+    # 3) 拉/拷
+    logger.info("取数据文件: {} → {} ({} bytes)", remote_full, local_path.name, size)
     started = time.time()
     try:
-        with _session.sftp() as sftp:
-            _atomic_write_from_sftp(sftp, remote_full, local_path)
+        if _is_local_backend():
+            _atomic_copy_local(remote_full, local_path)
+        else:
+            with _session.sftp() as sftp:
+                _atomic_write_from_sftp(sftp, remote_full, local_path)
     except Exception as exc:
-        logger.warning("pull 失败（下载）: {} ({})", remote_full, exc)
+        logger.warning("pull 失败（取文件）: {} ({})", remote_full, exc)
         return local_path if local_path.exists() else None
     elapsed = time.time() - started
     logger.info("拉取完成: {} (耗时 {:.1f}s)", local_path.name, elapsed)
