@@ -126,9 +126,17 @@ class AlertEngine:
                 target_symbol = rule.params.get("symbol")
                 window_minutes = int(rule.params.get("window_minutes", 0) or 0)
 
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                max_staleness = timedelta(
+                    minutes=max(0, int(getattr(config, "ALERT_PRICE_MAX_STALENESS_MINUTES", 30)))
+                )
+
                 triggered = []
                 for r in price_records:
                     if target_symbol and r.symbol != target_symbol:
+                        continue
+                    # 陈旧数据保护：源停更（休市/掉线）时不对旧 bar 反复告警
+                    if self._is_stale_for_alert(r.timestamp, now, max_staleness):
                         continue
                     move = self._price_window_move(r, window_minutes)
                     if move is not None and abs(move.change_pct) >= threshold:
@@ -153,6 +161,18 @@ class AlertEngine:
 
         for rule, title, content in alerts_to_send:
             self._dispatch(rule, title, content)
+
+    @staticmethod
+    def _is_stale_for_alert(ts, now: datetime, max_staleness: timedelta) -> bool:
+        """当前价 bar 是否过旧、不应告警（源停更：休市/周末/掉线）。
+        max_staleness<=0 关闭此保护（永远不算 stale）。"""
+        if max_staleness.total_seconds() <= 0:
+            return False
+        if ts is None:
+            return True
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        return (now - ts) > max_staleness
 
     @staticmethod
     def _price_window_move(record: PriceRecord, window_minutes: int) -> PriceWindowMove | None:

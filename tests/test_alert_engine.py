@@ -1,7 +1,7 @@
 """Tests for alert message formatting."""
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -125,7 +125,7 @@ def test_price_alert_message_includes_time_window_and_price_range(monkeypatch):
             symbol="ETH/USDT",
             name="ETH",
             price=2361.99,
-            timestamp=datetime(2026, 4, 26, 18, 15),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
         )
     ])
 
@@ -292,3 +292,61 @@ def test_hourly_threshold_summary_uses_market_overview_default_symbols(monkeypat
     assert [summary.symbol for summary in summaries] == ["NQ=F"]
     assert summaries[0].trigger_count == 1
     assert summaries[0].strongest_move.change_pct == pytest.approx(0.42)
+
+
+def _nq_spike_engine():
+    engine = AlertEngine.__new__(AlertEngine)
+    engine.rules = [
+        AlertRule(
+            name="us_futures_spike",
+            rule_type="price_change",
+            params={"symbol": "NQ=F", "threshold_pct": 0.3, "window_minutes": 15},
+            channels=["wechat_work"],
+            cooldown_minutes=0,
+            enabled=True,
+        )
+    ]
+    return engine
+
+
+_NQ_MOVE = PriceWindowMove(
+    change_pct=0.72,
+    start_time=datetime(2026, 6, 5, 20, 45),
+    end_time=datetime(2026, 6, 5, 21, 0),
+    start_price=28818.0,
+    end_price=29026.5,
+    low_price=28812.75,
+    high_price=29026.5,
+)
+
+
+def test_stale_price_bar_does_not_alert(monkeypatch):
+    """休市/源停更：当前价 bar 过旧时不应反复告警（修复周末期货刷屏）。"""
+    engine = _nq_spike_engine()
+    monkeypatch.setattr(engine, "_is_in_cooldown", lambda *a: False)
+    monkeypatch.setattr(engine, "_price_window_move", lambda record, window: _NQ_MOVE)
+    sent = []
+    monkeypatch.setattr(engine, "_dispatch", lambda *a: sent.append(a))
+
+    stale_ts = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
+    engine.evaluate_prices([
+        PriceRecord(asset_class="futures", symbol="NQ=F", name="纳指期货",
+                    price=29026.5, timestamp=stale_ts)
+    ])
+    assert sent == [], "过旧的 bar 不应触发告警"
+
+
+def test_fresh_price_bar_alerts(monkeypatch):
+    """新鲜 bar 仍正常告警。"""
+    engine = _nq_spike_engine()
+    monkeypatch.setattr(engine, "_is_in_cooldown", lambda *a: False)
+    monkeypatch.setattr(engine, "_price_window_move", lambda record, window: _NQ_MOVE)
+    sent = []
+    monkeypatch.setattr(engine, "_dispatch", lambda *a: sent.append(a))
+
+    fresh_ts = datetime.now(timezone.utc).replace(tzinfo=None)
+    engine.evaluate_prices([
+        PriceRecord(asset_class="futures", symbol="NQ=F", name="纳指期货",
+                    price=29026.5, timestamp=fresh_ts)
+    ])
+    assert sent, "新鲜 bar 应正常告警"
