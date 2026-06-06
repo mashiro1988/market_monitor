@@ -31,6 +31,19 @@ class YFinancePriceSource(BaseSource):
                 if info.get("source") == "yfinance"
             },
         }
+        # 浏览器指纹会话：绕过 Yahoo 对数据中心 IP 的 TLS 指纹限流（YFRateLimitError）。
+        # 本机住宅 IP 不需要，但部署到云服务器（数据中心 IP）必须，否则 yfinance 全 429。
+        self._session = self._build_session()
+
+    @staticmethod
+    def _build_session():
+        """构造 curl_cffi Chrome 指纹会话；不可用时返回 None（yfinance 退回默认会话）。"""
+        try:
+            from curl_cffi import requests as curl_requests
+            return curl_requests.Session(impersonate="chrome")
+        except Exception as exc:  # pragma: no cover - 仅依赖缺失时触发
+            logger.warning("curl_cffi 浏览器会话不可用，yfinance 退回默认会话: {}", exc)
+            return None
 
     @staticmethod
     def _to_utc_naive(ts) -> datetime | None:
@@ -149,6 +162,7 @@ class YFinancePriceSource(BaseSource):
                     auto_adjust=True,
                     progress=False,
                     threads=True,
+                    session=self._session,
                 )
 
                 if df.empty:
@@ -223,6 +237,7 @@ class YFinancePriceSource(BaseSource):
                     auto_adjust=True,
                     progress=False,
                     threads=True,
+                    session=self._session,
                 )
 
                 if df.empty:
@@ -254,7 +269,7 @@ class YFinancePriceSource(BaseSource):
 
     def health_check(self) -> bool:
         try:
-            t = yf.Ticker("^GSPC")
+            t = yf.Ticker("^GSPC", session=self._session)
             info = t.fast_info
             return info is not None
         except Exception:
