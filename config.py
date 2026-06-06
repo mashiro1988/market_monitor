@@ -287,6 +287,12 @@ ALERT_RULES = [
 ALERT_PRICE_MAX_STALENESS_MINUTES = int(os.getenv("ALERT_PRICE_MAX_STALENESS_MINUTES", "30"))
 
 # ============================================================
+# 标注事件合并
+# ============================================================
+# 相邻同方向异动段的静默间隔 ≤ 此分钟数则并为同一事件窗口（合成一个跨段窗口）。
+ANNOTATION_EVENT_MERGE_GAP_MINUTES = int(os.getenv("ANNOTATION_EVENT_MERGE_GAP_MINUTES", "60"))
+
+# ============================================================
 # Dune Analytics 配置（保留）
 # ============================================================
 DUNE_QUERY_ID_ETH_TOP100_NETFLOW = os.getenv("DUNE_QUERY_ID_ETH_TOP100_NETFLOW", "")

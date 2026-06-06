@@ -217,8 +217,8 @@ def load_price_windows(
         (row.window_start, row.window_end): row.id for row in annotation_rows
     }
 
-    # Step 1：扫所有快照，找出全部超阈值的滚动窗口（"原始触发"）。
-    triggers: list[tuple[datetime, dict]] = []  # (window_end_dt, schema_kwargs)
+    # Step 1：扫快照，收集超阈值触发；保留原始 datetime 供合并用。
+    triggers: list[dict] = []
     for current in rows:
         if current.timestamp < display_cutoff:
             continue
@@ -229,50 +229,72 @@ def load_price_windows(
         change_pct = ((current.price - baseline.price) / abs(baseline.price)) * 100
         if abs(change_pct) < threshold_pct:
             continue
-        annotation_id = annotation_index.get((baseline.timestamp, current.timestamp))
-        triggers.append((
-            current.timestamp,
-            {
-                "symbol": current.symbol,
-                "asset_class": current.asset_class,
-                "name": current.name,
-                "window_start": timestamp_pair(baseline.timestamp),
-                "window_end": timestamp_pair(current.timestamp),
-                "configured_window_minutes": window_minutes,
-                "actual_window_minutes": round((current.timestamp - baseline.timestamp).total_seconds() / 60, 1),
-                "price_start": baseline.price,
-                "price_end": current.price,
-                "change_pct": change_pct,
-                "annotation_id": annotation_id,
-            },
-        ))
+        triggers.append({
+            "start_dt": baseline.timestamp,
+            "end_dt": current.timestamp,
+            "price_start": baseline.price,
+            "price_end": current.price,
+            "sign": 1 if change_pct >= 0 else -1,
+            "asset_class": current.asset_class,
+            "name": current.name,
+        })
 
-    # Step 2：按时间正序聚合连续 run。两个相邻触发同号且 window_end 间隔 ≤ window_minutes
-    # 时视为同一连续异动；run 的第一个为 primary，其余为 secondary（is_primary=False）。
-    triggers.sort(key=lambda t: t[0])
-    enriched: list[tuple[datetime, datetime, PriceWindowSchema]] = []  # (run_anchor_dt, end_dt, schema)
-    last_end_dt: datetime | None = None
-    last_sign: int | None = None
-    run_anchor_dt: datetime | None = None
-    for end_dt, kwargs in triggers:
-        sign = 1 if kwargs["change_pct"] >= 0 else -1
-        is_primary = (
-            last_end_dt is None
-            or sign != last_sign
-            or (end_dt - last_end_dt).total_seconds() / 60 > window_minutes
-        )
-        if is_primary:
-            run_anchor_dt = end_dt
-        kwargs["is_primary"] = is_primary
-        last_end_dt = end_dt
-        last_sign = sign
-        enriched.append((run_anchor_dt, end_dt, PriceWindowSchema(**kwargs)))
+    if not triggers:
+        return []
 
-    # Step 3：排序——最新的 run 排前面（按 anchor DESC），run 内部按 end ASC（primary 在前）。
-    # 用稳定排序两步走：先按 end ASC，再按 anchor DESC，得到所需顺序。
-    enriched.sort(key=lambda t: t[1])
-    enriched.sort(key=lambda t: t[0], reverse=True)
-    return [t[2] for t in enriched][:200]
+    # Step 2：按 window_end 升序，把同方向、相邻段静默间隔 ≤ merge_gap 的触发聚成一个事件。
+    triggers.sort(key=lambda t: t["end_dt"])
+    merge_gap = timedelta(minutes=max(1, int(getattr(config, "ANNOTATION_EVENT_MERGE_GAP_MINUTES", 60))))
+    events: list[list[dict]] = []
+    for t in triggers:
+        if (
+            events
+            and events[-1][-1]["sign"] == t["sign"]
+            and (t["start_dt"] - events[-1][-1]["end_dt"]) <= merge_gap
+        ):
+            events[-1].append(t)
+        else:
+            events.append([t])
+
+    # Step 3：每个事件合成一个跨段窗口（净 + 峰值 + 振幅 + 段数）。
+    windows: list[tuple[datetime, PriceWindowSchema]] = []
+    for ev in events:
+        first, last = ev[0], ev[-1]
+        w_start, w_end = first["start_dt"], last["end_dt"]
+        p_start, p_end = first["price_start"], last["price_end"]
+        if not p_start:
+            continue
+        net_pct = (p_end - p_start) / abs(p_start) * 100
+        span_prices = [
+            r.price for r in rows
+            if r.price is not None and w_start <= r.timestamp <= w_end
+        ]
+        low_price = min(span_prices) if span_prices else min(p_start, p_end)
+        high_price = max(span_prices) if span_prices else max(p_start, p_end)
+        extreme = high_price if first["sign"] >= 0 else low_price
+        peak_pct = (extreme - p_start) / abs(p_start) * 100
+        windows.append((w_end, PriceWindowSchema(
+            symbol=symbol,
+            asset_class=first["asset_class"],
+            name=first["name"],
+            window_start=timestamp_pair(w_start),
+            window_end=timestamp_pair(w_end),
+            configured_window_minutes=window_minutes,
+            actual_window_minutes=round((w_end - w_start).total_seconds() / 60, 1),
+            price_start=p_start,
+            price_end=p_end,
+            change_pct=net_pct,
+            peak_change_pct=peak_pct,
+            low_price=low_price,
+            high_price=high_price,
+            segment_count=len(ev),
+            annotation_id=annotation_index.get((w_start, w_end)),
+            is_primary=True,
+        )))
+
+    # 最新事件在前；截断 200。
+    windows.sort(key=lambda t: t[0], reverse=True)
+    return [w for _, w in windows][:200]
 
 
 def load_context_news(session: Session, context_start: datetime, context_end: datetime) -> ContextNewsResponse:

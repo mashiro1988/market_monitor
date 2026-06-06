@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CornerDownRight, Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
+import { Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
 
@@ -535,7 +535,7 @@ export function AnnotationsPage() {
                 </header>
                 <div className="annotation-pair-panel-body">
                   <ul className="window-list">
-                    {groups.map(({ primary, secondaries }) => {
+                    {groups.map(({ primary }) => {
                       const key = windowKey(primary);
                       const isActive = key === activeKey;
                       const tone = primary.change_pct >= 0 ? "up" : "down";
@@ -556,28 +556,10 @@ export function AnnotationsPage() {
                             <span className="window-item-pct">
                               {sign}{primary.change_pct.toFixed(2)}%
                             </span>
+                            <span className="window-item-pct" title="峰值（相对起点价的最大偏离）">
+                              峰 {primary.peak_change_pct >= 0 ? "+" : ""}{primary.peak_change_pct.toFixed(2)}%
+                            </span>
                           </button>
-                          {secondaries.length ? (
-                            <ul className="window-secondary-list">
-                              {secondaries.map((s) => {
-                                const sTone = s.change_pct >= 0 ? "up" : "down";
-                                const sSign = s.change_pct > 0 ? "+" : "";
-                                return (
-                                  <li key={windowKey(s)}>
-                                    <div className={`window-item secondary ${sTone}`} title="连续异动延伸窗口，已聚合到上方事件，不需单独标注">
-                                      <span className="window-item-icon"><CornerDownRight size={12} /></span>
-                                      <span className="window-item-time">
-                                        {s.window_end.timestamp_bj?.slice(11, 16)}
-                                      </span>
-                                      <span className="window-item-pct">
-                                        {sSign}{s.change_pct.toFixed(2)}%
-                                      </span>
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          ) : null}
                         </li>
                       );
                     })}
