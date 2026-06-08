@@ -22,6 +22,13 @@ function windowKey(w: PriceWindow): string {
   return `${w.symbol}|${w.window_start.timestamp_utc}|${w.window_end.timestamp_utc}`;
 }
 
+// 同期纳斯达克(NQ=F)涨跌展示：标注 NQ 自身显「本身」，无数据（周末/休市）显「无」。
+function fmtNasdaq(symbol: string, pct: number | null | undefined): string {
+  if (symbol === "NQ=F") return "纳指 本身";
+  if (pct == null) return "纳指 无";
+  return `纳指 ${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（勾选/no_clear_news/notes）
 // + 当前选中窗口 + 标注人。切到别的页面再回来不会丢；标注保存成功后该 key 会被清理。
 // 不持久化 hours/symbol：那些是浏览偏好，下一次会话默认值更合理。
@@ -559,6 +566,9 @@ export function AnnotationsPage() {
                             <span className="window-item-pct" title="峰值（相对起点价的最大偏离）">
                               峰 {primary.peak_change_pct >= 0 ? "+" : ""}{primary.peak_change_pct.toFixed(2)}%
                             </span>
+                            <span className="window-item-pct" title="同期纳斯达克(NQ=F)涨跌，休市为无">
+                              {fmtNasdaq(primary.symbol, primary.nasdaq_pct)}
+                            </span>
                           </button>
                         </li>
                       );
@@ -639,6 +649,12 @@ export function AnnotationsPage() {
                   const sign = pct > 0 ? "+" : "";
                   return <span className={pct >= 0 ? "up-text" : "down-text"}>{sign}{pct.toFixed(2)}%</span>;
                 },
+                className: "num"
+              },
+              {
+                key: "nasdaq",
+                header: "纳指对标",
+                cell: (row) => fmtNasdaq(row.symbol, row.nasdaq_pct),
                 className: "num"
               },
               {

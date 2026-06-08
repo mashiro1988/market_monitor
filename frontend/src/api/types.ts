@@ -231,6 +231,7 @@ export type PriceWindow = {
   segment_count: number;
   annotation_id: number | null;
   is_primary: boolean;  // 合并事件窗口恒 True
+  nasdaq_pct?: number | null;  // 同期 NQ=F 涨跌；null=休市/本身
 };
 
 export type AnnotationDetail = {
@@ -311,6 +312,7 @@ export type AnnotationListItem = {
   window_start: TimeFields;
   window_end: TimeFields;
   change_pct: number | null;
+  nasdaq_pct?: number | null;
   no_clear_news: boolean;
   selected_count: number;
   labeler: string | null;
