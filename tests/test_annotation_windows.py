@@ -106,3 +106,56 @@ def test_merge_gap_is_configurable(session, monkeypatch):
     )
     _seed(session, now, bars)
     assert len(_call(session)) == 2
+
+
+def _add_nq(session, now, minutes_ago, price):
+    session.add(PriceSnapshot(
+        timestamp=now - timedelta(minutes=minutes_ago),
+        asset_class="futures", symbol="NQ=F", name="纳指期货",
+        price=price, source="test",
+    ))
+
+
+def test_window_carries_nasdaq_reference(session):
+    now = utc_now_naive()
+    _seed(session, now, [(20, 100.0), (15, 101.0)])          # TEST 窗口 [-20,-15]
+    _add_nq(session, now, 20, 20000.0)
+    _add_nq(session, now, 15, 20100.0)                       # (20100-20000)/20000 = +0.5%
+    session.commit()
+    wins = _call(session)
+    assert len(wins) == 1
+    assert wins[0].nasdaq_pct == pytest.approx(0.5, abs=0.01)
+
+
+def test_window_nasdaq_none_when_market_closed(session):
+    now = utc_now_naive()
+    _seed(session, now, [(20, 100.0), (15, 101.0)])          # 无 NQ 快照
+    wins = _call(session)
+    assert wins[0].nasdaq_pct is None
+
+
+def test_nasdaq_symbol_itself_has_none_reference(session):
+    now = utc_now_naive()
+    for m, p in [(20, 20000.0), (15, 20200.0)]:              # 标注 NQ 自身，+1% 触发
+        _add_nq(session, now, m, p)
+    session.commit()
+    wins = load_price_windows(session, "NQ=F", hours=24, threshold_pct=0.5, window_minutes=5)
+    assert len(wins) == 1
+    assert wins[0].nasdaq_pct is None                        # 本身不对标
+
+
+def test_list_annotations_carries_nasdaq_reference(session):
+    from models.news import NewsPriceAnnotation
+    now = utc_now_naive()
+    ws, we = now - timedelta(minutes=20), now - timedelta(minutes=15)
+    session.add(NewsPriceAnnotation(
+        symbol="BTC/USDT", window_start=ws, window_end=we,
+        context_start=ws, context_end=we,           # NOT NULL 无默认，必须给
+        change_pct=1.0, no_clear_news=False, created_at=now, updated_at=now,
+    ))
+    _add_nq(session, now, 20, 20000.0)
+    _add_nq(session, now, 15, 20100.0)
+    session.commit()
+    items = annotation_service.list_annotations(session, symbol=None, hours=24)
+    assert len(items) == 1
+    assert items[0].nasdaq_pct == pytest.approx(0.5, abs=0.01)
