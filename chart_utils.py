@@ -4,11 +4,16 @@ from datetime import datetime, time, timedelta
 import pandas as pd
 
 
-def normalize_prices(prices: list[float]) -> list[float]:
-    """将价格序列转为相对第一个点的涨跌幅（%）。"""
+def normalize_prices(prices: list[float], base: float | None = None) -> list[float]:
+    """将价格序列转为相对基准价的涨跌幅（%）。
+
+    base=None 时以序列第一个点为基准（旧行为）；传入时以该基准价归一，用于
+    「跨资产走势」按窗口起点锚定净值，保留隔夜跳空。base 为 0/None 时回退首点。
+    """
     if not prices:
         return []
-    base = prices[0]
+    if base is None or base == 0:
+        base = prices[0]
     if base == 0:
         return [0.0] * len(prices)
     return [(p / base - 1) * 100 for p in prices]
