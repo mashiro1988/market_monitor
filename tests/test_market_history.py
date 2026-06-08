@@ -1,0 +1,57 @@
+"""get_history 窗口起点锚定净值：隔夜跳空不被首点基准吃掉。"""
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from datetime import timedelta
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from database import Base
+import models  # noqa: F401  注册模型到 Base.metadata
+from models.price import PriceSnapshot
+from services import market_service
+from services.time_utils import utc_now_naive
+
+
+@pytest.fixture
+def session():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    s = sessionmaker(bind=engine)()
+    try:
+        yield s
+    finally:
+        s.close()
+
+
+def _add(s, symbol, ts, price, asset_class="asian_index"):
+    s.add(PriceSnapshot(timestamp=ts, asset_class=asset_class, symbol=symbol,
+                        name=symbol, price=price, source="test"))
+
+
+def test_baseline_anchored_at_window_start_preserves_gap(session):
+    now = utc_now_naive()
+    start = now - timedelta(hours=4)
+    _add(session, "^KS11", start - timedelta(hours=1), 100.0)        # 昨收=基准
+    _add(session, "^KS11", start + timedelta(minutes=5), 92.0)       # 今开已跌 8%
+    _add(session, "^KS11", start + timedelta(minutes=10), 93.0)
+    session.commit()
+    resp = market_service.get_history(session, symbols=["^KS11"], hours=4)
+    pts = resp.series[0].points
+    assert pts[0].normalized_pct == pytest.approx(-8.0, abs=0.05)    # 相对昨收，非 0
+    assert pts[1].normalized_pct == pytest.approx(-7.0, abs=0.05)
+
+
+def test_falls_back_to_first_point_without_pre_window_data(session):
+    now = utc_now_naive()
+    start = now - timedelta(hours=4)
+    _add(session, "BTC/USDT", start + timedelta(minutes=5), 50000.0, asset_class="crypto")
+    _add(session, "BTC/USDT", start + timedelta(minutes=10), 51000.0, asset_class="crypto")
+    session.commit()
+    resp = market_service.get_history(session, symbols=["BTC/USDT"], hours=4)
+    pts = resp.series[0].points
+    assert pts[0].normalized_pct == 0.0                              # 无前置数据 → 回退首点
+    assert pts[1].normalized_pct == pytest.approx(2.0, abs=0.05)
