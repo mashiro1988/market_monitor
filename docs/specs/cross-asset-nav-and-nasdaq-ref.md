@@ -75,7 +75,7 @@ def normalize_prices(prices: list[float], base: float | None = None) -> list[flo
 - `list_annotations`：同理一次性查 NQ=F 快照，逐 `NewsPriceAnnotation` 行（已有 `window_start/end`）求 `nasdaq_pct`；`symbol==NQ=F` → None。
 
 ### 4.3 前端（`frontend/`）
-- `src/api/types.ts`：`PriceWindow`、`AnnotationListItem` 镜像 `nasdaq_pct?: number | null`。
+- `src/api/types.ts`：`PriceWindow`、`AnnotationListItem` 镜像 `nasdaq_pct?: number | null`（实现时确认这两个接口在 types.ts 的实际导出名）。
 - `src/pages/AnnotationsPage.tsx`：
   - 统一格式化 `fmtNasdaq(symbol, pct)`：`symbol==="NQ=F"` → 「纳指 本身」；`pct==null` → 「纳指 无」；否则 `纳指 {+}{pct.toFixed(2)}%`。
   - 「待标注事件」行（L556–561）：在 `峰 +X%` 后加一段 `· {fmtNasdaq(primary.symbol, primary.nasdaq_pct)}`。
@@ -92,9 +92,9 @@ def normalize_prices(prices: list[float], base: float | None = None) -> list[flo
 
 > 复用「事件合并」spec 建立的真实内存 SQLite session fixture 先例（`tests/test_annotation_windows.py`）：`create_engine("sqlite:///:memory:")` → `Base.metadata.create_all` → `Session` → 造 `PriceSnapshot`。时间戳一律**相对 `utc_now_naive()` 倒推**，否则落在 `display_cutoff` 外扫不出。
 
-### 5.1 后端 A — `tests/test_market_history.py`（新建）
-- `normalize_prices`：`base=100,[100,110,92]→[0,10,-8]`；`base=None,[100,110]→[0,10]`（旧行为）；`base=0` 回退首点。
-- `get_history`：造某品种 `start−1h` 收盘=100，缺口后 in-window 首点=92、次点=93 → 断言首个 `normalized_pct≈−8`（相对 100，**非 0**）；另造一无前置数据品种 → 回退首点（首点=0）。
+### 5.1 后端 A
+- `normalize_prices` 的 `base=` 用例**扩展现有 `tests/test_price_history.py`**（该文件已覆盖 normalize_prices 无 base 情形，勿另起文件重复）：`base=100,[100,110,92]→[0,10,-8]`；`base=None,[100,110]→[0,10]`（与旧行为等价）；显式 `base=0` → 回退首点。
+- `get_history` 窗口起点基准测试 → **新建 `tests/test_market_history.py`**（DB 集成测试，复用内存 SQLite fixture；`test_price_history.py` 是纯 chart_utils 单测，不混入 DB）：造某品种 `start−1h` 收盘=100，缺口后 in-window 首点=92、次点=93 → 断言首个 `normalized_pct≈−8`（相对 100，**非 0**）；另造一无前置数据品种 → 回退首点（首点=0）。
 
 ### 5.2 后端 B — 扩展 `tests/test_annotation_windows.py`
 - 造 BTC/USDT 异动窗口（沿用现有造数法）+ 覆盖同期的 NQ=F 快照 → 断言 `window.nasdaq_pct≈` 预期值。
@@ -118,7 +118,7 @@ def normalize_prices(prices: list[float], base: float | None = None) -> list[flo
 - `schemas/annotations.py` — `PriceWindowSchema`、`AnnotationListItem` 各加 `nasdaq_pct`
 - `frontend/src/api/types.ts` — 镜像两处 `nasdaq_pct`
 - `frontend/src/pages/AnnotationsPage.tsx` — `fmtNasdaq` + 待标注行 + 已标注列
-- `tests/test_market_history.py`（新建）、`tests/test_annotation_windows.py`（扩展）
+- `tests/test_price_history.py`（扩展 `normalize_prices` base= 用例）、`tests/test_market_history.py`（新建，`get_history` DB 测试）、`tests/test_annotation_windows.py`（扩展纳指对标）
 - **地图同步（同次 commit）**：`DATAFLOW.md`（windows/list 端点加 `nasdaq_pct`、走势图归一语义改为窗口起点锚定）、`ARCHITECTURE.md`（修 L77 调用链 Bloomberg→CNBC、推进"最近确认"日期、补事件合并/陈旧守卫漂移）、`DECISIONS.md`（追加本次两条 ADR）、`PENDING.md`（推进确认日期）。
 </content>
 </invoke>
