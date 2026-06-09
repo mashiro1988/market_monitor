@@ -60,3 +60,20 @@ def test_today_beijing_anchor_utc():
 def test_today_beijing_anchor_utc_can_be_in_future():
     result = today_beijing_anchor_utc(21, 30, now_utc=datetime(2026, 4, 23, 6, 0, 0))
     assert result == datetime(2026, 4, 23, 13, 30, 0)
+
+
+def test_normalize_with_explicit_base():
+    # base 来自窗口起点（昨收 100），首点已跌到 92 → −8%，不被吃掉
+    result = normalize_prices([92.0, 93.0], base=100.0)
+    assert abs(result[0] - (-8.0)) < 0.001
+    assert abs(result[1] - (-7.0)) < 0.001
+
+
+def test_normalize_base_none_matches_legacy():
+    assert normalize_prices([100.0, 110.0], base=None) == normalize_prices([100.0, 110.0])
+
+
+def test_normalize_explicit_zero_base_falls_back_to_first_point():
+    result = normalize_prices([100.0, 110.0], base=0)
+    assert result[0] == 0.0
+    assert abs(result[1] - 10.0) < 0.001

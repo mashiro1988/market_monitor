@@ -115,6 +115,31 @@ def get_symbols(session: Session, days: int = 10) -> list[MarketSymbol]:
     return [MarketSymbol(symbol=row.symbol, name=row.name, asset_class=row.asset_class) for row in rows]
 
 
+def _window_baseline_prices(
+    session: Session, symbols: list[str], start: datetime, lookback_days: int
+) -> dict[str, float]:
+    """每个 symbol 在窗口起点 start 当时的基准价 = timestamp ≤ start 的最后一笔收盘。
+    用于「跨资产走势」按窗口起点锚定净值，保留隔夜跳空。无前置数据的 symbol 不入字典。"""
+    if not symbols:
+        return {}
+    lookback_start = start - timedelta(days=lookback_days)
+    rows = (
+        session.query(PriceSnapshot.symbol, PriceSnapshot.timestamp, PriceSnapshot.price)
+        .filter(
+            PriceSnapshot.symbol.in_(symbols),
+            PriceSnapshot.timestamp >= lookback_start,
+            PriceSnapshot.timestamp <= start,
+        )
+        .order_by(PriceSnapshot.timestamp.asc())
+        .all()
+    )
+    baseline: dict[str, float] = {}
+    for row in rows:
+        if row.price:
+            baseline[row.symbol] = row.price  # asc 遍历，最后写入的是 ≤start 最近一笔
+    return baseline
+
+
 def get_history(
     session: Session,
     symbols: list[str] | None = None,
@@ -153,10 +178,14 @@ def get_history(
         )
         bucket["rows"].append(row)
 
+    baselines = _window_baseline_prices(
+        session, list(grouped.keys()), start, config.MARKET_HISTORY_BASELINE_LOOKBACK_DAYS
+    )
+
     series: list[MarketHistorySeries] = []
     for symbol, bucket in grouped.items():
         prices = [row.price for row in bucket["rows"]]
-        normalized = normalize_prices(prices) if len(prices) >= 1 else []
+        normalized = normalize_prices(prices, base=baselines.get(symbol)) if len(prices) >= 1 else []
         points = [
             MarketHistoryPoint(
                 symbol=row.symbol,

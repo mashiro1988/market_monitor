@@ -35,6 +35,7 @@ class PriceWindowSchema(BaseModel):
     segment_count: int = 1
     annotation_id: int | None = None  # 已标注则为对应 NewsPriceAnnotation.id
     is_primary: bool = True            # 合并事件窗口恒 True（不再发 secondary）
+    nasdaq_pct: float | None = None    # 同期 NQ=F 涨跌；None=休市/本身
 
 
 class AnnotationCreateRequest(BaseModel):
@@ -147,6 +148,7 @@ class AnnotationListItem(BaseModel):
     window_start: TimeFields
     window_end: TimeFields
     change_pct: float | None
+    nasdaq_pct: float | None = None
     no_clear_news: bool
     selected_count: int
     labeler: str | None

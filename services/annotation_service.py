@@ -32,6 +32,41 @@ from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 TARGET_PRICE_SYMBOLS = ["BTC/USDT", "NQ=F"]
 
+NASDAQ_REFERENCE_SYMBOL = "NQ=F"
+
+
+def _nearest_snapshot_any(rows: list[PriceSnapshot], target: datetime, tolerance_minutes: int) -> PriceSnapshot | None:
+    """rows 里与 target 时间差最小且 ≤ 容差者（不限前后，区别于 _nearest_snapshot）。"""
+    best = None
+    best_delta = None
+    for row in rows:
+        delta = abs((row.timestamp - target).total_seconds())
+        if delta > tolerance_minutes * 60:
+            continue
+        if best_delta is None or delta < best_delta:
+            best, best_delta = row, delta
+    return best
+
+
+def _load_reference_rows(session: Session, cutoff: datetime) -> list[PriceSnapshot]:
+    return (
+        session.query(PriceSnapshot)
+        .filter(PriceSnapshot.symbol == NASDAQ_REFERENCE_SYMBOL, PriceSnapshot.timestamp >= cutoff)
+        .order_by(PriceSnapshot.timestamp.asc())
+        .all()
+    )
+
+
+def _reference_change_for_window(
+    nq_rows: list[PriceSnapshot], window_start: datetime, window_end: datetime, tolerance_minutes: int
+) -> float | None:
+    """同期 NQ=F 涨跌：端点最近快照求 (end-start)/start。任一端无数据 → None。"""
+    s = _nearest_snapshot_any(nq_rows, window_start, tolerance_minutes)
+    e = _nearest_snapshot_any(nq_rows, window_end, tolerance_minutes)
+    if s is None or e is None or not s.price:
+        return None
+    return (e.price - s.price) / abs(s.price) * 100
+
 # 每个标注窗口前后取的候选新闻范围：向前 15 分钟，向后 30 分钟。
 # 与 upsert_annotation 写入 context_start / context_end 的偏移保持一致。
 CONTEXT_PRE_MINUTES_DEFAULT = 15
@@ -203,6 +238,7 @@ def load_price_windows(
     )
     display_cutoff = utc_now_naive() - timedelta(hours=hours)
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
+    nq_rows = [] if symbol == NASDAQ_REFERENCE_SYMBOL else _load_reference_rows(session, cutoff)
 
     # 一次性把这个 symbol 在显示窗口里的已有标注全部捞出来，按 (window_start, window_end) 建查找表。
     annotation_rows = (
@@ -290,6 +326,8 @@ def load_price_windows(
             segment_count=len(ev),
             annotation_id=annotation_index.get((w_start, w_end)),
             is_primary=True,
+            nasdaq_pct=None if symbol == NASDAQ_REFERENCE_SYMBOL
+            else _reference_change_for_window(nq_rows, w_start, w_end, tolerance_minutes),
         )))
 
     # 最新事件在前；截断 200。
@@ -446,6 +484,12 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
     if symbol:
         query = query.filter(NewsPriceAnnotation.symbol == symbol)
     rows = query.order_by(NewsPriceAnnotation.window_end.desc()).limit(500).all()
+    tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
+    if rows:
+        earliest = min(r.window_start for r in rows)
+        nq_rows = _load_reference_rows(session, earliest - timedelta(minutes=tolerance_minutes + 5))
+    else:
+        nq_rows = []
     items: list[AnnotationListItem] = []
     for row in rows:
         selected_ids = _parse_news_ids(row.causal_news_ids)
@@ -456,6 +500,8 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
             window_start=timestamp_pair(row.window_start),
             window_end=timestamp_pair(row.window_end),
             change_pct=row.change_pct,
+            nasdaq_pct=None if row.symbol == NASDAQ_REFERENCE_SYMBOL
+            else _reference_change_for_window(nq_rows, row.window_start, row.window_end, tolerance_minutes),
             no_clear_news=bool(row.no_clear_news),
             selected_count=len(selected_ids),
             labeler=row.labeler,

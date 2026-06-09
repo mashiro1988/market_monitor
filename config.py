@@ -79,6 +79,9 @@ SCAN_INTERVALS = {
 }
 SCAN_ROLLING_BACKFILL_INTERVALS = int(os.getenv("SCAN_ROLLING_BACKFILL_INTERVALS", "2"))
 
+# 「跨资产走势」净值基准：取窗口起始时刻之前最后一笔收盘作基准，向前回看上限（天）。
+MARKET_HISTORY_BASELINE_LOOKBACK_DAYS = int(os.getenv("MARKET_HISTORY_BASELINE_LOOKBACK_DAYS", "7"))
+
 # App / scheduler 启动后最多回补的 5m 价格历史小时数。
 # 回补按已入库的最新 timestamp 继续，重复 (symbol, timestamp) 会跳过。
 PRICE_BACKFILL_MAX_HOURS = int(os.getenv("PRICE_BACKFILL_MAX_HOURS", "72"))
