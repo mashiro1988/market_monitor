@@ -4,6 +4,7 @@ RSS 数据源 - 通用 RSS/Atom 订阅解析器
 """
 import hashlib
 import re
+import time
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 import requests
@@ -40,8 +41,15 @@ class RSSSource(BaseSource):
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                # 带 Accept 头：FinancialJuice 等 Cloudflare 源缺它会被判定为机器人返回 429。
+                "Accept": "application/rss+xml, application/xml, text/xml; q=0.9, */*; q=0.8",
             }
             r = requests.get(self.url, headers=headers, timeout=15, proxies=proxies)
+            # Cloudflare 限流（429）退避重试一次；5 分钟间隔 + Accept 头下极少触发。
+            if r.status_code == 429:
+                logger.warning(f"RSS {self.name} 429，退避 2s 重试一次")
+                time.sleep(2)
+                r = requests.get(self.url, headers=headers, timeout=15, proxies=proxies)
             feed = feedparser.parse(r.content)
         except Exception as e:
             logger.error(f"RSS {self.name} 获取失败: {e}")

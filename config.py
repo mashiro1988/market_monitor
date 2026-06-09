@@ -186,6 +186,22 @@ NEWS_SOURCES = {
         "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         "name": "CNBC",
     },
+    # InvestingLive（原 ForexLive）：英文宏观/外汇快讯，分钟级，普通 nginx 直连稳定。
+    "investinglive": {
+        "enabled": True,
+        "type": "rss",
+        "language": "en",
+        "url": "https://investinglive.com/feed/news",
+        "name": "InvestingLive",
+    },
+    # FinancialJuice：英文版 jin10，秒级短快讯；Cloudflare 源，靠 rss_source 的 Accept 头 + 429 退避。
+    "financialjuice": {
+        "enabled": True,
+        "type": "rss",
+        "language": "en",
+        "url": "https://www.financialjuice.com/feed.ashx?xml=rss",
+        "name": "FinancialJuice",
+    },
 }
 
 # ============================================================
