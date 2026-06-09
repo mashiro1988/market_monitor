@@ -564,6 +564,14 @@ export function AnnotationsPage() {
                             <span className="window-item-pct">
                               {sign}{primary.change_pct.toFixed(2)}%
                             </span>
+                            {primary.references?.length ? (
+                              <span className="window-item-refs" title="同期宏观对标（纳指/原油/黄金）">
+                                {primary.references.map((ref) => {
+                                  const f = fmtRef(ref);
+                                  return <span key={ref.symbol} className={f.cls}>{f.text}</span>;
+                                })}
+                              </span>
+                            ) : null}
                           </button>
                         </li>
                       );
@@ -580,26 +588,14 @@ export function AnnotationsPage() {
                   </span>
                 </header>
                 <div className="annotation-pair-panel-body">
-                  {!activeWindow ? <EmptyState title="选择左侧窗口查看候选新闻" /> : (
-                    <>
-                      {activeWindow.references?.length ? (
-                        <div className="macro-ref-strip">
-                          <span className="macro-ref-label">宏观同期对标</span>
-                          {activeWindow.references.map((ref) => {
-                            const f = fmtRef(ref);
-                            return <span key={ref.symbol} className={`macro-ref-item ${f.cls}`}>{f.text}</span>;
-                          })}
-                        </div>
-                      ) : null}
-                      {contextNews.isLoading ? <LoadingState /> :
-                       contextNews.error ? <ErrorState error={contextNews.error} /> : (
-                        <DataTable<NewsItem>
-                          rows={contextNews.data?.items ?? []}
-                          empty="窗口前 15 / 后 30 分钟没有候选新闻"
-                          columns={newsColumns}
-                        />
-                      )}
-                    </>
+                  {!activeWindow ? <EmptyState title="选择左侧窗口查看候选新闻" /> :
+                   contextNews.isLoading ? <LoadingState /> :
+                   contextNews.error ? <ErrorState error={contextNews.error} /> : (
+                    <DataTable<NewsItem>
+                      rows={contextNews.data?.items ?? []}
+                      empty="窗口前 15 / 后 30 分钟没有候选新闻"
+                      columns={newsColumns}
+                    />
                   )}
                 </div>
               </section>
