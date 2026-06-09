@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
-import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow } from "../api/types";
+import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow, ReferenceChange } from "../api/types";
 
 // 实测 5 窗口 × reasoning_effort=max 经常把 max_tokens 预算用完导致空 content（模型
 // 还在思考没产出 JSON），所以再保守一档到 3。后端 AUTO_ANNOTATE_BATCH_LIMIT 仍是 10,
@@ -22,11 +22,12 @@ function windowKey(w: PriceWindow): string {
   return `${w.symbol}|${w.window_start.timestamp_utc}|${w.window_end.timestamp_utc}`;
 }
 
-// 同期纳斯达克(NQ=F)涨跌展示：标注 NQ 自身显「本身」，无数据（周末/休市）显「无」。
-function fmtNasdaq(symbol: string, pct: number | null | undefined): string {
-  if (symbol === "NQ=F") return "纳指 本身";
-  if (pct == null) return "纳指 无";
-  return `纳指 ${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+// 单个宏观对标的展示文本 + 涨跌色类。本身 / 无数据（周末/休市）→ 中性灰。
+function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
+  if (ref.is_self) return { text: `${ref.label} 本身`, cls: "ref-neutral" };
+  if (ref.pct == null) return { text: `${ref.label} 无`, cls: "ref-neutral" };
+  const sign = ref.pct > 0 ? "+" : "";
+  return { text: `${ref.label} ${sign}${ref.pct.toFixed(2)}%`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
 }
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（勾选/no_clear_news/notes）
@@ -567,9 +568,6 @@ export function AnnotationsPage() {
                               <span className="window-item-pct" title="峰值（相对起点价的最大偏离）">
                                 峰 {primary.peak_change_pct >= 0 ? "+" : ""}{primary.peak_change_pct.toFixed(2)}%
                               </span>
-                              <span className="window-item-ref" title="同期纳斯达克(NQ=F)涨跌，休市为无">
-                                {fmtNasdaq(primary.symbol, primary.nasdaq_pct)}
-                              </span>
                             </span>
                           </button>
                         </li>
@@ -587,14 +585,26 @@ export function AnnotationsPage() {
                   </span>
                 </header>
                 <div className="annotation-pair-panel-body">
-                  {!activeWindow ? <EmptyState title="选择左侧窗口查看候选新闻" /> :
-                   contextNews.isLoading ? <LoadingState /> :
-                   contextNews.error ? <ErrorState error={contextNews.error} /> : (
-                    <DataTable<NewsItem>
-                      rows={contextNews.data?.items ?? []}
-                      empty="窗口前 15 / 后 30 分钟没有候选新闻"
-                      columns={newsColumns}
-                    />
+                  {!activeWindow ? <EmptyState title="选择左侧窗口查看候选新闻" /> : (
+                    <>
+                      {activeWindow.references?.length ? (
+                        <div className="macro-ref-strip">
+                          <span className="macro-ref-label">宏观同期对标</span>
+                          {activeWindow.references.map((ref) => {
+                            const f = fmtRef(ref);
+                            return <span key={ref.symbol} className={`macro-ref-item ${f.cls}`}>{f.text}</span>;
+                          })}
+                        </div>
+                      ) : null}
+                      {contextNews.isLoading ? <LoadingState /> :
+                       contextNews.error ? <ErrorState error={contextNews.error} /> : (
+                        <DataTable<NewsItem>
+                          rows={contextNews.data?.items ?? []}
+                          empty="窗口前 15 / 后 30 分钟没有候选新闻"
+                          columns={newsColumns}
+                        />
+                      )}
+                    </>
                   )}
                 </div>
               </section>
@@ -654,10 +664,16 @@ export function AnnotationsPage() {
                 className: "num"
               },
               {
-                key: "nasdaq",
-                header: "纳指对标",
-                cell: (row) => fmtNasdaq(row.symbol, row.nasdaq_pct),
-                className: "num"
+                key: "macro",
+                header: "宏观对标",
+                cell: (row) => row.references?.length ? (
+                  <span className="macro-cell">
+                    {row.references.map((ref) => {
+                      const f = fmtRef(ref);
+                      return <span key={ref.symbol} className={f.cls}>{f.text}</span>;
+                    })}
+                  </span>
+                ) : "—"
               },
               {
                 key: "selected",

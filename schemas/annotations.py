@@ -18,6 +18,14 @@ class AnnotationSymbol(BaseModel):
     asset_class: str
 
 
+class ReferenceChange(BaseModel):
+    """标注窗口的「宏观同期对标」单项（纳指/原油/黄金…）。"""
+    symbol: str
+    label: str
+    pct: float | None = None   # 同期涨跌%；None=休市/无数据
+    is_self: bool = False      # 标注品种本身（不对标自己）
+
+
 class PriceWindowSchema(BaseModel):
     symbol: str
     asset_class: str
@@ -35,7 +43,7 @@ class PriceWindowSchema(BaseModel):
     segment_count: int = 1
     annotation_id: int | None = None  # 已标注则为对应 NewsPriceAnnotation.id
     is_primary: bool = True            # 合并事件窗口恒 True（不再发 secondary）
-    nasdaq_pct: float | None = None    # 同期 NQ=F 涨跌；None=休市/本身
+    references: list[ReferenceChange] = Field(default_factory=list)  # 宏观同期对标（纳指/原油/黄金…）
 
 
 class AnnotationCreateRequest(BaseModel):
@@ -148,7 +156,7 @@ class AnnotationListItem(BaseModel):
     window_start: TimeFields
     window_end: TimeFields
     change_pct: float | None
-    nasdaq_pct: float | None = None
+    references: list[ReferenceChange] = Field(default_factory=list)
     no_clear_news: bool
     selected_count: int
     labeler: str | None

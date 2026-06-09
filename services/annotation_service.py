@@ -26,14 +26,12 @@ from schemas.annotations import (
     ContextNewsResponse,
     PriceRuleSchema,
     PriceWindowSchema,
+    ReferenceChange,
 )
 from services.news_service import to_news_schema
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 TARGET_PRICE_SYMBOLS = ["BTC/USDT", "NQ=F"]
-
-NASDAQ_REFERENCE_SYMBOL = "NQ=F"
-
 
 def _nearest_snapshot_any(rows: list[PriceSnapshot], target: datetime, tolerance_minutes: int) -> PriceSnapshot | None:
     """rows 里与 target 时间差最小且 ≤ 容差者（不限前后，区别于 _nearest_snapshot）。"""
@@ -48,24 +46,50 @@ def _nearest_snapshot_any(rows: list[PriceSnapshot], target: datetime, tolerance
     return best
 
 
-def _load_reference_rows(session: Session, cutoff: datetime) -> list[PriceSnapshot]:
-    return (
-        session.query(PriceSnapshot)
-        .filter(PriceSnapshot.symbol == NASDAQ_REFERENCE_SYMBOL, PriceSnapshot.timestamp >= cutoff)
-        .order_by(PriceSnapshot.timestamp.asc())
-        .all()
-    )
-
-
 def _reference_change_for_window(
-    nq_rows: list[PriceSnapshot], window_start: datetime, window_end: datetime, tolerance_minutes: int
+    rows: list[PriceSnapshot], window_start: datetime, window_end: datetime, tolerance_minutes: int
 ) -> float | None:
-    """同期 NQ=F 涨跌：端点最近快照求 (end-start)/start。任一端无数据 → None。"""
-    s = _nearest_snapshot_any(nq_rows, window_start, tolerance_minutes)
-    e = _nearest_snapshot_any(nq_rows, window_end, tolerance_minutes)
+    """同期涨跌：端点最近快照求 (end-start)/start。任一端无数据 → None。"""
+    s = _nearest_snapshot_any(rows, window_start, tolerance_minutes)
+    e = _nearest_snapshot_any(rows, window_end, tolerance_minutes)
     if s is None or e is None or not s.price:
         return None
     return (e.price - s.price) / abs(s.price) * 100
+
+
+def _load_reference_rows(session: Session, cutoff: datetime) -> dict[str, list[PriceSnapshot]]:
+    """一次性把所有「宏观同期对标」资产（config.ANNOTATION_REFERENCE_ASSETS）的快照捞出，按 symbol 分组。"""
+    symbols = [sym for sym, _ in config.ANNOTATION_REFERENCE_ASSETS]
+    if not symbols:
+        return {}
+    rows = (
+        session.query(PriceSnapshot)
+        .filter(PriceSnapshot.symbol.in_(symbols), PriceSnapshot.timestamp >= cutoff)
+        .order_by(PriceSnapshot.timestamp.asc())
+        .all()
+    )
+    by_symbol: dict[str, list[PriceSnapshot]] = {sym: [] for sym in symbols}
+    for row in rows:
+        by_symbol.setdefault(row.symbol, []).append(row)
+    return by_symbol
+
+
+def _reference_changes_for_window(
+    ref_rows: dict[str, list[PriceSnapshot]],
+    window_start: datetime,
+    window_end: datetime,
+    tolerance_minutes: int,
+    annotated_symbol: str,
+) -> list[ReferenceChange]:
+    """按 config.ANNOTATION_REFERENCE_ASSETS 逐个算同期涨跌；标注品种本身 → is_self（不对标自己）。"""
+    out: list[ReferenceChange] = []
+    for sym, label in config.ANNOTATION_REFERENCE_ASSETS:
+        if sym == annotated_symbol:
+            out.append(ReferenceChange(symbol=sym, label=label, pct=None, is_self=True))
+            continue
+        pct = _reference_change_for_window(ref_rows.get(sym, []), window_start, window_end, tolerance_minutes)
+        out.append(ReferenceChange(symbol=sym, label=label, pct=pct))
+    return out
 
 # 每个标注窗口前后取的候选新闻范围：向前 15 分钟，向后 30 分钟。
 # 与 upsert_annotation 写入 context_start / context_end 的偏移保持一致。
@@ -238,7 +262,7 @@ def load_price_windows(
     )
     display_cutoff = utc_now_naive() - timedelta(hours=hours)
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
-    nq_rows = [] if symbol == NASDAQ_REFERENCE_SYMBOL else _load_reference_rows(session, cutoff)
+    ref_rows = _load_reference_rows(session, cutoff)
 
     # 一次性把这个 symbol 在显示窗口里的已有标注全部捞出来，按 (window_start, window_end) 建查找表。
     annotation_rows = (
@@ -326,8 +350,7 @@ def load_price_windows(
             segment_count=len(ev),
             annotation_id=annotation_index.get((w_start, w_end)),
             is_primary=True,
-            nasdaq_pct=None if symbol == NASDAQ_REFERENCE_SYMBOL
-            else _reference_change_for_window(nq_rows, w_start, w_end, tolerance_minutes),
+            references=_reference_changes_for_window(ref_rows, w_start, w_end, tolerance_minutes, symbol),
         )))
 
     # 最新事件在前；截断 200。
@@ -487,9 +510,9 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
     if rows:
         earliest = min(r.window_start for r in rows)
-        nq_rows = _load_reference_rows(session, earliest - timedelta(minutes=tolerance_minutes + 5))
+        ref_rows = _load_reference_rows(session, earliest - timedelta(minutes=tolerance_minutes + 5))
     else:
-        nq_rows = []
+        ref_rows = {}
     items: list[AnnotationListItem] = []
     for row in rows:
         selected_ids = _parse_news_ids(row.causal_news_ids)
@@ -500,8 +523,7 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
             window_start=timestamp_pair(row.window_start),
             window_end=timestamp_pair(row.window_end),
             change_pct=row.change_pct,
-            nasdaq_pct=None if row.symbol == NASDAQ_REFERENCE_SYMBOL
-            else _reference_change_for_window(nq_rows, row.window_start, row.window_end, tolerance_minutes),
+            references=_reference_changes_for_window(ref_rows, row.window_start, row.window_end, tolerance_minutes, row.symbol),
             no_clear_news=bool(row.no_clear_news),
             selected_count=len(selected_ids),
             labeler=row.labeler,

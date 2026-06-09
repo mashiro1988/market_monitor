@@ -116,35 +116,53 @@ def _add_nq(session, now, minutes_ago, price):
     ))
 
 
-def test_window_carries_nasdaq_reference(session):
+def _add_ref(session, now, symbol, minutes_ago, price):
+    session.add(PriceSnapshot(
+        timestamp=now - timedelta(minutes=minutes_ago),
+        asset_class="commodity", symbol=symbol, name=symbol,
+        price=price, source="test",
+    ))
+
+
+def test_window_carries_references(session):
     now = utc_now_naive()
     _seed(session, now, [(20, 100.0), (15, 101.0)])          # TEST 窗口 [-20,-15]
     _add_nq(session, now, 20, 20000.0)
-    _add_nq(session, now, 15, 20100.0)                       # (20100-20000)/20000 = +0.5%
+    _add_nq(session, now, 15, 20100.0)                       # 纳指 +0.5%
+    _add_ref(session, now, "CL=F", 20, 60.0)
+    _add_ref(session, now, "CL=F", 15, 60.6)                 # 原油 +1.0%
     session.commit()
     wins = _call(session)
     assert len(wins) == 1
-    assert wins[0].nasdaq_pct == pytest.approx(0.5, abs=0.01)
+    refs = {r.label: r for r in wins[0].references}
+    assert set(refs) == {"纳指", "原油", "黄金"}              # 来自 config 清单
+    assert refs["纳指"].pct == pytest.approx(0.5, abs=0.01)
+    assert refs["原油"].pct == pytest.approx(1.0, abs=0.01)
+    assert refs["黄金"].pct is None                          # 无快照 → 无
+    assert all(not r.is_self for r in wins[0].references)
 
 
-def test_window_nasdaq_none_when_market_closed(session):
+def test_references_none_when_market_closed(session):
     now = utc_now_naive()
-    _seed(session, now, [(20, 100.0), (15, 101.0)])          # 无 NQ 快照
+    _seed(session, now, [(20, 100.0), (15, 101.0)])          # 无任何对标快照
     wins = _call(session)
-    assert wins[0].nasdaq_pct is None
+    assert [r.label for r in wins[0].references] == ["纳指", "原油", "黄金"]
+    assert all(r.pct is None and not r.is_self for r in wins[0].references)
 
 
-def test_nasdaq_symbol_itself_has_none_reference(session):
+def test_reference_self_for_annotated_symbol(session):
     now = utc_now_naive()
     for m, p in [(20, 20000.0), (15, 20200.0)]:              # 标注 NQ 自身，+1% 触发
         _add_nq(session, now, m, p)
     session.commit()
     wins = load_price_windows(session, "NQ=F", hours=24, threshold_pct=0.5, window_minutes=5)
     assert len(wins) == 1
-    assert wins[0].nasdaq_pct is None                        # 本身不对标
+    refs = {r.label: r for r in wins[0].references}
+    assert refs["纳指"].is_self is True and refs["纳指"].pct is None    # 本身不对标
+    assert refs["原油"].is_self is False and refs["原油"].pct is None   # 无数据
 
 
-def test_list_annotations_carries_nasdaq_reference(session):
+def test_list_annotations_carries_references(session):
     from models.news import NewsPriceAnnotation
     now = utc_now_naive()
     ws, we = now - timedelta(minutes=20), now - timedelta(minutes=15)
@@ -158,4 +176,5 @@ def test_list_annotations_carries_nasdaq_reference(session):
     session.commit()
     items = annotation_service.list_annotations(session, symbol=None, hours=24)
     assert len(items) == 1
-    assert items[0].nasdaq_pct == pytest.approx(0.5, abs=0.01)
+    refs = {r.label: r for r in items[0].references}
+    assert refs["纳指"].pct == pytest.approx(0.5, abs=0.01)
