@@ -145,10 +145,10 @@ PRICE_SOURCES = {
     },
     # 债券利率
     "bonds": {
-        "US_10Y": {"source": "eastmoney", "secid": "171.US10Y", "name": "美国10年期国债收益率"},
-        "US_2Y": {"source": "eastmoney", "secid": "171.US2Y", "name": "美国2年期国债收益率"},
-        "JP_10Y": {"source": "eastmoney", "secid": "171.JP10Y", "name": "日本10年期国债"},
-        "JP_2Y": {"source": "eastmoney", "secid": "171.JP2Y", "name": "日本2年期国债"},
+        "US_10Y": {"source": "cnbc", "cnbc": "US10Y", "name": "美国10年期国债收益率"},
+        "US_2Y": {"source": "cnbc", "cnbc": "US2Y", "name": "美国2年期国债收益率"},
+        "JP_10Y": {"source": "cnbc", "cnbc": "JP10Y", "name": "日本10年期国债"},
+        "JP_2Y": {"source": "cnbc", "cnbc": "JP2Y", "name": "日本2年期国债"},
     },
     # 商品
     "commodities": {

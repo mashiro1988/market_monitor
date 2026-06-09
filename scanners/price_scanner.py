@@ -10,7 +10,7 @@ from scanners.base import BaseSource, PriceRecord
 from scanners.sources.yfinance_source import YFinancePriceSource
 from scanners.sources.okx_source import OkxPriceSource
 from scanners.sources.coingecko_source import CoinGeckoPriceSource
-from scanners.sources.eastmoney_bond_source import EastmoneyBondQuoteSource
+from scanners.sources.cnbc_bond_source import CnbcBondQuoteSource
 import config
 
 
@@ -21,7 +21,7 @@ class PriceScanner:
         self.yfinance = YFinancePriceSource()
         self.okx = OkxPriceSource()              # 加密货币主源：OKX 合约优先，现货补位
         self.coingecko = CoinGeckoPriceSource()  # 加密货币备用源：OKX 缺失时使用实时价
-        self.eastmoney_bonds = EastmoneyBondQuoteSource()
+        self.cnbc_bonds = CnbcBondQuoteSource()   # 美/日债收益率：CNBC 行情 API（海外可达）
 
     def scan(self) -> list[PriceRecord]:
         """执行一次完整的价格扫描"""
@@ -41,8 +41,8 @@ class PriceScanner:
             crypto_records.extend(self._fetch_coingecko_symbols(missing_crypto))
         all_records.extend(crypto_records)
 
-        # 3. Eastmoney: 美债/日债 2Y/10Y 结构化盘中收益率报价
-        all_records.extend(self._fetch_safe(self.eastmoney_bonds))
+        # 3. CNBC: 美债/日债 2Y/10Y 盘中收益率（海外可达，替代东方财富）
+        all_records.extend(self._fetch_safe(self.cnbc_bonds))
 
         # 写入数据库
         self._save_records(all_records, scan_time)
@@ -58,7 +58,7 @@ class PriceScanner:
         """
         回补最近最多 72 小时的 5m 价格历史。
 
-        yfinance / OKX 可以按历史 K 线回补；CoinGecko 与东方财富 quote 只有当前价口径，
+        yfinance / OKX 可以按历史 K 线回补；CoinGecko 与 CNBC quote 只有当前价口径，
         不伪造历史点。重复的 (symbol, timestamp) 会在写入时跳过。
         """
         requested_hours = int(config.PRICE_BACKFILL_MAX_HOURS if max_hours is None else max_hours)
@@ -111,7 +111,7 @@ class PriceScanner:
         )
 
         logger.info(
-            "[PriceBackfill] 回补完成；东方财富债券与 CoinGecko 备用源无历史 5m K 线，"
+            "[PriceBackfill] 回补完成；CNBC 债券与 CoinGecko 备用源无历史 5m K 线，"
             "只会由常规扫描写入当前报价"
         )
         return all_records
