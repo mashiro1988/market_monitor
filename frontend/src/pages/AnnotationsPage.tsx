@@ -560,14 +560,16 @@ export function AnnotationsPage() {
                             <span className="window-item-time">
                               {primary.window_start.timestamp_bj?.slice(5, 16)} → {primary.window_end.timestamp_bj?.slice(11, 16)}
                             </span>
-                            <span className="window-item-pct">
-                              {sign}{primary.change_pct.toFixed(2)}%
-                            </span>
-                            <span className="window-item-pct" title="峰值（相对起点价的最大偏离）">
-                              峰 {primary.peak_change_pct >= 0 ? "+" : ""}{primary.peak_change_pct.toFixed(2)}%
-                            </span>
-                            <span className="window-item-pct" title="同期纳斯达克(NQ=F)涨跌，休市为无">
-                              {fmtNasdaq(primary.symbol, primary.nasdaq_pct)}
+                            <span className="window-item-metrics">
+                              <span className="window-item-pct">
+                                {sign}{primary.change_pct.toFixed(2)}%
+                              </span>
+                              <span className="window-item-pct" title="峰值（相对起点价的最大偏离）">
+                                峰 {primary.peak_change_pct >= 0 ? "+" : ""}{primary.peak_change_pct.toFixed(2)}%
+                              </span>
+                              <span className="window-item-ref" title="同期纳斯达克(NQ=F)涨跌，休市为无">
+                                {fmtNasdaq(primary.symbol, primary.nasdaq_pct)}
+                              </span>
                             </span>
                           </button>
                         </li>

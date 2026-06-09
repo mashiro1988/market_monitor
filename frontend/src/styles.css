@@ -809,6 +809,22 @@ code {
   color: var(--down);
 }
 
+/* 三个数值（涨跌 / 峰 / 纳指对标）成组放进网格第 3 列，右对齐、不换行、不重叠 */
+.window-item-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* 纳指对标是"参照"：中性色，不随本窗口涨跌方向染色 */
+.window-item-ref {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 .window-secondary-list {
   list-style: none;
   margin: 4px 0 6px 18px;
