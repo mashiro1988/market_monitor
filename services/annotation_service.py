@@ -325,14 +325,6 @@ def load_price_windows(
         if not p_start:
             continue
         net_pct = (p_end - p_start) / abs(p_start) * 100
-        span_prices = [
-            r.price for r in rows
-            if r.price is not None and w_start <= r.timestamp <= w_end
-        ]
-        low_price = min(span_prices) if span_prices else min(p_start, p_end)
-        high_price = max(span_prices) if span_prices else max(p_start, p_end)
-        extreme = high_price if first["sign"] >= 0 else low_price
-        peak_pct = (extreme - p_start) / abs(p_start) * 100
         windows.append((w_end, PriceWindowSchema(
             symbol=symbol,
             asset_class=first["asset_class"],
@@ -344,9 +336,6 @@ def load_price_windows(
             price_start=p_start,
             price_end=p_end,
             change_pct=net_pct,
-            peak_change_pct=peak_pct,
-            low_price=low_price,
-            high_price=high_price,
             segment_count=len(ev),
             annotation_id=annotation_index.get((w_start, w_end)),
             is_primary=True,

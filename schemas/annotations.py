@@ -37,9 +37,6 @@ class PriceWindowSchema(BaseModel):
     price_start: float
     price_end: float
     change_pct: float
-    peak_change_pct: float = 0.0
-    low_price: float = 0.0
-    high_price: float = 0.0
     segment_count: int = 1
     annotation_id: int | None = None  # 已标注则为对应 NewsPriceAnnotation.id
     is_primary: bool = True            # 合并事件窗口恒 True（不再发 secondary）

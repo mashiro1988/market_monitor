@@ -232,9 +232,6 @@ export type PriceWindow = {
   price_start: number;
   price_end: number;
   change_pct: number;
-  peak_change_pct: number;
-  low_price: number;
-  high_price: number;
   segment_count: number;
   annotation_id: number | null;
   is_primary: boolean;  // 合并事件窗口恒 True

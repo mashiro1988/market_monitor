@@ -561,13 +561,8 @@ export function AnnotationsPage() {
                             <span className="window-item-time">
                               {primary.window_start.timestamp_bj?.slice(5, 16)} → {primary.window_end.timestamp_bj?.slice(11, 16)}
                             </span>
-                            <span className="window-item-metrics">
-                              <span className="window-item-pct">
-                                {sign}{primary.change_pct.toFixed(2)}%
-                              </span>
-                              <span className="window-item-pct" title="峰值（相对起点价的最大偏离）">
-                                峰 {primary.peak_change_pct >= 0 ? "+" : ""}{primary.peak_change_pct.toFixed(2)}%
-                              </span>
+                            <span className="window-item-pct">
+                              {sign}{primary.change_pct.toFixed(2)}%
                             </span>
                           </button>
                         </li>

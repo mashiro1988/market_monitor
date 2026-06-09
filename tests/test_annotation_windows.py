@@ -59,10 +59,6 @@ def test_two_segments_within_gap_merge_into_one(session):
     w = wins[0]
     assert w.segment_count == 4
     assert w.change_pct == pytest.approx(4.0, abs=0.05)         # (104-100)/100
-    assert w.high_price == pytest.approx(104.0)
-    assert w.low_price == pytest.approx(100.0)
-    assert w.peak_change_pct >= w.change_pct - 1e-6
-    assert w.high_price >= w.price_end and w.low_price <= w.price_start
 
 
 def test_two_segments_beyond_gap_split(session):
@@ -93,7 +89,6 @@ def test_single_segment(session):
     wins = _call(session)
     assert len(wins) == 1
     assert wins[0].segment_count == 1
-    assert wins[0].peak_change_pct == pytest.approx(wins[0].change_pct, abs=1e-6)
 
 
 def test_merge_gap_is_configurable(session, monkeypatch):

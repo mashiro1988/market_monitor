@@ -809,15 +809,6 @@ code {
   color: var(--down);
 }
 
-/* 涨跌 / 峰 两个数值成组放进网格第 3 列，右对齐不换行 */
-.window-item-metrics {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  white-space: nowrap;
-}
-
 /* 选中窗口详情区的「宏观同期对标」条（纳指/原油/黄金…） */
 .macro-ref-strip {
   display: flex;
