@@ -114,7 +114,9 @@ MARKET_OVERVIEW_DEFAULT_SYMBOLS = [
     "^N225",      # 日经指数
     "CL=F",       # 原油
     "GC=F",       # 黄金
+    "DX=F",       # 美元指数
     "BTC/USDT",   # BTC
+    "ETH/USDT",   # ETH
 ]
 
 # ============================================================
@@ -154,29 +156,14 @@ PRICE_SOURCES = {
         "黄金": "GC=F",
         "白银": "SI=F",
     },
-    # 加密货币
+    # 美元指数等外汇（yfinance）
+    "currencies": {
+        "美元指数": "DX=F",
+    },
+    # 加密货币（市场概览只跟 BTC/ETH；如需更多在此添加）
     "crypto": {
         "BTC": "BTCUSDT",
         "ETH": "ETHUSDT",
-        "FET": "FETUSDT",
-        "TAO": "TAOUSDT",
-        "RNDR": "RENDERUSDT",
-        "WLD": "WLDUSDT",
-        "UNI": "UNIUSDT",
-        "ONDO": "ONDOUSDT",
-        "PENDLE": "PENDLEUSDT",
-        "1INCH": "1INCHUSDT",
-        "DOGE": "DOGEUSDT",
-        "XRP": "XRPUSDT",
-        "SOL": "SOLUSDT",
-        "DOT": "DOTUSDT",
-        "LINK": "LINKUSDT",
-        "CFX": "CFXUSDT",
-        "ENS": "ENSUSDT",
-        "AR": "ARUSDT",
-        "FIL": "FILUSDT",
-        "ARB": "ARBUSDT",
-        "OP": "OPUSDT",
     },
 }
 

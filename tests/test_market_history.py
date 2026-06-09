@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import config
 from database import Base
 import models  # noqa: F401  注册模型到 Base.metadata
 from models.price import PriceSnapshot
@@ -55,3 +56,25 @@ def test_falls_back_to_first_point_without_pre_window_data(session):
     pts = resp.series[0].points
     assert pts[0].normalized_pct == 0.0                              # 无前置数据 → 回退首点
     assert pts[1].normalized_pct == pytest.approx(2.0, abs=0.05)
+
+
+def test_latest_prices_filters_unconfigured_crypto(session, monkeypatch):
+    monkeypatch.setitem(config.PRICE_SOURCES, "crypto", {"BTC": "BTCUSDT", "ETH": "ETHUSDT"})
+    now = utc_now_naive()
+    _add(session, "BTC/USDT", now - timedelta(minutes=5), 50000.0, asset_class="crypto")
+    _add(session, "ETH/USDT", now - timedelta(minutes=5), 3000.0, asset_class="crypto")
+    _add(session, "DOGE/USDT", now - timedelta(minutes=5), 0.1, asset_class="crypto")
+    session.commit()
+    resp = market_service.get_latest_prices(session)
+    symbols = {item.symbol for item in resp.items}
+    assert {"BTC/USDT", "ETH/USDT"} <= symbols
+    assert "DOGE/USDT" not in symbols                                # 未配置的 alt 被过滤掉
+
+
+def test_latest_prices_includes_currency_class(session):
+    now = utc_now_naive()
+    _add(session, "DX=F", now - timedelta(minutes=5), 105.0, asset_class="currency")
+    session.commit()
+    resp = market_service.get_latest_prices(session)
+    item = next(i for i in resp.items if i.symbol == "DX=F")
+    assert item.asset_class == "currency"

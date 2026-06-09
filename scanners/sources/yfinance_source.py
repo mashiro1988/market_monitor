@@ -25,6 +25,7 @@ class YFinancePriceSource(BaseSource):
             "futures": config.PRICE_SOURCES.get("us_futures", {}),
             "asian_index": config.PRICE_SOURCES.get("asian_indices", {}),
             "commodity": config.PRICE_SOURCES.get("commodities", {}),
+            "currency": config.PRICE_SOURCES.get("currencies", {}),
             "bond": {
                 name: info["symbol"]
                 for name, info in config.PRICE_SOURCES.get("bonds", {}).items()

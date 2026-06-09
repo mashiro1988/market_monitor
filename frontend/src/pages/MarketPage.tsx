@@ -15,10 +15,11 @@ const classNames: Record<string, string> = {
   asian_index: "亚洲指数",
   bond: "债券利率",
   commodity: "商品",
+  currency: "外汇",
   crypto: "加密货币"
 };
 
-const classOrder = ["stock_index", "futures", "asian_index", "bond", "commodity", "crypto"];
+const classOrder = ["stock_index", "futures", "asian_index", "bond", "commodity", "currency", "crypto"];
 const windowOptions = [
   { label: "1小时", value: "1" },
   { label: "4小时", value: "4" },
@@ -50,6 +51,8 @@ const MARKET_HOURS_BY_SYMBOL: Record<string, string> = {
   "CL=F": "周一 06:00 — 周六 05:00 (夏令)",
   "GC=F": "周一 06:00 — 周六 05:00 (夏令)",
   "SI=F": "周一 06:00 — 周六 05:00 (夏令)",
+  // 美元指数期货（ICE）
+  "DX=F": "周一 06:00 — 周六 05:00 (夏令)",
   // 美股指数（NYSE / NASDAQ 常规盘）
   "^DJI": "21:30 — 次日 04:00 (夏令)",
   "^IXIC": "21:30 — 次日 04:00 (夏令)",

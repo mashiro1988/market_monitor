@@ -24,13 +24,14 @@ from schemas.market import (
 from services.pagination import clamp_page, page_count
 from services.time_utils import timestamp_pair, utc_now_naive
 
-CLASS_ORDER = ["stock_index", "futures", "asian_index", "bond", "commodity", "crypto"]
+CLASS_ORDER = ["stock_index", "futures", "asian_index", "bond", "commodity", "currency", "crypto"]
 CLASS_NAMES = {
     "stock_index": "美股指数",
     "futures": "美股期货",
     "asian_index": "亚洲指数",
     "bond": "债券利率",
     "commodity": "商品",
+    "currency": "外汇",
     "crypto": "加密货币",
 }
 MARKET_OPEN_NOTES = {
@@ -39,6 +40,7 @@ MARKET_OPEN_NOTES = {
     "asian_index": "北京时间：日本/韩国开盘 08:00，收盘 14:30；A股开盘 09:30，收盘 15:00（午休 11:30-13:00）",
     "bond": "北京时间：美债参考开盘 20:00，收盘 05:00（T+1，美夏令时）；开盘 21:00，收盘 06:00（T+1，美冬令时）；日债参考开盘 08:00，收盘 14:30",
     "commodity": "北京时间：开盘 06:00，收盘 05:00（T+1，美夏令时）；开盘 07:00，收盘 06:00（T+1，美冬令时）",
+    "currency": "北京时间：美元指数期货近 23 小时交易，约 05:00-06:00 收盘（随夏/冬令时）",
 }
 
 
@@ -74,11 +76,15 @@ def get_latest_prices(session: Session) -> MarketLatestResponse:
     for snapshot in snapshots:
         by_symbol[snapshot.symbol].append(snapshot)
 
+    allowed_crypto = {f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})}
     items: list[MarketLatestItem] = []
     for symbol, snaps in by_symbol.items():
         if not snaps:
             continue
         latest = snaps[-1]
+        # 市场概览加密区只显示当前配置的币种（如 BTC/ETH）；已停采的 alt 立刻消失
+        if latest.asset_class == "crypto" and symbol not in allowed_crypto:
+            continue
         items.append(
             MarketLatestItem(
                 name=latest.name,
