@@ -75,6 +75,14 @@ def test_delete_unknown_id_returns_false(session):
     assert prediction_service.delete_tracked_market(session, 99999) is False
 
 
+def test_delete_already_dismissed_returns_false(session):
+    created = prediction_service.create_tracked_market(
+        session, TrackedMarketCreate(kind="slug", identifier="foo")
+    )
+    assert prediction_service.delete_tracked_market(session, created.id) is True
+    assert prediction_service.delete_tracked_market(session, created.id) is False  # 已删→幂等 404
+
+
 def test_create_strips_whitespace_and_validates_empty(session):
     with pytest.raises(ValueError, match="empty"):
         prediction_service.create_tracked_market(

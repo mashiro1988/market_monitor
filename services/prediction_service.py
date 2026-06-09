@@ -300,8 +300,8 @@ def update_tracked_market(session: Session, tracked_id: int, payload: TrackedMar
 
 def delete_tracked_market(session: Session, tracked_id: int) -> bool:
     row = session.query(TrackedMarket).filter(TrackedMarket.id == tracked_id).first()
-    if row is None:
-        return False
+    if row is None or row.dismissed:
+        return False        # 不存在或已软删 → 调用方返回 404（删第二次幂等）
     # 软删除：打墓碑、留行。seed 的 existing 查全表，行还在→(kind,identifier) 仍命中→重启不补种。
     row.dismissed = True
     session.commit()
