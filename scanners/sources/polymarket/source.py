@@ -35,7 +35,10 @@ class PolymarketSource(BaseSource):
     def _load_tracked_from_db(self) -> tuple[list[str], list[str]]:
         session = get_session()
         try:
-            rows = session.query(TrackedMarket).filter(TrackedMarket.enabled.is_(True)).all()
+            rows = session.query(TrackedMarket).filter(
+                TrackedMarket.enabled.is_(True),
+                TrackedMarket.dismissed.is_(False),
+            ).all()
             slugs = [r.identifier for r in rows if r.kind == "slug"]
             tags = [r.identifier for r in rows if r.kind == "tag"]
             return slugs, tags

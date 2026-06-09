@@ -16,6 +16,8 @@ class TrackedMarket(Base):
     identifier = Column(String(255), nullable=False)
     display_name = Column(String(255), nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
+    # 软删除墓碑：用户删除时置 True（行保留），让 seed 重启时不会把它当"缺失"补种回来。
+    dismissed = Column(Boolean, nullable=False, default=False)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_utc_naive_now)
 

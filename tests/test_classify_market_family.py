@@ -24,3 +24,30 @@ def test_wti_april_separate_family_from_may():
 
 def test_unrelated_market_returns_none():
     assert classify_market_family("Will Bitcoin reach $1m by 2026?") is None
+
+
+def test_core_cpi_mom_groups_by_month():
+    a = classify_market_family("Will Core CPI MoM be 0.3% in May?")
+    b = classify_market_family("Will Core CPI MoM be 0.2% in May?")
+    assert a["id"] == b["id"] == "core_cpi_mom_may"
+    assert a["label"] == "0.3%" and a["order"] == 0.3
+
+
+def test_core_cpi_mom_bounds_and_negative():
+    lo = classify_market_family("Will Core CPI MoM be -0.3% or less in May?")
+    hi = classify_market_family("Will Core CPI MoM be 0.6% or more in May?")
+    assert lo["label"] == "≤-0.3%" and lo["order"] == -0.3
+    assert hi["label"] == "≥0.6%" and hi["order"] == 0.6
+
+
+def test_core_cpi_mom_different_months_separate_family():
+    may = classify_market_family("Will Core CPI MoM be 0.3% in May?")
+    jun = classify_market_family("Will Core CPI MoM be 0.3% in June?")
+    assert may["id"] != jun["id"]
+
+
+def test_monthly_inflation_mom_groups():
+    a = classify_market_family("Will monthly inflation increase by 0.3% in May?")
+    b = classify_market_family("Will monthly inflation increase by 0.1% or less in May?")
+    assert a["id"] == b["id"] == "inflation_mom_may"
+    assert b["label"] == "≤0.1%"

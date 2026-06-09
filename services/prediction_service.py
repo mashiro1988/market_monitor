@@ -100,6 +100,25 @@ def classify_market_family(question: str) -> dict | None:
         threshold = float(match.group(1))
         return {"id": "inflation_threshold_2026", "name": "2026 年美国通胀阈值", "label": f">{threshold:g}%", "order": threshold}
 
+    # 核心 CPI 月环比：同一个月的所有区间桶（如 0.1% / 0.2% / ≤-0.3% / ≥0.6%）聚成一族。
+    # 真实问法："Will Core CPI MoM be 0.3% in May?" / "...be -0.3% or less in May?"
+    match = re.search(r"core cpi mom be (-?[0-9.]+)%(?: (or less|or more))? in (\w+)", q)
+    if match:
+        value = float(match.group(1))
+        bound = match.group(2)
+        month = match.group(3).title()
+        label = f"≤{value:g}%" if bound == "or less" else f"≥{value:g}%" if bound == "or more" else f"{value:g}%"
+        return {"id": f"core_cpi_mom_{month.lower()}", "name": f"{month} 核心CPI月环比", "label": label, "order": value}
+
+    # 月度通胀（headline CPI 月环比）："Will monthly inflation increase by 0.3% in May?"
+    match = re.search(r"monthly inflation increase by (-?[0-9.]+)%(?: (or less|or more))? in (\w+)", q)
+    if match:
+        value = float(match.group(1))
+        bound = match.group(2)
+        month = match.group(3).title()
+        label = f"≤{value:g}%" if bound == "or less" else f"≥{value:g}%" if bound == "or more" else f"{value:g}%"
+        return {"id": f"inflation_mom_{month.lower()}", "name": f"{month} 月度通胀", "label": label, "order": value}
+
     if "strait of hormuz traffic returns to normal by" in q:
         label_match = re.search(r"by (.+?)\?", question or "", flags=re.IGNORECASE)
         label = label_match.group(1).strip() if label_match else question[:40]
@@ -218,6 +237,7 @@ def _tracked_to_schema(row: TrackedMarket) -> TrackedMarketSchema:
 def list_tracked_markets(session: Session) -> list[TrackedMarketSchema]:
     rows = (
         session.query(TrackedMarket)
+        .filter(TrackedMarket.dismissed.is_(False))
         .order_by(TrackedMarket.kind, TrackedMarket.identifier)
         .all()
     )
@@ -235,6 +255,19 @@ def create_tracked_market(session: Session, payload: TrackedMarketCreate) -> Tra
         .first()
     )
     if exists:
+        if exists.dismissed:
+            # 之前被软删的同名项 → 复活而不是报重复。
+            exists.dismissed = False
+            exists.enabled = True
+            new_name = (payload.display_name or "").strip()
+            if new_name:
+                exists.display_name = new_name
+            new_notes = (payload.notes or "").strip()
+            if new_notes:
+                exists.notes = new_notes
+            session.commit()
+            session.refresh(exists)
+            return _tracked_to_schema(exists)
         raise ValueError("duplicate")
 
     row = TrackedMarket(
@@ -269,6 +302,7 @@ def delete_tracked_market(session: Session, tracked_id: int) -> bool:
     row = session.query(TrackedMarket).filter(TrackedMarket.id == tracked_id).first()
     if row is None:
         return False
-    session.delete(row)
+    # 软删除：打墓碑、留行。seed 的 existing 查全表，行还在→(kind,identifier) 仍命中→重启不补种。
+    row.dismissed = True
     session.commit()
     return True

@@ -68,6 +68,12 @@ def _ensure_sqlite_schema():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_price_annotations ADD COLUMN {column_name} {column_type}"))
 
+        # tracked_markets：补软删除墓碑列（删除留行，避免 seed 重启把它补种回来）。
+        if "tracked_markets" in table_names:
+            existing = {col["name"] for col in inspector.get_columns("tracked_markets")}
+            if "dismissed" not in existing:
+                conn.execute(text("ALTER TABLE tracked_markets ADD COLUMN dismissed BOOLEAN NOT NULL DEFAULT 0"))
+
 
 def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: list[str] | None = None):
     """从给定 slug/tag 列表 upsert tracked_markets。已存在的 (kind, identifier) 行跳过，

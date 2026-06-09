@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from database import Base
 from models.tracked_market import TrackedMarket
 from database import seed_tracked_markets
+from services import prediction_service
 
 
 @pytest.fixture
@@ -58,3 +59,15 @@ def test_seed_does_not_overwrite_user_changes(session):
     row = session.query(TrackedMarket).first()
     assert row.enabled is False
     assert row.display_name == "user override"
+
+
+def test_soft_delete_survives_reseed(session):
+    """删除后重启再 seed，不应把已删的项补种回来（5b 修复）。"""
+    seed_tracked_markets(session, slugs=["foo"], tags=[])
+    row = session.query(TrackedMarket).filter_by(identifier="foo").first()
+    assert prediction_service.delete_tracked_market(session, row.id) is True
+    # 模拟重启再 seed
+    seed_tracked_markets(session, slugs=["foo"], tags=[])
+    rows = session.query(TrackedMarket).filter_by(identifier="foo").all()
+    assert len(rows) == 1 and rows[0].dismissed is True          # 墓碑还在，没重复插入
+    assert all(t.identifier != "foo" for t in prediction_service.list_tracked_markets(session))

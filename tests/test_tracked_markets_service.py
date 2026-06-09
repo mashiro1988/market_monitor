@@ -80,3 +80,18 @@ def test_create_strips_whitespace_and_validates_empty(session):
         prediction_service.create_tracked_market(
             session, TrackedMarketCreate(kind="slug", identifier="   ")
         )
+
+
+def test_create_reactivates_dismissed(session):
+    """软删除后再添加同名项 → 复活，不报 duplicate（5b 修复）。"""
+    created = prediction_service.create_tracked_market(
+        session, TrackedMarketCreate(kind="slug", identifier="foo")
+    )
+    prediction_service.delete_tracked_market(session, created.id)
+    assert prediction_service.list_tracked_markets(session) == []
+    again = prediction_service.create_tracked_market(
+        session, TrackedMarketCreate(kind="slug", identifier="foo")
+    )
+    assert again.identifier == "foo"
+    listed = prediction_service.list_tracked_markets(session)
+    assert len(listed) == 1 and listed[0].identifier == "foo"
