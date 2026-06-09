@@ -202,10 +202,12 @@ def test_hourly_threshold_summary_uses_market_overview_default_symbols(monkeypat
             cooldown_minutes=0,
             enabled=True,
         ),
+        # SOL 有规则+异动，但不在 MARKET_OVERVIEW_DEFAULT_SYMBOLS 里 → 必须被摘要排除，
+        # 以此证明整点摘要严格按概览清单取样（ETH 现已进清单，不再适合当"被排除"样本）。
         AlertRule(
-            name="eth_price_spike",
+            name="sol_price_spike",
             rule_type="price_change",
-            params={"symbol": "ETH/USDT", "threshold_pct": 0.5, "window_minutes": 15},
+            params={"symbol": "SOL/USDT", "threshold_pct": 0.5, "window_minutes": 15},
             channels=["wechat_work"],
             cooldown_minutes=0,
             enabled=True,
@@ -221,11 +223,11 @@ def test_hourly_threshold_summary_uses_market_overview_default_symbols(monkeypat
             price=100.4,
         ),
         SimpleNamespace(
-            symbol="ETH/USDT",
-            name="ETH",
+            symbol="SOL/USDT",
+            name="SOL",
             asset_class="crypto",
             timestamp=datetime(2026, 4, 28, 1, 0),
-            price=2400.0,
+            price=150.0,
         ),
     ]
 
@@ -266,14 +268,14 @@ def test_hourly_threshold_summary_uses_market_overview_default_symbols(monkeypat
             low_price=100.0,
             high_price=100.4,
         ),
-        "ETH/USDT": PriceWindowMove(
+        "SOL/USDT": PriceWindowMove(
             change_pct=0.9,
             start_time=datetime(2026, 4, 28, 0, 45),
             end_time=datetime(2026, 4, 28, 1, 0),
-            start_price=2380.0,
-            end_price=2400.0,
-            low_price=2380.0,
-            high_price=2400.0,
+            start_price=148.0,
+            end_price=150.0,
+            low_price=148.0,
+            high_price=150.0,
         ),
     }
     monkeypatch.setattr(
