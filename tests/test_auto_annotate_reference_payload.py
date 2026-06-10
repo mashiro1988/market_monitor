@@ -161,3 +161,6 @@ def test_prompts_document_reference_changes():
         # 美债10Y 用 bp 口径 + 利率冲击 vs 避险的方向判别指引。
         assert "bp" in prompt
         assert "利率冲击" in prompt
+        # 长窗口（多段合并）指引：触发新闻常在窗口中段，不得因"晚于窗口起点"排除。
+        # 实弹回放（2026-06-09 #26 窗口）证实缺这条会让模型用起点对齐理由拒选。
+        assert "晚于窗口起点" in prompt
