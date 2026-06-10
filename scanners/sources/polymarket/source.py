@@ -72,11 +72,13 @@ class PolymarketSource(BaseSource):
         records: list[PredictionRecord],
         seen_ids: set[str],
         market: dict,
+        origin: str | None = None,
     ):
         for r in self._parse_market(market):
             key = f"{r.market_id}:{r.outcome}"
             if key in seen_ids:
                 continue
+            r.origin = origin
             records.append(r)
             seen_ids.add(key)
 
@@ -89,13 +91,13 @@ class PolymarketSource(BaseSource):
 
         for slug in slugs:
             for market in self._get_markets_by_slug(slug):
-                self._append_market_records(records, seen_ids, market)
+                self._append_market_records(records, seen_ids, market, origin=f"slug:{slug}")
 
         for tag in tags:
             for market in self._search_markets(tag, limit=self.discovery_limit):
                 if self._is_noise_market(market):
                     continue
-                self._append_market_records(records, seen_ids, market)
+                self._append_market_records(records, seen_ids, market, origin=f"tag:{tag}")
 
         logger.info(f"[Polymarket] 获取 {len(records)} 条预测市场记录")
         return records

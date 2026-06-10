@@ -60,6 +60,7 @@ class PredictionScanner:
                     probability=r.probability,
                     prev_probability=prev_probability,
                     volume=r.volume,
+                    origin=getattr(r, "origin", None),
                 )
                 session.add(pm)
 

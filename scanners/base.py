@@ -49,6 +49,8 @@ class PredictionRecord:
     outcome: str            # "Yes", "No"
     probability: float      # 0.0 - 1.0
     volume: Optional[float] = None
+    # 来源跟踪项："slug:<identifier>" / "tag:<identifier>"，由 source 在 fetch 时打标
+    origin: Optional[str] = None
 
 
 class BaseSource(ABC):

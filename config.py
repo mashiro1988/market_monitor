@@ -79,6 +79,11 @@ SCAN_INTERVALS = {
 }
 SCAN_ROLLING_BACKFILL_INTERVALS = int(os.getenv("SCAN_ROLLING_BACKFILL_INTERVALS", "2"))
 
+# 预测市场图表的「活跃」宽限期（分钟）：最后一笔快照落后于表内最新快照超过该值的市场，
+# 视为已停止跟踪（软删除后快照断流），整体从 /predictions 与 families 图表消失。
+# 基准取表内最新快照时间而非墙钟，调度器宕机时不会误杀全部市场。
+PREDICTION_ACTIVE_GRACE_MINUTES = int(os.getenv("PREDICTION_ACTIVE_GRACE_MINUTES", "30"))
+
 # 「跨资产走势」净值基准：取窗口起始时刻之前最后一笔收盘作基准，向前回看上限（天）。
 MARKET_HISTORY_BASELINE_LOOKBACK_DAYS = int(os.getenv("MARKET_HISTORY_BASELINE_LOOKBACK_DAYS", "7"))
 

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+import config
 from models.prediction import PredictionMarket
 from models.tracked_market import TrackedMarket
 from schemas.predictions import (
@@ -41,12 +42,44 @@ def _row_schema(row: PredictionMarket) -> PredictionRow:
 def load_prediction_rows(session: Session, hours: int = 24) -> list[PredictionMarket]:
     hours = max(1, min(int(hours or 24), 24 * 30))
     cutoff = utc_now_naive() - timedelta(hours=hours)
-    return (
+    rows = (
         session.query(PredictionMarket)
         .filter(PredictionMarket.timestamp >= cutoff)
         .order_by(PredictionMarket.timestamp.asc())
         .all()
     )
+    if not rows:
+        return rows
+    # 图表只显示「仍在跟踪」的市场，按市场粒度整体保留/剔除：
+    # 1) 快照带 origin（"slug:x"/"tag:y"）→ 按 tracked_markets 软删状态精确判定：
+    #    删除跟踪立即清图；市场结算/接口抖动导致的断流不误伤（tag 还在跟踪就保留历史）。
+    # 2) 旧快照（origin 为 NULL，无法关联跟踪项）→ 断流启发式兜底：最后一笔快照落后
+    #    表内最新快照超过宽限期视为已停跟踪。基准取表内最新时间而非墙钟，调度器宕机不误杀。
+    active_keys = {
+        f"{t.kind}:{t.identifier}"
+        for t in session.query(TrackedMarket.kind, TrackedMarket.identifier)
+        .filter(TrackedMarket.dismissed.is_(False))
+        .all()
+    }
+    origins_by_market: dict[str, set[str]] = defaultdict(set)
+    latest_by_market: dict[str, datetime] = {}
+    for row in rows:
+        if row.origin:
+            origins_by_market[row.market_id].add(row.origin)
+        prev_latest = latest_by_market.get(row.market_id)
+        if prev_latest is None or row.timestamp > prev_latest:
+            latest_by_market[row.market_id] = row.timestamp
+    latest_ts = max(latest_by_market.values())
+    grace = timedelta(minutes=max(1, int(config.PREDICTION_ACTIVE_GRACE_MINUTES)))
+
+    def _visible(market_id: str) -> bool:
+        origins = origins_by_market.get(market_id)
+        if origins:
+            return bool(origins & active_keys)
+        return latest_by_market[market_id] >= latest_ts - grace
+
+    visible = {market_id for market_id in latest_by_market if _visible(market_id)}
+    return [row for row in rows if row.market_id in visible]
 
 
 def latest_predictions(rows: list[PredictionMarket]) -> list[PredictionMarket]:

@@ -74,6 +74,12 @@ def _ensure_sqlite_schema():
             if "dismissed" not in existing:
                 conn.execute(text("ALTER TABLE tracked_markets ADD COLUMN dismissed BOOLEAN NOT NULL DEFAULT 0"))
 
+        # prediction_markets：补来源跟踪项列（图表按跟踪项软删状态精确过滤；旧快照为 NULL，走断流启发式）。
+        if "prediction_markets" in table_names:
+            existing = {col["name"] for col in inspector.get_columns("prediction_markets")}
+            if "origin" not in existing:
+                conn.execute(text("ALTER TABLE prediction_markets ADD COLUMN origin VARCHAR(120)"))
+
 
 def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: list[str] | None = None):
     """从给定 slug/tag 列表 upsert tracked_markets。已存在的 (kind, identifier) 行跳过，
