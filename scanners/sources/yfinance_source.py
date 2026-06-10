@@ -137,72 +137,87 @@ class YFinancePriceSource(BaseSource):
 
         return records
 
-    def fetch(self) -> list[PriceRecord]:
-        """批量拉取所有 yfinance 品种的最新 5m K 线收盘价"""
-        records = []
+    def _all_tickers(self) -> dict[str, tuple[str, str]]:
+        """symbol -> (asset_class, name)，把所有资产组拍平、合并为一次 yf.download。
 
+        注意：合并**不减少** HTTP 请求数（yf.download 内部对每 ticker 各发一次 chart
+        请求，无批量端点）。合并的真实价值是消除「单品种资产组」落入单 ticker 取列
+        坏分支的结构性风险（见 _close_series_for），并让全品种共享同一条失败/解析路径。"""
+        out: dict[str, tuple[str, str]] = {}
         for asset_class, symbols in self.symbol_groups.items():
-            if not symbols:
-                continue
-
-            name_map = {}
-            ticker_list = []
             for name, symbol in symbols.items():
-                name_map[symbol] = name
-                ticker_list.append(symbol)
+                out[symbol] = (asset_class, name)
+        return out
 
-            if not ticker_list:
-                continue
+    @staticmethod
+    def _close_series_for(df: pd.DataFrame, symbol: str) -> pd.Series:
+        """从 yf.download 结果取单品种收盘序列，兼容两种列形态。
 
+        yfinance ≥0.2.51 对**列表输入**恒返回 MultiIndex 列——即使只有 1 个 ticker，
+        df["Close"] 也是单列 DataFrame 而非 Series。旧代码按 len(ticker_list)==1 特判
+        直接拿 DataFrame 当 Series 用：迭代到的是列名而不是时间戳，fetch_history
+        静默返回 0 条、fetch 落入未收盘 fallback——currencies 组只有美元指数一个品种，
+        这正是它上线后一直无数据的确定性原因之一。"""
+        close = df["Close"]
+        if isinstance(close, pd.DataFrame):
+            return close[symbol]
+        return close
+
+    def fetch(self) -> list[PriceRecord]:
+        """一次 yf.download 批量拉取所有 yfinance 品种的最新 5m K 线收盘价"""
+        records: list[PriceRecord] = []
+        tickers = self._all_tickers()
+        if not tickers:
+            return records
+        ticker_list = list(tickers)
+
+        try:
+            df = yf.download(
+                ticker_list,
+                period=self.PERIOD,
+                interval=self.INTERVAL,
+                prepost=False,
+                auto_adjust=True,
+                progress=False,
+                threads=True,
+                session=self._session,
+            )
+        except Exception as e:
+            logger.error(f"yfinance 批量下载失败: {e}")
+            return records
+
+        if df.empty:
+            logger.warning("yfinance 5m 批量下载返回空数据")
+            return records
+
+        for symbol in ticker_list:
+            asset_class, name = tickers[symbol]
             try:
-                df = yf.download(
-                    ticker_list,
-                    period=self.PERIOD,
-                    interval=self.INTERVAL,
-                    prepost=False,
-                    auto_adjust=True,
-                    progress=False,
-                    threads=True,
-                    session=self._session,
-                )
+                close_series = self._close_series_for(df, symbol)
 
-                if df.empty:
-                    logger.warning(f"yfinance {asset_class} 5m 批量下载返回空数据")
+                picked = self._pick_last_closed(close_series)
+                if picked is None:
+                    logger.warning(f"{name} ({symbol}) 无已收盘 5m K 线")
                     continue
 
-                for symbol in ticker_list:
-                    try:
-                        if len(ticker_list) == 1:
-                            close_series = df["Close"]
-                        else:
-                            close_series = df["Close"][symbol]
+                end_ts, price, prev_price = picked
+                change_pct = (
+                    (price - prev_price) / prev_price * 100
+                    if prev_price else None
+                )
 
-                        picked = self._pick_last_closed(close_series)
-                        if picked is None:
-                            logger.warning(f"{name_map[symbol]} ({symbol}) 无已收盘 5m K 线")
-                            continue
-
-                        end_ts, price, prev_price = picked
-                        change_pct = (
-                            (price - prev_price) / prev_price * 100
-                            if prev_price else None
-                        )
-
-                        records.append(PriceRecord(
-                            asset_class=asset_class,
-                            symbol=symbol,
-                            name=name_map[symbol],
-                            price=price,
-                            prev_price=prev_price,
-                            change_pct=change_pct,
-                            source=self.name,
-                            timestamp=end_ts,
-                        ))
-                    except Exception as e:
-                        logger.error(f"yfinance 解析 {symbol} 失败: {e}")
-
+                records.append(PriceRecord(
+                    asset_class=asset_class,
+                    symbol=symbol,
+                    name=name,
+                    price=price,
+                    prev_price=prev_price,
+                    change_pct=change_pct,
+                    source=self.name,
+                    timestamp=end_ts,
+                ))
             except Exception as e:
-                logger.error(f"yfinance 批量下载 {asset_class} 失败: {e}")
+                logger.error(f"yfinance 解析 {symbol} 失败: {e}")
 
         return records
 
@@ -216,55 +231,45 @@ class YFinancePriceSource(BaseSource):
             return []
 
         records: list[PriceRecord] = []
-        for asset_class, symbols in self.symbol_groups.items():
-            if not symbols:
-                continue
+        tickers = self._all_tickers()
+        if not tickers:
+            return records
+        ticker_list = list(tickers)
 
-            name_map = {}
-            ticker_list = []
-            for name, symbol in symbols.items():
-                name_map[symbol] = name
-                ticker_list.append(symbol)
+        try:
+            df = yf.download(
+                ticker_list,
+                period=self.PERIOD,
+                interval=self.INTERVAL,
+                prepost=False,
+                auto_adjust=True,
+                progress=False,
+                threads=True,
+                session=self._session,
+            )
+        except Exception as e:
+            logger.error(f"yfinance 历史批量下载失败: {e}")
+            return records
 
-            if not ticker_list:
-                continue
+        if df.empty:
+            logger.warning("yfinance 历史 5m 批量下载返回空数据")
+            return records
 
+        for symbol in ticker_list:
+            asset_class, name = tickers[symbol]
             try:
-                df = yf.download(
-                    ticker_list,
-                    period=self.PERIOD,
-                    interval=self.INTERVAL,
-                    prepost=False,
-                    auto_adjust=True,
-                    progress=False,
-                    threads=True,
-                    session=self._session,
-                )
+                close_series = self._close_series_for(df, symbol)
 
-                if df.empty:
-                    logger.warning(f"yfinance {asset_class} 历史 5m 批量下载返回空数据")
-                    continue
-
-                for symbol in ticker_list:
-                    try:
-                        if len(ticker_list) == 1:
-                            close_series = df["Close"]
-                        else:
-                            close_series = df["Close"][symbol]
-
-                        records.extend(self._records_from_close_series(
-                            asset_class=asset_class,
-                            symbol=symbol,
-                            name=name_map[symbol],
-                            close_series=close_series,
-                            start_ts=start_ts,
-                            end_ts=end_ts,
-                        ))
-                    except Exception as e:
-                        logger.error(f"yfinance 历史解析 {symbol} 失败: {e}")
-
+                records.extend(self._records_from_close_series(
+                    asset_class=asset_class,
+                    symbol=symbol,
+                    name=name,
+                    close_series=close_series,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                ))
             except Exception as e:
-                logger.error(f"yfinance 历史批量下载 {asset_class} 失败: {e}")
+                logger.error(f"yfinance 历史解析 {symbol} 失败: {e}")
 
         return records
 
