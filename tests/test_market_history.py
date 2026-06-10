@@ -78,3 +78,29 @@ def test_latest_prices_includes_currency_class(session):
     resp = market_service.get_latest_prices(session)
     item = next(i for i in resp.items if i.symbol == "DX-Y.NYB")
     assert item.asset_class == "currency"
+
+
+def test_symbols_options_match_overview_crypto_filter(session, monkeypatch):
+    """跨资产走势的品种选项必须与概览同口径：白名单外的加密（已停采 alt）不出现。"""
+    monkeypatch.setitem(config.PRICE_SOURCES, "crypto", {"BTC": "BTCUSDT", "ETH": "ETHUSDT"})
+    now = utc_now_naive()
+    _add(session, "BTC/USDT", now - timedelta(minutes=5), 100000.0, asset_class="crypto")
+    _add(session, "DOGE/USDT", now - timedelta(minutes=5), 0.1, asset_class="crypto")   # 6/9 已停采
+    session.commit()
+    values = {s.symbol for s in market_service.get_symbols(session)}
+    assert "BTC/USDT" in values
+    assert "DOGE/USDT" not in values
+
+
+def test_symbols_renamed_symbol_appears_once_with_latest_meta(session):
+    """同一 symbol 历史上改过名/改过资产类（换源）时，选项只出现一次且用最新元数据。"""
+    now = utc_now_naive()
+    s1 = PriceSnapshot(timestamp=now - timedelta(days=2), asset_class="bond",
+                       symbol="US_10Y", name="旧名", price=4.5, source="eastmoney")
+    s2 = PriceSnapshot(timestamp=now - timedelta(minutes=5), asset_class="bond",
+                       symbol="US_10Y", name="美国10年期国债收益率", price=4.6, source="cnbc")
+    session.add_all([s1, s2])
+    session.commit()
+    matches = [s for s in market_service.get_symbols(session) if s.symbol == "US_10Y"]
+    assert len(matches) == 1
+    assert matches[0].name == "美国10年期国债收益率"

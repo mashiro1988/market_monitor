@@ -188,6 +188,17 @@ export function MarketPage() {
   const latest = useQuery({ queryKey: ["market-latest"], queryFn: api.marketLatest, refetchInterval: 60_000 });
   const symbolsList = useQuery({ queryKey: ["market-symbols"], queryFn: () => api.marketSymbols() });
 
+  // 清洗 localStorage 里残留的已停采品种：选项集就绪后剔除无效选中，避免「已选 N 个」
+  // 与图上线数对不上；清空则回退到默认集与选项的交集。单向 + 无变化早退，不构成更新环。
+  useEffect(() => {
+    const items = symbolsList.data;
+    if (!items || !items.length) return;
+    const valid = new Set(items.map((s) => s.symbol));
+    const filtered = chartSymbols.filter((s) => valid.has(s));
+    if (filtered.length === chartSymbols.length) return;
+    setChartSymbols(filtered.length ? filtered : DEFAULT_CHART_SYMBOLS.filter((s) => valid.has(s)));
+  }, [symbolsList.data, chartSymbols]);
+
   const history = useQuery({
     queryKey: ["market-history", hours, chartSymbols.join(",")],
     queryFn: () => api.marketHistory({ hours: Number(hours), symbols: chartSymbols }),

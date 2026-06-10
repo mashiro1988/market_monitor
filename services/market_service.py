@@ -110,15 +110,29 @@ def get_latest_prices(session: Session) -> MarketLatestResponse:
 
 
 def get_symbols(session: Session, days: int = 10) -> list[MarketSymbol]:
+    """跨资产走势的可选品种，与市场概览（get_latest_prices）同口径：
+    近 N 天有快照 + 加密只留当前配置币种（已停采 alt 同步消失）；
+    按每个 symbol 最新一条快照取 name/asset_class（历史改名/换源不产生重复选项）；
+    排序同概览（CLASS_ORDER 优先级 + symbol）。"""
     cutoff = utc_now_naive() - timedelta(days=max(1, days))
     rows = (
-        session.query(PriceSnapshot.symbol, PriceSnapshot.name, PriceSnapshot.asset_class)
+        session.query(PriceSnapshot.symbol, PriceSnapshot.name, PriceSnapshot.asset_class, PriceSnapshot.timestamp)
         .filter(PriceSnapshot.timestamp >= cutoff)
-        .distinct()
-        .order_by(PriceSnapshot.asset_class, PriceSnapshot.symbol)
+        .order_by(PriceSnapshot.timestamp.asc())
         .all()
     )
-    return [MarketSymbol(symbol=row.symbol, name=row.name, asset_class=row.asset_class) for row in rows]
+    latest_by_symbol: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        latest_by_symbol[row.symbol] = (row.name, row.asset_class)   # 升序遍历 → 留最新
+
+    allowed_crypto = {f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})}
+    items = [
+        MarketSymbol(symbol=symbol, name=name, asset_class=asset_class)
+        for symbol, (name, asset_class) in latest_by_symbol.items()
+        if not (asset_class == "crypto" and symbol not in allowed_crypto)
+    ]
+    items.sort(key=lambda s: (CLASS_ORDER.index(s.asset_class) if s.asset_class in CLASS_ORDER else 99, s.symbol))
+    return items
 
 
 def _window_baseline_prices(
