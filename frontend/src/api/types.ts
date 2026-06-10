@@ -217,7 +217,8 @@ export type AnnotationSymbol = {
 export type ReferenceChange = {
   symbol: string;
   label: string;
-  pct: number | null;
+  pct: number | null;        // unit=pct 时为涨跌%，unit=bp 时为基点
+  unit?: "pct" | "bp";       // 收益率类品种（美债10Y）用 bp
   is_self: boolean;
 };
 

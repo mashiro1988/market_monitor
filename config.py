@@ -87,12 +87,17 @@ PREDICTION_ACTIVE_GRACE_MINUTES = int(os.getenv("PREDICTION_ACTIVE_GRACE_MINUTES
 # 「跨资产走势」净值基准：取窗口起始时刻之前最后一笔收盘作基准，向前回看上限（天）。
 MARKET_HISTORY_BASELINE_LOOKBACK_DAYS = int(os.getenv("MARKET_HISTORY_BASELINE_LOOKBACK_DAYS", "7"))
 
-# 标注页「宏观同期对标」清单：(symbol, 中文标签)。增减对标资产只改这里。
+# 标注页「宏观同期对标」清单：(symbol, 中文标签[, 单位])。增减对标资产只改这里。
 # symbol 必须是 price_snapshots 里在采的（config 价格源内）。
+# 第三项可选 "bp"：收益率类品种按基点显示（+10.0bp = 上行 0.10 个百分点），缺省按涨跌%。
+# 六个对标 = 六条独立宏观通道：风险资产 / 地缘供给 / 避险 / 利率 / 美元流动性 / 加密贝塔。
 ANNOTATION_REFERENCE_ASSETS = [
     ("NQ=F", "纳指"),
     ("CL=F", "原油"),
     ("GC=F", "黄金"),
+    ("US_10Y", "美债10Y", "bp"),
+    ("DX-Y.NYB", "美元指数"),
+    ("BTC/USDT", "BTC"),
 ]
 
 # App / scheduler 启动后最多回补的 5m 价格历史小时数。

@@ -27,9 +27,17 @@ W_END = datetime(2026, 6, 9, 17, 30)
 
 @pytest.fixture
 def session(monkeypatch):
+    # 与 config 真实清单同构：6 个对标，美债10Y 用 bp 口径（3 元组第三项）。
     monkeypatch.setattr(
         config, "ANNOTATION_REFERENCE_ASSETS",
-        [("NQ=F", "纳指"), ("CL=F", "原油"), ("GC=F", "黄金")],
+        [
+            ("NQ=F", "纳指"),
+            ("CL=F", "原油"),
+            ("GC=F", "黄金"),
+            ("US_10Y", "美债10Y", "bp"),
+            ("DX-Y.NYB", "美元指数"),
+            ("BTC/USDT", "BTC"),
+        ],
     )
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(bind=engine)
@@ -55,6 +63,10 @@ def _seed(session):
     _price(session, "NQ=F", "纳指", "futures", W_END, 19800.0)
     _price(session, "CL=F", "原油", "futures", W_START, 70.0)
     _price(session, "CL=F", "原油", "futures", W_END, 72.1)
+    # 美债10Y：4.30% → 4.40%，bp 口径应显示 +10.0bp（而不是 +2.33%）
+    _price(session, "US_10Y", "美债10Y", "bond", W_START, 4.30)
+    _price(session, "US_10Y", "美债10Y", "bond", W_END, 4.40)
+    # 美元指数不喂数据 → null
     # 至少一条候选新闻，否则 auto_annotate 直接短路不调模型
     session.add(NewsItem(
         timestamp=W_START + timedelta(minutes=5), source="jin10",
@@ -92,6 +104,9 @@ def test_auto_annotate_payload_includes_reference_changes(session, monkeypatch):
     assert refs["纳指"] == "-1.00%"
     assert refs["原油"] == "+3.00%"
     assert refs["黄金"] is None
+    assert refs["美债10Y"] == "+10.0bp"   # 收益率用 bp，不用百分比涨跌
+    assert refs["美元指数"] is None
+    assert "BTC" not in refs              # 标注品种本身（BTC/USDT）不对标自己
 
 
 def test_batch_payload_includes_reference_changes(session):
@@ -103,6 +118,7 @@ def test_batch_payload_includes_reference_changes(session):
     assert refs["纳指"] == "-1.00%"
     assert refs["原油"] == "+3.00%"
     assert refs["黄金"] is None
+    assert refs["美债10Y"] == "+10.0bp"
 
 
 def test_reference_changes_exclude_annotated_symbol_itself(session):
@@ -113,6 +129,21 @@ def test_reference_changes_exclude_annotated_symbol_itself(session):
     refs = _payload_json(user_content)["windows"][0]["reference_changes"]
     assert "纳指" not in refs          # 自己不对标自己
     assert refs["原油"] == "+3.00%"
+    assert refs["BTC"] == "-3.00%"     # 标注纳指时，BTC 作为加密对照出现
+
+
+def test_reference_change_schema_carries_unit(session):
+    """UI 用的 ReferenceChange 列表也要带 unit，前端按 bp/% 分别渲染。"""
+    _seed(session)
+    from services.annotation_service import _load_reference_rows, _reference_changes_for_window
+    from datetime import timedelta as _td
+    ref_rows = _load_reference_rows(session, W_START - _td(minutes=15))
+    refs = _reference_changes_for_window(ref_rows, W_START, W_END, 10, "BTC/USDT")
+    by_label = {r.label: r for r in refs}
+    assert by_label["美债10Y"].unit == "bp"
+    assert by_label["美债10Y"].pct == pytest.approx(10.0)
+    assert by_label["纳指"].unit == "pct"
+    assert by_label["纳指"].pct == pytest.approx(-1.0)
 
 
 def test_prompts_document_reference_changes():
@@ -127,3 +158,6 @@ def test_prompts_document_reference_changes():
         assert "全部为 null" in prompt
         # 标注品种本身不出现在 reference_changes 里（键缺失），必须向模型说明不是数据故障。
         assert "不会出现在 reference_changes" in prompt
+        # 美债10Y 用 bp 口径 + 利率冲击 vs 避险的方向判别指引。
+        assert "bp" in prompt
+        assert "利率冲击" in prompt

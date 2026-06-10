@@ -23,11 +23,13 @@ function windowKey(w: PriceWindow): string {
 }
 
 // 单个宏观对标的展示文本 + 涨跌色类。本身 / 无数据（周末/休市）→ 中性灰。
+// 收益率类品种（unit=bp）显示基点变动，其余显示涨跌%。
 function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
   if (ref.is_self) return { text: `${ref.label} 本身`, cls: "ref-neutral" };
   if (ref.pct == null) return { text: `${ref.label} 无`, cls: "ref-neutral" };
   const sign = ref.pct > 0 ? "+" : "";
-  return { text: `${ref.label} ${sign}${ref.pct.toFixed(2)}%`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
+  const value = ref.unit === "bp" ? `${sign}${ref.pct.toFixed(1)}bp` : `${sign}${ref.pct.toFixed(2)}%`;
+  return { text: `${ref.label} ${value}`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
 }
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（勾选/no_clear_news/notes）
