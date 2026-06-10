@@ -73,8 +73,8 @@ def test_latest_prices_filters_unconfigured_crypto(session, monkeypatch):
 
 def test_latest_prices_includes_currency_class(session):
     now = utc_now_naive()
-    _add(session, "DX=F", now - timedelta(minutes=5), 105.0, asset_class="currency")
+    _add(session, "DX-Y.NYB", now - timedelta(minutes=5), 105.0, asset_class="currency")
     session.commit()
     resp = market_service.get_latest_prices(session)
-    item = next(i for i in resp.items if i.symbol == "DX=F")
+    item = next(i for i in resp.items if i.symbol == "DX-Y.NYB")
     assert item.asset_class == "currency"

@@ -119,7 +119,7 @@ MARKET_OVERVIEW_DEFAULT_SYMBOLS = [
     "^N225",      # 日经指数
     "CL=F",       # 原油
     "GC=F",       # 黄金
-    "DX=F",       # 美元指数
+    "DX-Y.NYB",   # 美元指数（ICE 现货指数；Yahoo 已无 DX=F 期货行情）
     "BTC/USDT",   # BTC
     "ETH/USDT",   # ETH
 ]
@@ -161,9 +161,9 @@ PRICE_SOURCES = {
         "黄金": "GC=F",
         "白银": "SI=F",
     },
-    # 美元指数等外汇（yfinance）
+    # 美元指数等外汇（yfinance）。注意：Yahoo 已下架 DX=F（期货）行情，必须用 ICE 现货指数 DX-Y.NYB。
     "currencies": {
-        "美元指数": "DX=F",
+        "美元指数": "DX-Y.NYB",
     },
     # 加密货币（市场概览只跟 BTC/ETH；如需更多在此添加）
     "crypto": {
