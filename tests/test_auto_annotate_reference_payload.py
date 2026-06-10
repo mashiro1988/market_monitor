@@ -167,3 +167,9 @@ def test_prompts_document_reference_changes():
         # 黄金是地缘签名的佐证而非必要条件（2026-06 美伊冲突实测金价未涨），
         # 不得以"黄金没涨"否定地缘归因。
         assert "不必然" in prompt
+        # 对标不可用（CME 日休/周末，主力对标 null、仅剩低波动品种走平）时，
+        # 跨资产签名不得作为排除依据——退回纯事件判断。
+        # 实证：2026-06-10 05:15 BTC 窗口，美军打击伊朗首报在候选里，模型却以
+        # "reference change 无明显变化"拒选。
+        assert "不能用来排除" in prompt
+        assert "纯事件判断" in prompt
