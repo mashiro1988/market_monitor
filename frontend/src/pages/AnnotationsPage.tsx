@@ -260,36 +260,44 @@ export function AnnotationsPage() {
     }
   }, [activeKey, batchByKey, batchMeta]);
 
-  // 用户对当前窗口的勾选 / no_clear_news / notes 改动写回 batchByKey，让其成为 in-progress 单一来源。
-  // 内置幂等：值未变时早退避免与上面 hydrate 形成循环。
-  useEffect(() => {
-    if (!activeKey || !activeWindow) return;
-    setBatchByKey((prev) => {
-      const existing = prev.get(activeKey);
-      const sameSelected = existing
-        ? arraysEqual(existing.selected_news_ids, selectedNews)
-        : selectedNews.length === 0;
-      const sameNoClear = (existing?.no_clear_news ?? false) === noClearNews;
-      const sameSummary = (existing?.summary ?? "") === notes;
-      if (existing && sameSelected && sameNoClear && sameSummary) return prev;
-      // 没 existing + 用户也没动过 → 不创建空 entry
-      if (!existing && !selectedNews.length && !noClearNews && !notes) return prev;
-
-      const next = new Map(prev);
-      next.set(activeKey, {
-        symbol: activeWindow.symbol,
-        window_start_utc: activeWindow.window_start.timestamp_utc!,
-        window_end_utc: activeWindow.window_end.timestamp_utc!,
-        selected_news_ids: selectedNews,
-        no_clear_news: noClearNews,
-        summary: notes,
-        reasoning: existing?.reasoning ?? "",
-        candidate_count: existing?.candidate_count ?? 0,
-        candidate_news_ids: existing?.candidate_news_ids ?? []
+  // 用户编辑（勾选新闻 / no_clear_news / notes）在**事件处理器里**同步写回 batchByKey 草稿。
+  // 不能用 effect 镜像表单→缓存：activeKey 切换时 hydrate（缓存→表单）和写回（表单→缓存）
+  // 会在同一次提交里各自用对方的旧快照互相覆盖，两个存储的值从此每轮渲染互换、
+  // 永不收敛（实测 checked 被以 ~6500 次/秒翻转——就是「勾选框抖动」）。
+  // 事件驱动写回只在用户真实操作时发生，结构上无环；hydrate 保持唯一的 缓存→表单 方向。
+  const updateDraft = useCallback(
+    (patch: Partial<Pick<AutoAnnotateBatchItem, "selected_news_ids" | "no_clear_news" | "summary">>) => {
+      if (!activeKey || !activeWindow) return;
+      setBatchByKey((prev) => {
+        const existing = prev.get(activeKey);
+        const merged = {
+          symbol: activeWindow.symbol,
+          window_start_utc: activeWindow.window_start.timestamp_utc!,
+          window_end_utc: activeWindow.window_end.timestamp_utc!,
+          selected_news_ids: existing?.selected_news_ids ?? [],
+          no_clear_news: existing?.no_clear_news ?? false,
+          summary: existing?.summary ?? "",
+          reasoning: existing?.reasoning ?? "",
+          candidate_count: existing?.candidate_count ?? 0,
+          candidate_news_ids: existing?.candidate_news_ids ?? [],
+          ...patch
+        };
+        // 用户把窗口清回全空且无 AI 痕迹 → 删草稿而不是存空条目（保持「没动过=无草稿」语义，
+        // 批量自动标注的 pending 列表也依赖这一点）。
+        const empty = !merged.selected_news_ids.length && !merged.no_clear_news && !merged.summary && !merged.reasoning;
+        if (empty) {
+          if (!prev.has(activeKey)) return prev;
+          const next = new Map(prev);
+          next.delete(activeKey);
+          return next;
+        }
+        const next = new Map(prev);
+        next.set(activeKey, merged);
+        return next;
       });
-      return next;
-    });
-  }, [activeKey, activeWindow, selectedNews, noClearNews, notes]);
+    },
+    [activeKey, activeWindow]
+  );
 
   // 把 batchByKey / batchMeta / labeler / activeKey 持久化到 sessionStorage。
   // **必须 debounce** —— reasoning 能有几 KB，每次 JSON.stringify + sessionStorage.setItem 是
@@ -446,8 +454,10 @@ export function AnnotationsPage() {
   // 是抖动主因之二。toggleNews 用 useCallback 保持稳定；columns 只在 selectedNews 变化时重建（
   // 此时 checkbox 的 checked 也确实需要更新，是必要的重建）。
   const toggleNews = useCallback((id: number, checked: boolean) => {
-    setSelectedNews((ids) => checked ? [...ids, id] : ids.filter((x) => x !== id));
-  }, []);
+    const next = checked ? [...selectedNews, id] : selectedNews.filter((x) => x !== id);
+    setSelectedNews(next);
+    updateDraft({ selected_news_ids: next });
+  }, [selectedNews, updateDraft]);
 
   const newsColumns = useMemo(() => [
     {
@@ -607,13 +617,27 @@ export function AnnotationsPage() {
               <div className="annotation-save-block">
                 <div className="annotation-form-row">
                   <label className="checkline">
-                    <input type="checkbox" checked={noClearNews} onChange={(event) => setNoClearNews(event.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={noClearNews}
+                      onChange={(event) => {
+                        setNoClearNews(event.target.checked);
+                        updateDraft({ no_clear_news: event.target.checked });
+                      }}
+                    />
                     没有明确新闻触发
                   </label>
                 </div>
                 <label className="field full">
                   <span>备注 / 因果归因</span>
-                  <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="自动标注后会自动填入 summary，可手动修改" />
+                  <textarea
+                    value={notes}
+                    onChange={(event) => {
+                      setNotes(event.target.value);
+                      updateDraft({ summary: event.target.value });
+                    }}
+                    placeholder="自动标注后会自动填入 summary，可手动修改"
+                  />
                 </label>
                 <div className="annotation-save-row">
                   <Button disabled={save.isPending} onClick={() => save.mutate()}>
