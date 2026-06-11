@@ -295,6 +295,18 @@ def annotations(request: AnnotationCreateRequest, db: Session = Depends(get_db))
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
 
 
+@router.get("/annotations/export")
+def annotations_export(days: int = 365, db: Session = Depends(get_db)) -> Response:
+    """标注训练集 JSONL 导出（docs/specs/annotation-v2.md §4）。"""
+    lines = annotation_service.export_training_jsonl(db, days=days)
+    body = "\n".join(lines) + ("\n" if lines else "")
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": "attachment; filename=annotations_training.jsonl"},
+    )
+
+
 @router.get("/annotations", response_model=list[AnnotationListItem])
 def annotation_list(
     symbol: str | None = None,

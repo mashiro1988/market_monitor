@@ -271,8 +271,11 @@ export type AutoAnnotateRequest = {
 };
 
 export type AutoAnnotateResponse = {
-  selected_news_ids: number[];
-  no_clear_news: boolean;
+  selected_news_ids: number[];      // 派生兼容字段（primary+secondary）
+  no_clear_news: boolean;           // 派生兼容字段（无 primary）
+  news_roles: Record<number, string>;        // v2：{news_id: causal_role}，只含非 noise
+  market_reaction_type: string | null;       // v2：八分类
+  confidence: number | null;                 // v2：0-1
   summary: string;
   reasoning: string;
   model: string;
@@ -288,8 +291,11 @@ export type AutoAnnotateBatchItem = {
   symbol: string;
   window_start_utc: string;
   window_end_utc: string;
-  selected_news_ids: number[];
-  no_clear_news: boolean;
+  selected_news_ids: number[];      // 派生兼容字段
+  no_clear_news: boolean;           // 派生兼容字段
+  news_roles: Record<number, string>;
+  market_reaction_type: string | null;
+  confidence: number | null;
   summary: string;
   reasoning: string;  // 该窗口专属 reasoning（来自结构化 JSON），与 batch.reasoning（DeepSeek thinking）不同
   candidate_count: number;
@@ -320,6 +326,8 @@ export type AnnotationListItem = {
   references?: ReferenceChange[];
   no_clear_news: boolean;
   selected_count: number;
+  market_reaction_type?: string | null;
+  confidence?: number | null;
   labeler: string | null;
   notes: string | null;
   created_at: TimeFields;
@@ -331,12 +339,16 @@ export type AnnotationCreateRequest = {
   window_start_utc: string;
   window_end_utc: string;
   threshold_pct: number;
-  selected_news_ids: number[];
-  no_clear_news: boolean;
+  // v2 标签（selected_news_ids / no_clear_news 由后端从 news_roles 派生，前端不再传）
+  news_roles?: Record<number, string>;
+  market_reaction_type?: string | null;
+  confidence?: number | null;
+  selected_news_ids?: number[];
+  no_clear_news?: boolean;
   notes?: string | null;
   labeler?: string | null;
   // 训练数据增强字段：
-  candidate_news_ids?: number[] | null;  // 标注时这个 context 窗口里的全部候选新闻 ID（含未选中作负样本）
+  candidate_news_ids?: number[] | null;  // 标注时这个 context 窗口里的全部候选新闻 ID（含未标作负样本）
   auto_reasoning?: string | null;        // DeepSeek auto-annotate 的 reasoning_content 全文（纯人工则 null）
   auto_summary?: string | null;          // DeepSeek auto-annotate 的 summary 原文（与人改后的 notes 区分）
 };

@@ -5,6 +5,28 @@ from pydantic import BaseModel, Field
 from schemas.common import TimeFields
 from schemas.news import NewsItemSchema
 
+# —— 标注 v2 标签体系（docs/specs/annotation-v2.md）——
+# 每条新闻的因果角色；noise 为默认值，news_roles 里只存非 noise 条目。
+NEWS_CAUSAL_ROLES = (
+    "primary_driver",        # 主驱动
+    "secondary_driver",      # 次驱动 / 同事件簇补充报道
+    "amplifier",             # 放大既有趋势
+    "noise",                 # 噪音（默认，不落库）
+    "post_hoc_explanation",  # 事后解释（行情综述类）
+    "contradictory",         # 新闻方向与价格反应相反
+)
+# 窗口级市场反应类型。
+MARKET_REACTION_TYPES = (
+    "fundamental_repricing",     # 基本面重估
+    "policy_expectation_shift",  # 政策预期变化
+    "liquidity_shock",           # 流动性冲击
+    "risk_sentiment",            # 风险偏好变化
+    "positioning_squeeze",       # 仓位挤压
+    "emotional_noise",           # 情绪波动
+    "technical_move",            # 技术面波动
+    "no_clear_driver",           # 无明显驱动（对应旧 no_clear_news）
+)
+
 
 class PriceRuleSchema(BaseModel):
     symbol: str
@@ -58,6 +80,10 @@ class AnnotationCreateRequest(BaseModel):
     # 自动标注流程：LLM 原始推理 + 摘要（与人审后的 notes 分开存）；纯人工标注则两者都为 None。
     auto_reasoning: str | None = None
     auto_summary: str | None = None
+    # —— v2 标签（None = 旧格式请求，落库时由 selected/no_clear 归一化派生）——
+    news_roles: dict[int, str] | None = None          # {news_id: causal_role}，只含非 noise
+    market_reaction_type: str | None = None           # MARKET_REACTION_TYPES 之一
+    confidence: float | None = None                   # 0-1
 
 
 class AnnotationResponse(BaseModel):
@@ -90,6 +116,9 @@ class AnnotationDetail(BaseModel):
     labeler: str | None = None
     auto_reasoning: str | None = None
     auto_summary: str | None = None
+    news_roles: dict[int, str] = Field(default_factory=dict)
+    market_reaction_type: str | None = None
+    confidence: float | None = None
     created_at: TimeFields
     updated_at: TimeFields
 
@@ -103,9 +132,13 @@ class AutoAnnotateRequest(BaseModel):
 
 
 class AutoAnnotateResponse(BaseModel):
-    """自动标注返回：建议的 selected_news_ids + 推理过程 + 摘要。**不写库**，由前端 review 后调 POST /api/annotations 落库。"""
+    """自动标注返回：v2 标签 + 推理过程 + 摘要。**不写库**，由前端 review 后调 POST /api/annotations 落库。
+    selected_news_ids / no_clear_news 为派生兼容字段（primary+secondary / 无 primary）。"""
     selected_news_ids: list[int] = Field(default_factory=list)
     no_clear_news: bool = False
+    news_roles: dict[int, str] = Field(default_factory=dict)
+    market_reaction_type: str | None = None
+    confidence: float | None = None
     summary: str = ""
     reasoning: str = ""  # DeepSeek 的 message.reasoning_content
     model: str
@@ -125,6 +158,9 @@ class AutoAnnotateBatchItem(BaseModel):
     window_end_utc: str
     selected_news_ids: list[int] = Field(default_factory=list)
     no_clear_news: bool = False
+    news_roles: dict[int, str] = Field(default_factory=dict)
+    market_reaction_type: str | None = None
+    confidence: float | None = None
     summary: str = ""
     reasoning: str = ""  # 模型对该窗口的逐条解释（来自结构化 JSON，不是 message.reasoning_content）
     candidate_count: int = 0
@@ -157,6 +193,8 @@ class AnnotationListItem(BaseModel):
     references: list[ReferenceChange] = Field(default_factory=list)
     no_clear_news: bool
     selected_count: int
+    market_reaction_type: str | None = None
+    confidence: float | None = None
     labeler: str | None
     notes: str | None
     created_at: TimeFields

@@ -1250,3 +1250,56 @@ code {
 .ret-down { color: var(--down); }
 .ret-flat { color: var(--muted); }
 .muted    { color: var(--muted); }
+
+/* === 标注 v2：角色下拉 / 反应类型 / 置信度 === */
+.role-select {
+  background: var(--panel, #11161f);
+  color: var(--muted);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.role-select.role-active {
+  color: #5eead4;
+  border-color: rgba(94, 234, 212, 0.5);
+}
+.v2-labels-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.v2-labels-row .field span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.confidence-tiers {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.tier-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 4px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tier-btn.active {
+  color: #5eead4;
+  border-color: rgba(94, 234, 212, 0.6);
+  background: rgba(94, 234, 212, 0.08);
+}
+.reaction-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(94, 234, 212, 0.35);
+  color: #5eead4;
+  font-size: 12px;
+}

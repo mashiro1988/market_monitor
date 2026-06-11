@@ -12,7 +12,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.annotation_service import _call_deepseek_reasoner, _parse_auto_annotate_response
+from services.annotation_service import _call_deepseek_reasoner, _parse_auto_annotate_v2
+
+DRIVER = ("primary_driver", "secondary_driver")
 
 SCENARIOS = [
     {
@@ -49,10 +51,11 @@ SCENARIOS = [
             {"id": 6257, "time_bj": "2026-06-09 23:10", "source": "jin10", "llm_score": 3,
              "title": "金十数据整理：欧盘美盘重要新闻汇总（2026-06-09）", "content": ""},
         ],
-        # 期望：选中升级信号（6217 或同簇 6212），不选噪音 6200 / 综述 6257
-        "judge": lambda sel, no_clear: (not no_clear) and (6217 in sel or 6212 in sel)
-                  and not any(i in sel for i in (6200, 6257)),
-        "expect": "选中 6217/6212 升级信号；不选 6200 噪音、6257 综述",
+        # 期望：升级信号（6217 或同簇 6212）为主/次驱动；噪音 6200 与综述 6257 不得为驱动；类型非 no_clear/情绪
+        "judge": lambda p: any(p.news_roles.get(i) in DRIVER for i in (6217, 6212))
+                  and not any(p.news_roles.get(i) in DRIVER for i in (6200, 6257))
+                  and p.market_reaction_type not in (None, "no_clear_driver", "emotional_noise"),
+        "expect": "6217/6212 为主/次驱动；6200/6257 非驱动；反应类型为地缘/风险类",
     },
     {
         # 场景 2：2026-06-10 05:15~05:30 BJ（BTC -0.53%）——生产真实漏判。
@@ -88,10 +91,11 @@ SCENARIOS = [
             {"id": 6541, "time_bj": "2026-06-10 05:54", "source": "jin10", "llm_score": 5,
              "title": "据Axios：美国官员称美军袭击了霍尔木兹海峡周边的数个伊朗防空系统和雷达系统。", "content": ""},
         ],
-        # 期望：选中美军打击首报（6515/6517），不选背景回顾 6537
-        "judge": lambda sel, no_clear: (not no_clear) and (6515 in sel or 6517 in sel)
-                  and 6537 not in sel,
-        "expect": "选中 6515/6517 美军打击首报；不选 6537 背景回顾",
+        # 期望：美军打击首报（6515/6517）为主/次驱动；背景回顾 6537 不得为驱动；类型非 no_clear/情绪
+        "judge": lambda p: any(p.news_roles.get(i) in DRIVER for i in (6515, 6517))
+                  and p.news_roles.get(6537) not in DRIVER
+                  and p.market_reaction_type not in (None, "no_clear_driver", "emotional_noise"),
+        "expect": "6515/6517 为主/次驱动；6537 非驱动；反应类型为地缘/风险类",
     },
 ]
 
@@ -101,10 +105,11 @@ def run_scenario(sc) -> bool:
     user_content = f"共 {len(sc['candidates'])} 条候选新闻。\n{json.dumps(body, ensure_ascii=False)}"
     print(f"\n=== 场景：{sc['name']} ===")
     content, reasoning, duration = _call_deepseek_reasoner(user_content)
-    selected, no_clear, summary = _parse_auto_annotate_response(content, {c["id"] for c in sc["candidates"]})
-    ok = sc["judge"](selected, no_clear)
-    print(f"耗时 {duration:.1f}s  no_clear={no_clear}  selected={selected}")
-    print(f"summary: {summary}")
+    parsed = _parse_auto_annotate_v2(content, {c["id"] for c in sc["candidates"]})
+    ok = sc["judge"](parsed)
+    print(f"耗时 {duration:.1f}s  type={parsed.market_reaction_type}  confidence={parsed.confidence}")
+    print(f"news_roles: {parsed.news_roles}")
+    print(f"summary: {parsed.summary}")
     print(f"判定：{'PASS' if ok else 'FAIL'}（期望：{sc['expect']}）")
     if not ok:
         print(f"--- reasoning（前 1200 字）---\n{reasoning[:1200]}")

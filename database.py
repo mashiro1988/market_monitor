@@ -57,16 +57,21 @@ def _ensure_sqlite_schema():
                 conn.execute(text("DROP INDEX IF EXISTS ix_news_source_id"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_source_id ON news_items (source, source_id)"))
 
-        # news_price_annotations：补训练数据列（候选集 + LLM 推理 + LLM 摘要）。
+        # news_price_annotations：补训练数据列（候选集 + LLM 推理 + LLM 摘要 + v2 标签）。
         if "news_price_annotations" in table_names:
             existing = {col["name"] for col in inspector.get_columns("news_price_annotations")}
             for column_name, column_type in {
                 "candidate_news_ids": "TEXT",
                 "auto_reasoning": "TEXT",
                 "auto_summary": "TEXT",
+                "news_roles": "TEXT",
+                "market_reaction_type": "VARCHAR(40)",
+                "confidence": "FLOAT",
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_price_annotations ADD COLUMN {column_name} {column_type}"))
+            # v1 → v2 一次性迁移（幂等：只处理 news_roles 为 NULL 的行）
+            migrate_legacy_annotations(conn)
 
         # tracked_markets：补软删除墓碑列（删除留行，避免 seed 重启把它补种回来）。
         if "tracked_markets" in table_names:
@@ -79,6 +84,34 @@ def _ensure_sqlite_schema():
             existing = {col["name"] for col in inspector.get_columns("prediction_markets")}
             if "origin" not in existing:
                 conn.execute(text("ALTER TABLE prediction_markets ADD COLUMN origin VARCHAR(120)"))
+
+
+def migrate_legacy_annotations(conn) -> int:
+    """把旧二元勾选标注映射为 v2 标签（docs/specs/annotation-v2.md §2）。
+
+    causal_news_ids 第一条 → primary_driver、其余 → secondary_driver；
+    no_clear_news=1 → market_reaction_type='no_clear_driver'。
+    confidence 保持 NULL（导出时作为低保真 schema_version=1 标记）。
+    返回迁移行数；幂等（news_roles IS NULL 才处理）。"""
+    import json as _json
+
+    rows = conn.execute(text(
+        "SELECT id, causal_news_ids, no_clear_news FROM news_price_annotations WHERE news_roles IS NULL"
+    )).fetchall()
+    for row in rows:
+        try:
+            ids = _json.loads(row[1]) if row[1] else []
+        except (ValueError, TypeError):
+            ids = []
+        roles = {str(int(nid)): ("primary_driver" if i == 0 else "secondary_driver")
+                 for i, nid in enumerate(ids)}
+        reaction = "no_clear_driver" if row[2] else None
+        conn.execute(
+            text("UPDATE news_price_annotations SET news_roles = :roles, "
+                 "market_reaction_type = COALESCE(market_reaction_type, :reaction) WHERE id = :id"),
+            {"roles": _json.dumps(roles, ensure_ascii=False), "reaction": reaction, "id": row[0]},
+        )
+    return len(rows)
 
 
 def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: list[str] | None = None):
