@@ -67,10 +67,13 @@ def _ensure_sqlite_schema():
                 "news_roles": "TEXT",
                 "market_reaction_type": "VARCHAR(40)",
                 "confidence": "FLOAT",
+                "auto_news_roles": "TEXT",
+                "prompt_version": "VARCHAR(40)",
+                "eval_set": "BOOLEAN NOT NULL DEFAULT 0",
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_price_annotations ADD COLUMN {column_name} {column_type}"))
-            # v1 → v2 一次性迁移（幂等：只处理 news_roles 为 NULL 的行）
+            # v1 → v2 一次性迁移 + v2.0 枚举升级到 v2.1（均幂等）
             migrate_legacy_annotations(conn)
 
         # tracked_markets：补软删除墓碑列（删除留行，避免 seed 重启把它补种回来）。
@@ -86,15 +89,32 @@ def _ensure_sqlite_schema():
                 conn.execute(text("ALTER TABLE prediction_markets ADD COLUMN origin VARCHAR(120)"))
 
 
-def migrate_legacy_annotations(conn) -> int:
-    """把旧二元勾选标注映射为 v2 标签（docs/specs/annotation-v2.md §2）。
+# v2.0 → v2.1 枚举映射（2026-06-11 与用户定稿：角色不分主次、反应类型收敛为驱动源单轴）
+_ROLE_UPGRADE = {
+    "primary_driver": "driver", "secondary_driver": "driver", "amplifier": "driver",
+}
+_REACTION_UPGRADE = {
+    "fundamental_repricing": "macro_policy", "policy_expectation_shift": "macro_policy",
+    "risk_sentiment": "event_driven",
+    "liquidity_shock": "no_news_driver", "positioning_squeeze": "no_news_driver",
+    "technical_move": "no_news_driver", "emotional_noise": "no_news_driver",
+    "no_clear_driver": "no_news_driver",
+}
 
-    causal_news_ids 第一条 → primary_driver、其余 → secondary_driver；
-    no_clear_news=1 → market_reaction_type='no_clear_driver'。
-    confidence 保持 NULL（导出时作为低保真 schema_version=1 标记）。
-    返回迁移行数；幂等（news_roles IS NULL 才处理）。"""
+
+def migrate_legacy_annotations(conn) -> int:
+    """标注标签迁移（docs/specs/annotation-v2.md §2），两步均幂等：
+
+    1. v1 二元勾选行（news_roles IS NULL）：causal_news_ids 全部 → 'driver'；
+       no_clear_news=1 → market_reaction_type='no_news_driver'。confidence 保持
+       NULL（导出时作为低保真 schema_version=1 标记）。
+    2. v2.0 旧枚举行：news_roles 值与 market_reaction_type 按 _ROLE_UPGRADE /
+       _REACTION_UPGRADE 升级到 v2.1（新值映射到自身 → 重跑无副作用）。
+    返回发生变更的行数。"""
     import json as _json
 
+    changed = 0
+    # 步骤 1：v1 → v2.1
     rows = conn.execute(text(
         "SELECT id, causal_news_ids, no_clear_news FROM news_price_annotations WHERE news_roles IS NULL"
     )).fetchall()
@@ -103,15 +123,34 @@ def migrate_legacy_annotations(conn) -> int:
             ids = _json.loads(row[1]) if row[1] else []
         except (ValueError, TypeError):
             ids = []
-        roles = {str(int(nid)): ("primary_driver" if i == 0 else "secondary_driver")
-                 for i, nid in enumerate(ids)}
-        reaction = "no_clear_driver" if row[2] else None
+        roles = {str(int(nid)): "driver" for nid in ids}
+        reaction = "no_news_driver" if row[2] else None
         conn.execute(
             text("UPDATE news_price_annotations SET news_roles = :roles, "
                  "market_reaction_type = COALESCE(market_reaction_type, :reaction) WHERE id = :id"),
             {"roles": _json.dumps(roles, ensure_ascii=False), "reaction": reaction, "id": row[0]},
         )
-    return len(rows)
+        changed += 1
+
+    # 步骤 2：v2.0 枚举 → v2.1
+    rows = conn.execute(text(
+        "SELECT id, news_roles, market_reaction_type FROM news_price_annotations WHERE news_roles IS NOT NULL"
+    )).fetchall()
+    for row in rows:
+        try:
+            roles = _json.loads(row[1]) if row[1] else {}
+        except (ValueError, TypeError):
+            roles = {}
+        new_roles = {k: _ROLE_UPGRADE.get(v, v) for k, v in roles.items()}
+        new_reaction = _REACTION_UPGRADE.get(row[2], row[2])
+        if new_roles != roles or new_reaction != row[2]:
+            conn.execute(
+                text("UPDATE news_price_annotations SET news_roles = :roles, "
+                     "market_reaction_type = :reaction WHERE id = :id"),
+                {"roles": _json.dumps(new_roles, ensure_ascii=False), "reaction": new_reaction, "id": row[0]},
+            )
+            changed += 1
+    return changed
 
 
 def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: list[str] | None = None):

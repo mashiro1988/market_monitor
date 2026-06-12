@@ -5,26 +5,20 @@ from pydantic import BaseModel, Field
 from schemas.common import TimeFields
 from schemas.news import NewsItemSchema
 
-# —— 标注 v2 标签体系（docs/specs/annotation-v2.md）——
+# —— 标注 v2.1 标签体系（docs/specs/annotation-v2.md；2026-06-11 与用户讨论定稿）——
 # 每条新闻的因果角色；noise 为默认值，news_roles 里只存非 noise 条目。
+# 不分主次驱动：窗口内主次判断主观且训练价值低，"主次"由日级聚合（幅度×置信度）计算。
 NEWS_CAUSAL_ROLES = (
-    "primary_driver",        # 主驱动
-    "secondary_driver",      # 次驱动 / 同事件簇补充报道
-    "amplifier",             # 放大既有趋势
-    "noise",                 # 噪音（默认，不落库）
-    "post_hoc_explanation",  # 事后解释（行情综述类）
-    "contradictory",         # 新闻方向与价格反应相反
+    "driver",                # 驱动（含同事件簇的全部相关报道）
+    "noise",                 # 噪音（默认，不落库；含迟到首报——事件发生在窗口前且已被定价）
+    "post_hoc_explanation",  # 事后解释（价格先动、新闻找理由的行情综述类）
+    "contradictory",         # 方向矛盾（仅限**新发生**的事件、方向与价格真实相反）
 )
-# 窗口级市场反应类型。
+# 窗口级市场反应类型（单轴=驱动源；与 news_roles 闭环：前两类 ⟺ 有 driver）。
 MARKET_REACTION_TYPES = (
-    "fundamental_repricing",     # 基本面重估
-    "policy_expectation_shift",  # 政策预期变化
-    "liquidity_shock",           # 流动性冲击
-    "risk_sentiment",            # 风险偏好变化
-    "positioning_squeeze",       # 仓位挤压
-    "emotional_noise",           # 情绪波动
-    "technical_move",            # 技术面波动
-    "no_clear_driver",           # 无明显驱动（对应旧 no_clear_news）
+    "macro_policy",          # 宏观数据与政策预期（数据公布/央行/官员/财政）
+    "event_driven",          # 其他明确事件驱动（地缘/制裁/监管/行业/标的专属）
+    "no_news_driver",        # 无新闻驱动（情绪/仓位/技术/无法归因；确定性由 confidence 表达）
 )
 
 
@@ -63,6 +57,7 @@ class PriceWindowSchema(BaseModel):
     segment_count: int = 1
     annotation_id: int | None = None  # 已标注则为对应 NewsPriceAnnotation.id
     is_primary: bool = True            # 合并事件窗口恒 True（不再发 secondary）
+    context_pre_minutes: int = 30      # 候选新闻前置窗（按档位：15m 档 30 / 60m 档 60）
     references: list[ReferenceChange] = Field(default_factory=list)  # 宏观同期对标（纳指/原油/黄金…）
 
 
@@ -84,6 +79,10 @@ class AnnotationCreateRequest(BaseModel):
     news_roles: dict[int, str] | None = None          # {news_id: causal_role}，只含非 noise
     market_reaction_type: str | None = None           # MARKET_REACTION_TYPES 之一
     confidence: float | None = None                   # 0-1
+    # AI 原始标注快照（人改前），用于沉淀人机分歧难例；纯人工标注为 None
+    auto_news_roles: dict[int, str] | None = None
+    # 候选新闻前置窗分钟数（多尺度窗口各档不同；不传用默认）
+    context_pre_minutes: int | None = None
 
 
 class AnnotationResponse(BaseModel):
@@ -119,6 +118,9 @@ class AnnotationDetail(BaseModel):
     news_roles: dict[int, str] = Field(default_factory=dict)
     market_reaction_type: str | None = None
     confidence: float | None = None
+    auto_news_roles: dict[int, str] = Field(default_factory=dict)
+    prompt_version: str | None = None
+    eval_set: bool = False
     created_at: TimeFields
     updated_at: TimeFields
 
@@ -129,6 +131,7 @@ class AutoAnnotateRequest(BaseModel):
     window_start_utc: str
     window_end_utc: str
     threshold_pct: float
+    context_pre_minutes: int | None = None   # 多尺度窗口各档候选前置分钟；不传用默认
 
 
 class AutoAnnotateResponse(BaseModel):
@@ -195,6 +198,7 @@ class AnnotationListItem(BaseModel):
     selected_count: int
     market_reaction_type: str | None = None
     confidence: float | None = None
+    eval_set: bool = False
     labeler: str | None
     notes: str | None
     created_at: TimeFields

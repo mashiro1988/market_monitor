@@ -296,15 +296,27 @@ def annotations(request: AnnotationCreateRequest, db: Session = Depends(get_db))
 
 
 @router.get("/annotations/export")
-def annotations_export(days: int = 365, db: Session = Depends(get_db)) -> Response:
-    """标注训练集 JSONL 导出（docs/specs/annotation-v2.md §4）。"""
-    lines = annotation_service.export_training_jsonl(db, days=days)
+def annotations_export(days: int = 365, split: str = "train", db: Session = Depends(get_db)) -> Response:
+    """标注训练集 JSONL 导出（docs/specs/annotation-v2.md §4）。split=train（默认，排除评估集）/eval/all。"""
+    try:
+        lines = annotation_service.export_training_jsonl(db, days=days, split=split)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
     body = "\n".join(lines) + ("\n" if lines else "")
     return Response(
         content=body.encode("utf-8"),
         media_type="application/x-ndjson",
-        headers={"Content-Disposition": "attachment; filename=annotations_training.jsonl"},
+        headers={"Content-Disposition": f"attachment; filename=annotations_{split}.jsonl"},
     )
+
+
+@router.post("/annotations/{annotation_id}/eval-set", response_model=AnnotationResponse)
+def annotation_eval_set(annotation_id: int, value: bool = True, db: Session = Depends(get_db)) -> AnnotationResponse:
+    """把标注冻结进/移出评估集（训练导出默认排除评估集行）。"""
+    try:
+        return AnnotationResponse(id=annotation_service.set_eval_set(db, annotation_id, value))
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_NOT_FOUND", str(exc), status_code=404) from exc
 
 
 @router.get("/annotations", response_model=list[AnnotationListItem])

@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.annotation_service import _call_deepseek_reasoner, _parse_auto_annotate_v2
 
-DRIVER = ("primary_driver", "secondary_driver")
+DRIVER = ("driver",)   # v2.1：驱动不分主次
 
 SCENARIOS = [
     {

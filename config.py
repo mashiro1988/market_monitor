@@ -87,6 +87,22 @@ PREDICTION_ACTIVE_GRACE_MINUTES = int(os.getenv("PREDICTION_ACTIVE_GRACE_MINUTES
 # 「跨资产走势」净值基准：取窗口起始时刻之前最后一笔收盘作基准，向前回看上限（天）。
 MARKET_HISTORY_BASELINE_LOOKBACK_DAYS = int(os.getenv("MARKET_HISTORY_BASELINE_LOOKBACK_DAYS", "7"))
 
+# 标注窗口多尺度规则（2026-06-11 与用户定稿，阈值按近 5 天分布校准）：
+# 每品种若干档 {窗口分钟, 触发阈值%, 净变动门槛%, 候选前置分钟}。
+# 15m 档捕快冲击；60m 档捕慢趋势（长窗口对快照缺口鲁棒——6/10 夜 -1.02% 慢跌即靠它）。
+# 净门槛过滤横跳：同向合并后 |净变动| 低于门槛的窗口整体丢弃（6/10 夜实测 11 窗口 → 3 真实事件）。
+# 显式传 threshold/window 参数的调试路径不走本配置、不做净过滤。
+ANNOTATION_WINDOW_SCALES = {
+    "BTC/USDT": [
+        {"window_minutes": 15, "threshold_pct": 0.5, "net_min_pct": 1.0, "pre_minutes": 30},
+        {"window_minutes": 60, "threshold_pct": 1.2, "net_min_pct": 1.5, "pre_minutes": 60},
+    ],
+    "NQ=F": [
+        {"window_minutes": 15, "threshold_pct": 0.3, "net_min_pct": 0.6, "pre_minutes": 30},
+        {"window_minutes": 60, "threshold_pct": 0.75, "net_min_pct": 1.0, "pre_minutes": 60},
+    ],
+}
+
 # 标注页「宏观同期对标」清单：(symbol, 中文标签[, 单位])。增减对标资产只改这里。
 # symbol 必须是 price_snapshots 里在采的（config 价格源内）。
 # 第三项可选 "bp"：收益率类品种按基点显示（+10.0bp = 上行 0.10 个百分点），缺省按涨跌%。

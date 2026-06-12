@@ -138,6 +138,8 @@ export const api = {
     request<AnnotationDetail>(`/annotations/${id}`),
   deleteAnnotation: (id: number) =>
     request<DeleteAnnotationResponse>(`/annotations/${id}`, { method: "DELETE" }),
+  setAnnotationEvalSet: (id: number, value: boolean) =>
+    request<AnnotationResponse>(`/annotations/${id}/eval-set?value=${value}`, { method: "POST" }),
   autoAnnotate: (body: AutoAnnotateRequest) =>
     request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) }),
   autoAnnotateBatch: (body: AutoAnnotateBatchRequest) =>

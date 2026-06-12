@@ -49,10 +49,13 @@ class NewsPriceAnnotation(Base):
     change_pct = Column(Float, nullable=True)
     causal_news_ids = Column(Text, nullable=True)        # JSON 数组，元素为 news_items.id；v2 起为派生值 = roles 中 primary+secondary
     candidate_news_ids = Column(Text, nullable=True)     # JSON 数组：标注时整个 context 窗口里的全部候选新闻 ID（含负样本，训练用）
-    # —— v2 标签（docs/specs/annotation-v2.md）——
+    # —— v2 标签（docs/specs/annotation-v2.md；v2.1 枚举见 schemas/annotations.py）——
     news_roles = Column(Text, nullable=True)             # JSON dict {news_id: causal_role}，只存非 noise 条目
-    market_reaction_type = Column(String(40), nullable=True)   # fundamental_repricing / ... / no_clear_driver
+    market_reaction_type = Column(String(40), nullable=True)   # macro_policy / event_driven / no_news_driver
     confidence = Column(Float, nullable=True)            # 0-1；旧迁移样本为 NULL（低保真标记）
+    auto_news_roles = Column(Text, nullable=True)        # AI 原始标注（人改前快照），人机分歧=难例信号
+    prompt_version = Column(String(40), nullable=True)   # 产生 auto_* 的提示词版本
+    eval_set = Column(Boolean, nullable=False, default=False)  # 冻结为评估集（训练导出默认排除）
     auto_reasoning = Column(Text, nullable=True)         # DeepSeek auto-annotate 的 reasoning_content 全文；纯人工标注则 NULL
     auto_summary = Column(Text, nullable=True)           # DeepSeek auto-annotate 的 summary 原文（与人改后的 notes 区分）
     no_clear_news = Column(Boolean, nullable=False, default=False)

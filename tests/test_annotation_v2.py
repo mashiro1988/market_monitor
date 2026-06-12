@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""标注 v2：每条新闻 causal_role 六分类 + 窗口 market_reaction_type/confidence + 迁移 + JSONL 导出。
+"""标注 v2.1：causal_role 四分类（driver/noise/post_hoc/contradictory）+
+market_reaction_type 三分类（macro_policy/event_driven/no_news_driver）+
+auto_news_roles/prompt_version/eval_set + 迁移 + JSONL 导出（train/eval split）。
 
 契约见 docs/specs/annotation-v2.md。兼容映射：
-- no_clear_news ⟺ market_reaction_type == "no_clear_driver"（派生，老消费方不破）
-- causal_news_ids ⟺ roles 中 primary_driver + secondary_driver 的 id
+- no_clear_news ⟺ 无 driver（或 reaction == "no_news_driver"）
+- causal_news_ids ⟺ roles 中全部 driver 的 id
 """
 import sys
 import os
@@ -13,7 +15,7 @@ import json
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import config
@@ -62,101 +64,106 @@ def _req(ids, **kw) -> AnnotationCreateRequest:
     )
 
 
-def test_upsert_v2_roundtrip(session):
+def test_upsert_v21_roundtrip(session):
     n1, n2, n3 = _seed(session)
     resp = annotation_service.upsert_annotation(session, _req(
         [n1, n2, n3],
-        news_roles={n1: "primary_driver", n2: "post_hoc_explanation"},
-        market_reaction_type="risk_sentiment",
+        news_roles={n1: "driver", n2: "post_hoc_explanation"},
+        market_reaction_type="event_driven",
         confidence=0.85,
         notes="美军打击导致避险",
+        auto_news_roles={n1: "driver"},          # AI 原始：少标了 n2 的事后解释（人补上的）
+        auto_summary="AI 摘要",
     ))
     d = annotation_service.get_annotation_detail(session, resp.id)
-    assert d.news_roles == {n1: "primary_driver", n2: "post_hoc_explanation"}
-    assert d.market_reaction_type == "risk_sentiment"
+    assert d.news_roles == {n1: "driver", n2: "post_hoc_explanation"}
+    assert d.market_reaction_type == "event_driven"
     assert d.confidence == pytest.approx(0.85)
-    assert d.selected_news_ids == [n1]          # 派生：primary + secondary
-    assert d.no_clear_news is False             # 派生：有 primary → False
+    assert d.selected_news_ids == [n1]          # 派生：全部 driver
+    assert d.no_clear_news is False
+    assert d.auto_news_roles == {n1: "driver"}  # 人机分歧可比对
+    assert d.prompt_version == annotation_service.ANNOTATION_PROMPT_VERSION
 
 
-def test_upsert_v2_no_clear_derivation(session):
+def test_upsert_no_clear_derivation(session):
     ids = _seed(session)
     resp = annotation_service.upsert_annotation(session, _req(
-        ids, news_roles={}, market_reaction_type="no_clear_driver", confidence=0.3,
+        ids, news_roles={}, market_reaction_type="no_news_driver", confidence=0.9,
     ))
     d = annotation_service.get_annotation_detail(session, resp.id)
     assert d.no_clear_news is True
     assert d.selected_news_ids == []
-    assert d.market_reaction_type == "no_clear_driver"
 
 
-def test_upsert_legacy_request_normalized_to_v2(session):
-    """老格式请求（只有 selected/no_clear）写入时归一化为 v2：首条 primary、其余 secondary。"""
+def test_upsert_legacy_request_normalized(session):
+    """老格式请求（selected/no_clear）：全部 selected → driver；no_clear → no_news_driver。"""
     n1, n2, _ = _seed(session)
     resp = annotation_service.upsert_annotation(session, _req(
         [n1, n2], selected_news_ids=[n1, n2], no_clear_news=False,
     ))
     d = annotation_service.get_annotation_detail(session, resp.id)
-    assert d.news_roles == {n1: "primary_driver", n2: "secondary_driver"}
-    assert d.selected_news_ids == [n1, n2]
+    assert d.news_roles == {n1: "driver", n2: "driver"}
+    assert sorted(d.selected_news_ids) == sorted([n1, n2])
 
     resp2 = annotation_service.upsert_annotation(session, _req(
         [n1], selected_news_ids=[], no_clear_news=True,
     ))
     d2 = annotation_service.get_annotation_detail(session, resp2.id)
-    assert d2.market_reaction_type == "no_clear_driver"
+    assert d2.market_reaction_type == "no_news_driver"
     assert d2.no_clear_news is True
 
 
-def test_invalid_roles_and_types_rejected(session):
+def test_old_v20_enums_rejected_at_api(session):
+    """v2.0 旧枚举（primary_driver / risk_sentiment 等）不再是合法输入。"""
     n1, _, _ = _seed(session)
     with pytest.raises(ValueError):
-        annotation_service.upsert_annotation(session, _req([n1], news_roles={n1: "bogus_role"}))
+        annotation_service.upsert_annotation(session, _req([n1], news_roles={n1: "primary_driver"}))
     with pytest.raises(ValueError):
-        annotation_service.upsert_annotation(session, _req([n1], market_reaction_type="bogus_type"))
+        annotation_service.upsert_annotation(session, _req([n1], market_reaction_type="risk_sentiment"))
 
 
-def test_legacy_rows_migrated(session):
-    """库里已有的旧格式行：迁移函数把 causal_news_ids 映射为 roles、no_clear 映射为 reaction_type。"""
+def test_migration_v1_and_v20_rows(session):
+    """迁移两步：v1 二元行 → driver/no_news_driver；v2.0 旧枚举行 → v2.1 枚举。"""
     n1, n2, _ = _seed(session)
-    session.add(NewsPriceAnnotation(
+    session.add(NewsPriceAnnotation(                      # v1 行
         symbol="BTC/USDT", window_start=W_START, window_end=W_END,
         context_start=W_START, context_end=W_END,
         causal_news_ids=json.dumps([n1, n2]), no_clear_news=False,
     ))
-    session.add(NewsPriceAnnotation(
+    session.add(NewsPriceAnnotation(                      # v2.0 行（旧枚举）
         symbol="BTC/USDT", window_start=W_START - timedelta(hours=2), window_end=W_END - timedelta(hours=2),
         context_start=W_START, context_end=W_END,
-        causal_news_ids=json.dumps([]), no_clear_news=True,
+        news_roles=json.dumps({str(n1): "primary_driver", str(n2): "secondary_driver"}),
+        market_reaction_type="risk_sentiment", no_clear_news=False,
+        causal_news_ids=json.dumps([n1, n2]),
     ))
     session.commit()
 
     from database import migrate_legacy_annotations
-    migrated = migrate_legacy_annotations(session.connection())
+    changed = migrate_legacy_annotations(session.connection())
     session.commit()
-    assert migrated == 2
+    assert changed == 2
 
     rows = session.query(NewsPriceAnnotation).order_by(NewsPriceAnnotation.window_start.desc()).all()
-    r_sel, r_noclear = rows[0], rows[1]
-    assert json.loads(r_sel.news_roles) == {str(n1): "primary_driver", str(n2): "secondary_driver"}
-    assert r_sel.market_reaction_type is None
-    assert json.loads(r_noclear.news_roles) == {}
-    assert r_noclear.market_reaction_type == "no_clear_driver"
-    # 幂等：再跑一遍不重复迁移
+    r_v1, r_v20 = rows[0], rows[1]
+    assert json.loads(r_v1.news_roles) == {str(n1): "driver", str(n2): "driver"}
+    assert r_v1.market_reaction_type is None
+    assert json.loads(r_v20.news_roles) == {str(n1): "driver", str(n2): "driver"}
+    assert r_v20.market_reaction_type == "event_driven"
+    # 幂等
     assert migrate_legacy_annotations(session.connection()) == 0
 
 
-def test_parse_auto_v2_filters_and_derives():
-    """v2 解析器：过滤幻觉 id 与非法 role/type，clamp confidence，派生 no_clear/selected。"""
+def test_parse_auto_v21_filters_and_derives():
     raw = json.dumps({
-        "news_roles": {"1": "primary_driver", "2": "post_hoc_explanation", "99": "primary_driver", "3": "bogus"},
-        "market_reaction_type": "risk_sentiment",
+        "news_roles": {"1": "driver", "2": "post_hoc_explanation", "99": "driver", "3": "primary_driver"},
+        "market_reaction_type": "macro_policy",
         "confidence": 1.7,
         "summary": "测试",
     })
     parsed = annotation_service._parse_auto_annotate_v2(raw, {1, 2, 3})
-    assert parsed.news_roles == {1: "primary_driver", 2: "post_hoc_explanation"}   # 99 幻觉、3 非法角色被丢
-    assert parsed.market_reaction_type == "risk_sentiment"
+    assert parsed.news_roles == {1: "driver", 2: "post_hoc_explanation"}   # 99 幻觉、3 旧枚举被丢
+    assert parsed.market_reaction_type == "macro_policy"
     assert parsed.confidence == 1.0
     assert parsed.selected_news_ids == [1]
     assert parsed.no_clear_news is False
@@ -167,33 +174,55 @@ def test_parse_auto_v2_filters_and_derives():
     assert parsed2.no_clear_news is True
 
 
-def test_export_jsonl(session):
+def test_export_jsonl_with_auto_labels(session):
     n1, n2, n3 = _seed(session)
     annotation_service.upsert_annotation(session, _req(
         [n1, n2, n3],
-        news_roles={n1: "primary_driver", n2: "post_hoc_explanation"},
-        market_reaction_type="risk_sentiment",
+        news_roles={n1: "driver", n2: "post_hoc_explanation"},
+        market_reaction_type="event_driven",
         confidence=0.85,
         notes="归因链",
         labeler="akis",
+        auto_news_roles={n1: "driver", n3: "driver"},   # AI 误标了 n3，人改掉了
+        auto_summary="AI 摘要",
     ))
     lines = annotation_service.export_training_jsonl(session, days=30)
     assert len(lines) == 1
     row = json.loads(lines[0])
     assert row["schema_version"] == 2
-    assert row["window"]["symbol"] == "BTC/USDT"
-    assert row["labels"]["market_reaction_type"] == "risk_sentiment"
-    assert row["labels"]["confidence"] == pytest.approx(0.85)
+    assert row["labels"]["market_reaction_type"] == "event_driven"
     roles = {c["id"]: c["causal_role"] for c in row["candidates"]}
-    assert roles[n1] == "primary_driver"
-    assert roles[n3] == "noise"                 # 未标条目导出为 noise（负样本）
-    assert any(c["title"] for c in row["candidates"])
-    assert "reference_changes" in row["window"]
+    assert roles[n1] == "driver"
+    assert roles[n3] == "noise"
+    # 人机分歧可见：AI 标了 n3，最终标签没有
+    assert row["auto_labels"]["news_roles"] == {str(n1): "driver", str(n3): "driver"}
+    assert row["prompt_version"] == annotation_service.ANNOTATION_PROMPT_VERSION
+    assert row["eval_set"] is False
+
+
+def test_export_split_excludes_eval(session):
+    n1, _, _ = _seed(session)
+    resp = annotation_service.upsert_annotation(session, _req([n1], selected_news_ids=[n1]))
+    annotation_service.set_eval_set(session, resp.id, True)
+
+    assert annotation_service.export_training_jsonl(session, days=30, split="train") == []
+    assert len(annotation_service.export_training_jsonl(session, days=30, split="eval")) == 1
+    assert len(annotation_service.export_training_jsonl(session, days=30, split="all")) == 1
+    with pytest.raises(ValueError):
+        annotation_service.export_training_jsonl(session, days=30, split="bogus")
 
 
 def test_export_marks_legacy_low_fidelity(session):
     n1, _, _ = _seed(session)
     annotation_service.upsert_annotation(session, _req([n1], selected_news_ids=[n1]))
-    # 老格式（无 reaction_type/confidence）→ schema_version 1
     row = json.loads(annotation_service.export_training_jsonl(session, days=30)[0])
-    assert row["schema_version"] == 1
+    assert row["schema_version"] == 1          # 无 confidence → 低保真
+
+
+def test_context_pre_minutes_respected(session):
+    n1, _, _ = _seed(session)
+    resp = annotation_service.upsert_annotation(session, _req(
+        [n1], selected_news_ids=[n1], context_pre_minutes=60,
+    ))
+    row = session.query(NewsPriceAnnotation).filter(NewsPriceAnnotation.id == resp.id).first()
+    assert row.context_start == W_START - timedelta(minutes=60)

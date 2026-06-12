@@ -236,6 +236,7 @@ export type PriceWindow = {
   segment_count: number;
   annotation_id: number | null;
   is_primary: boolean;  // 合并事件窗口恒 True
+  context_pre_minutes?: number;  // 候选前置窗（15m 档 30 / 60m 档 60）
   references?: ReferenceChange[];  // 宏观同期对标（纳指/原油/黄金…）
 };
 
@@ -268,6 +269,7 @@ export type AutoAnnotateRequest = {
   window_start_utc: string;
   window_end_utc: string;
   threshold_pct: number;
+  context_pre_minutes?: number;   // 候选前置窗（按窗口档位）
 };
 
 export type AutoAnnotateResponse = {
@@ -328,6 +330,7 @@ export type AnnotationListItem = {
   selected_count: number;
   market_reaction_type?: string | null;
   confidence?: number | null;
+  eval_set?: boolean;
   labeler: string | null;
   notes: string | null;
   created_at: TimeFields;
@@ -351,6 +354,8 @@ export type AnnotationCreateRequest = {
   candidate_news_ids?: number[] | null;  // 标注时这个 context 窗口里的全部候选新闻 ID（含未标作负样本）
   auto_reasoning?: string | null;        // DeepSeek auto-annotate 的 reasoning_content 全文（纯人工则 null）
   auto_summary?: string | null;          // DeepSeek auto-annotate 的 summary 原文（与人改后的 notes 区分）
+  auto_news_roles?: Record<number, string> | null;  // AI 原始角色（人改前快照，人机分歧=难例信号）
+  context_pre_minutes?: number | null;   // 候选前置窗分钟（多尺度窗口各档不同）
 };
 
 export type AnnotationResponse = {

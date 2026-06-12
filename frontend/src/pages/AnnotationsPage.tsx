@@ -53,25 +53,18 @@ function loadStored(): Partial<StoredState> {
   }
 }
 
-// —— v2 标签字典（与 schemas/annotations.py 的枚举一一对应）——
+// —— v2.1 标签字典（与 schemas/annotations.py 的枚举一一对应；2026-06-11 定稿）——
 const ROLE_OPTIONS = [
   { value: "noise", label: "噪音" },
-  { value: "primary_driver", label: "主驱动" },
-  { value: "secondary_driver", label: "次驱动" },
-  { value: "amplifier", label: "放大器" },
+  { value: "driver", label: "驱动" },
   { value: "post_hoc_explanation", label: "事后解释" },
   { value: "contradictory", label: "方向矛盾" },
 ] as const;
 
 const REACTION_OPTIONS = [
-  { value: "fundamental_repricing", label: "基本面重估" },
-  { value: "policy_expectation_shift", label: "政策预期变化" },
-  { value: "liquidity_shock", label: "流动性冲击" },
-  { value: "risk_sentiment", label: "风险偏好变化" },
-  { value: "positioning_squeeze", label: "仓位挤压" },
-  { value: "emotional_noise", label: "情绪波动" },
-  { value: "technical_move", label: "技术面波动" },
-  { value: "no_clear_driver", label: "无明显驱动" },
+  { value: "macro_policy", label: "宏观与政策" },
+  { value: "event_driven", label: "事件驱动" },
+  { value: "no_news_driver", label: "无新闻驱动" },
 ] as const;
 
 const REACTION_LABELS: Record<string, string> = Object.fromEntries(
@@ -236,12 +229,13 @@ export function AnnotationsPage() {
     [unannotatedPrimaries, activeKey]
   );
 
+  const activePre = activeWindow?.context_pre_minutes ?? 30;   // 多尺度：15m 档前 30 / 60m 档前 60
   const contextNews = useQuery({
-    queryKey: ["context-news", activeWindow?.window_start.timestamp_utc, activeWindow?.window_end.timestamp_utc],
+    queryKey: ["context-news", activeWindow?.window_start.timestamp_utc, activeWindow?.window_end.timestamp_utc, activePre],
     queryFn: () => api.contextNews({
       window_start_utc: activeWindow!.window_start.timestamp_utc!,
       window_end_utc: activeWindow!.window_end.timestamp_utc!,
-      pre_minutes: 15,
+      pre_minutes: activePre,
       post_minutes: 30
     }),
     enabled: Boolean(activeWindow)
@@ -375,6 +369,7 @@ export function AnnotationsPage() {
       window_start_utc: activeWindow!.window_start.timestamp_utc!,
       window_end_utc: activeWindow!.window_end.timestamp_utc!,
       threshold_pct: rule?.threshold_pct ?? 0,
+      context_pre_minutes: activePre,
       // v2 标签；selected_news_ids / no_clear_news 由后端从 news_roles 派生
       news_roles: newsRoles,
       market_reaction_type: reactionType,
@@ -383,9 +378,10 @@ export function AnnotationsPage() {
       labeler: autoResult ? `${labeler || ""}${labeler ? " · " : ""}${autoResult.model} (auto, reviewed)` : labeler,
       // 训练数据：把当前展示的全部候选新闻 ID 一起存（即使是纯人工标注，也保留负样本信息）。
       candidate_news_ids: (contextNews.data?.items ?? []).map((item) => item.id),
-      // 自动标注流程：保存 LLM 原始推理 + 摘要，与人改后的 notes 分开。
+      // 自动标注流程：保存 LLM 原始推理 / 摘要 / 原始角色（与人改后的分开存——人机分歧是难例信号）。
       auto_reasoning: autoResult?.reasoning ?? null,
-      auto_summary: autoResult?.summary ?? null
+      auto_summary: autoResult?.summary ?? null,
+      auto_news_roles: autoResult?.news_roles ?? null
     }),
     onSuccess: () => {
       // 已落库 → 从 in-progress 缓存里清掉，避免下次回到该 symbol 时还显示已经保存过的草稿
@@ -409,12 +405,20 @@ export function AnnotationsPage() {
     }
   });
 
+  const evalToggle = useMutation({
+    mutationFn: ({ id, value }: { id: number; value: boolean }) => api.setAnnotationEvalSet(id, value),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["annotation-list"] });
+    }
+  });
+
   const autoAnnotate = useMutation({
     mutationFn: () => api.autoAnnotate({
       symbol: activeWindow!.symbol,
       window_start_utc: activeWindow!.window_start.timestamp_utc!,
       window_end_utc: activeWindow!.window_end.timestamp_utc!,
-      threshold_pct: rule?.threshold_pct ?? 0
+      threshold_pct: rule?.threshold_pct ?? 0,
+      context_pre_minutes: activePre
     }),
     onSuccess: (result) => {
       setAutoResult(result);
@@ -477,7 +481,8 @@ export function AnnotationsPage() {
             symbol: w.symbol,
             window_start_utc: w.window_start.timestamp_utc!,
             window_end_utc: w.window_end.timestamp_utc!,
-            threshold_pct: rule?.threshold_pct ?? 0
+            threshold_pct: rule?.threshold_pct ?? 0,
+            context_pre_minutes: w.context_pre_minutes ?? 30
           }))
         });
         for (const item of response.results) {
@@ -602,7 +607,7 @@ export function AnnotationsPage() {
         <div className="panel-head">
           <h2>未标注 ({groups.length})</h2>
           <span className="muted-text small">
-            连续异动会聚合为一个事件，只标第一次（↳ 续发窗口只展示不标）。候选新闻取窗口前 15 / 后 30 分钟。
+            连续异动会聚合为一个事件，只标第一次。双档窗口（15m 快冲击 / 60m 慢趋势），候选新闻取窗口前 30/60（按档）/ 后 30 分钟。
           </span>
         </div>
 
@@ -659,7 +664,7 @@ export function AnnotationsPage() {
                 <header className="annotation-pair-panel-head">
                   <span>候选新闻</span>
                   <span>
-                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前15/后30 分钟`}
+                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前${activePre}/后30 分钟`}
                   </span>
                 </header>
                 <div className="annotation-pair-panel-body">
@@ -668,7 +673,7 @@ export function AnnotationsPage() {
                    contextNews.error ? <ErrorState error={contextNews.error} /> : (
                     <DataTable<NewsItem>
                       rows={contextNews.data?.items ?? []}
-                      empty="窗口前 15 / 后 30 分钟没有候选新闻"
+                      empty="该窗口前后没有候选新闻"
                       columns={newsColumns}
                     />
                   )}
@@ -808,15 +813,26 @@ export function AnnotationsPage() {
                 key: "action",
                 header: "操作",
                 cell: (row) => (
-                  <button
-                    type="button"
-                    className="link-button danger"
-                    onClick={() => undo.mutate(row.id)}
-                    disabled={undo.isPending && undo.variables === row.id}
-                  >
-                    <RotateCcw size={14} />
-                    撤销
-                  </button>
+                  <span className="annotation-row-actions">
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => evalToggle.mutate({ id: row.id, value: !row.eval_set })}
+                      disabled={evalToggle.isPending}
+                      title="评估集样本不进训练导出，作为提示词/模型迭代的打分基准"
+                    >
+                      {row.eval_set ? "★ 评估集" : "☆ 设为评估"}
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button danger"
+                      onClick={() => undo.mutate(row.id)}
+                      disabled={undo.isPending && undo.variables === row.id}
+                    >
+                      <RotateCcw size={14} />
+                      撤销
+                    </button>
+                  </span>
                 )
               }
             ]}
