@@ -97,6 +97,46 @@ SCENARIOS = [
                   and p.market_reaction_type not in (None, "no_clear_driver", "emotional_noise"),
         "expect": "6515/6517 为主/次驱动；6537 非驱动；反应类型为地缘/风险类",
     },
+    {
+        # 场景 3：2026-06-11 07:15~08:20 BJ（BTC +1.17%）——生产真实案例（v3 prompt 全标 noise）。
+        # 美伊升级新闻密集（关闭霍尔木兹）但 BTC 逆势上涨、原油反跌：市场无视升级。
+        # contradictory 的正确语义=关系标签：重大升级首报应标 contradictory 留痕，而非全降级 noise；
+        # 无 driver → type=no_news_driver。
+        "name": "市场无视地缘升级·BTC 逆势上涨（contradictory 语义）",
+        "window": {
+            "symbol": "BTC/USDT",
+            "start_utc": "2026-06-10T23:15:00", "end_utc": "2026-06-11T00:20:00",
+            "threshold_pct": 0.5, "price_start": 101170.9, "price_end": 102355.8, "change_pct": 1.17,
+            "reference_changes": {"纳指": "+0.26%", "原油": "-1.12%", "黄金": "+0.29%",
+                                   "美债10Y": "+0.8bp", "美元指数": None},
+        },
+        "candidates": [
+            {"id": 8214, "time_bj": "2026-06-11 06:48", "source": "jin10", "llm_score": 7,
+             "title": "【伊朗：关闭霍尔木兹海峡 试图通行将遭打击】伊朗武装部队总参谋部宣布，即日起关闭霍尔木兹海峡，任何试图通行的船只将遭到打击。", "content": ""},
+            {"id": 8218, "time_bj": "2026-06-11 06:53", "source": "jin10", "llm_score": 5,
+             "title": "WTI原油日内涨幅扩大至1.00%，现报93.68美元/桶。", "content": ""},
+            {"id": 8221, "time_bj": "2026-06-11 06:58", "source": "jin10", "llm_score": 5,
+             "title": "美军连续两晚轰炸伊朗！局势会如何演变，市场屏息以待", "content": ""},
+            {"id": 8240, "time_bj": "2026-06-11 07:22", "source": "jin10", "llm_score": 6,
+             "title": "【伊朗革命卫队：已向美军中东多处基地发射弹道导弹】伊朗革命卫队宣布对美军位于卡塔尔与伊拉克的基地发动新一轮导弹打击。", "content": ""},
+            {"id": 8252, "time_bj": "2026-06-11 07:40", "source": "financialjuice", "llm_score": 6,
+             "title": "FinancialJuice: US Central Command confirms strikes on Iranian missile sites near Tehran ongoing", "content": ""},
+            {"id": 8229, "time_bj": "2026-06-11 07:05", "source": "jin10", "llm_score": 3,
+             "title": "金十数据全球财经早餐 | 2026年6月11日", "content": ""},
+            {"id": 8299, "time_bj": "2026-06-11 08:01", "source": "jin10", "llm_score": 5,
+             "title": "日韩股市开盘大跌，日经225指数跌2.1%，韩国KOSPI跌1.8%。", "content": ""},
+            {"id": 8310, "time_bj": "2026-06-11 08:15", "source": "jin10", "llm_score": 4,
+             "title": "我喜欢通胀！特朗普语出惊人，市场哗然", "content": ""},
+            {"id": 8334, "time_bj": "2026-06-11 08:40", "source": "jin10", "llm_score": 3,
+             "title": "金十数据整理：隔夜全球市场表现汇总（2026-06-11）", "content": ""},
+        ],
+        # 期望：无 driver；窗口内重大升级（8240/8252，方向利空而价格涨）至少一条标 contradictory；
+        # 综述（8229/8334）不得为 driver；type=no_news_driver
+        "judge": lambda p: not any(r == "driver" for r in p.news_roles.values())
+                  and any(p.news_roles.get(i) == "contradictory" for i in (8240, 8252, 8214))
+                  and p.market_reaction_type == "no_news_driver",
+        "expect": "无 driver；升级首报 8240/8252 标 contradictory（市场无视）；type=no_news_driver",
+    },
 ]
 
 
