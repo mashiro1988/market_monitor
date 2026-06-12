@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -76,6 +77,16 @@ def _start_background_scheduler() -> BackgroundScheduler:
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] remote_data_cycle failed: {}", exc)
 
+    def gap_repair_cycle() -> None:
+        """价格快照缺口自愈：扫近 24h 缺口 → 定向回补 → 复扫 → 企业微信账目。
+        间歇限频 + 滚动回补只追 10 分钟造成的洞，由这里每小时修复（services/gap_repair.py）。"""
+        try:
+            from services.gap_repair import run_gap_repair
+            stats = run_gap_repair()
+            logger.info("[FastAPI Scheduler] gap_repair finished: {}", stats)
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] gap_repair failed: {}", exc)
+
     def cmc_bootstrap() -> None:
         """启动后异步检查 CMC 板块映射是否过期(7 天 TTL),过期了就刷新。
         作为 date trigger 一次性 job,不阻塞 lifespan。首次启动大概 2 分钟。
@@ -131,6 +142,15 @@ def _start_background_scheduler() -> BackgroundScheduler:
         IntervalTrigger(seconds=REMOTE_DATA_CYCLE_SEC,
                         start_date=datetime.now(timezone.utc) + timedelta(seconds=2)),
         id="remote_data_cycle",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # 缺口自愈：每小时第 37 分（错开 5 分钟扫描栅格与整点 hourly_summary），常态一轮 <10s。
+    scheduler.add_job(
+        gap_repair_cycle,
+        CronTrigger(minute=37),
+        id="gap_repair",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
