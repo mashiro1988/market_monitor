@@ -1356,6 +1356,8 @@ code {
   font-variant-numeric: tabular-nums;
 }
 .netvalue-marker-title {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
