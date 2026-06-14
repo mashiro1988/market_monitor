@@ -25,13 +25,13 @@ export function buildNetValueChart(
     const key = `${series.name} (${series.symbol})`;
     keys.push(key);
     if (series.symbol === annotatedSymbol) highlightKey = key;
-    const base = series.points.find((p) => p.price)?.price ?? null;  // 首个非 0 价作分母
+    const base = series.points.find((p) => p.price !== 0)?.price ?? null;  // 首个非 0 价作分母
     series.points.forEach((point) => {
       if (!point.timestamp_utc) return;
       const utcMinute = point.timestamp_utc.slice(0, 16);
       const displayTime = point.timestamp_bj?.slice(5, 16) ?? utcMinute;
       const row = byUtcMinute.get(utcMinute) ?? { time: displayTime };
-      row[key] = base ? point.price / base : null;
+      row[key] = base !== null ? point.price / base : null;
       byUtcMinute.set(utcMinute, row);
     });
   });
@@ -63,7 +63,7 @@ export function deriveMarkers(
     const target = item.timestamp_utc.slice(0, 16);
     const targetMs = toMs(target);
     let best = buckets[0];
-    let bestDiff = Math.abs(toMs(best.utcMinute) - targetMs);
+    let bestDiff = Infinity;
     for (const bucket of buckets) {
       const diff = Math.abs(toMs(bucket.utcMinute) - targetMs);
       if (diff < bestDiff) {
