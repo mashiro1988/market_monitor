@@ -11,6 +11,7 @@ const AUTO_BATCH_CHUNK = 3;
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
+import { WindowNetValueChart } from "../components/WindowNetValueChart";
 
 const hoursOptions = [
   { label: "24小时", value: "24" },
@@ -615,6 +616,15 @@ export function AnnotationsPage() {
          windowsQuery.error ? <ErrorState error={windowsQuery.error} /> :
          !groups.length ? <EmptyState title="该回溯期内没有未标注的价格异动事件" /> : (
           <>
+            {activeWindow ? (
+              <WindowNetValueChart
+                activeWindow={activeWindow}
+                preMinutes={activePre}
+                postMinutes={30}
+                candidateNews={contextNews.data?.items ?? []}
+                newsRoles={newsRoles}
+              />
+            ) : null}
             <div className="annotation-pair-grid">
               <section className="annotation-pair-panel">
                 <header className="annotation-pair-panel-head">
