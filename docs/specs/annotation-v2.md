@@ -14,30 +14,31 @@
 6. **日级聚合日界 = 北京时间 06:00 固定**（不判断夏令时）；日级 factor_ranking 层设计待后续讨论。
 7. 事件簇去重：**不做**（折叠不过滤=纯装饰，token 非约束）。债券保持 5 分钟采集（CNBC 无限频问题，且 10Y 对标依赖 10 分钟容差）。
 
-## 1. 标签体系
+## 1. 标签体系（v2.1 定稿）
 
-**每条新闻（人工标注唯一维度）— `causal_role` 六分类：**
+> 以代码 `schemas/annotations.py` 的 `NEWS_CAUSAL_ROLES` / `MARKET_REACTION_TYPES` 为准。
+> 顶部「v2.1 修订」记录了从初版 六分类 role + 八分类 reaction_type 收敛到下面 4+3 的过程。
+
+**每条新闻（人工标注唯一维度）— `causal_role` 四分类：**
 
 | 值 | 中文 | 语义 |
 |---|---|---|
-| `primary_driver` | 主驱动 | 直接触发本窗口异动 |
-| `secondary_driver` | 次驱动 | 辅助驱动 / 同事件簇的补充报道 |
-| `amplifier` | 放大器 | 放大既有趋势 |
-| `noise` | 噪音 | 无关 / 背景（**默认值，不落库**） |
-| `post_hoc_explanation` | 事后解释 | 价格先动、新闻找理由（行情综述类） |
-| `contradictory` | 方向矛盾 | 新闻方向与价格反应相反（如缓和消息+下跌） |
+| `driver` | 驱动 | 触发本窗口异动；**不分主次**（同事件簇的全部相关报道都算 driver，主次由日级聚合按 幅度×置信度 计算） |
+| `noise` | 噪音 | 无关 / 背景（**默认值，不落库**）；**含迟到首报**——事件发生在窗口前、价格已在前一时段反应过 |
+| `post_hoc_explanation` | 事后解释 | 价格先动、新闻事后找理由（行情综述类） |
+| `contradictory` | 方向矛盾 | **仅限新发生**的事件、方向与价格真实走向相反（如缓和消息却下跌）；报迟造成的表观矛盾按 noise |
 
 **窗口级：**
 
 | 字段 | 取值 |
 |---|---|
-| `market_reaction_type` | `fundamental_repricing` 基本面重估 / `policy_expectation_shift` 政策预期 / `liquidity_shock` 流动性冲击 / `risk_sentiment` 风险偏好 / `positioning_squeeze` 仓位挤压 / `emotional_noise` 情绪波动 / `technical_move` 技术面 / `no_clear_driver` 无明显驱动 |
+| `market_reaction_type` | 单轴=驱动源，与 roles 闭环（前两类 ⟺ 存在 driver）：`macro_policy` 宏观与政策预期（数据/央行/官员/财政） / `event_driven` 其他明确事件驱动（地缘/制裁/监管/行业/标的专属） / `no_news_driver` 无新闻驱动（情绪/仓位/技术/无法归因合一，确定性由 confidence 表达） |
 | `confidence` | 0-1 浮点；UI 三档：高 0.9 / 中 0.65 / 低 0.3 |
 | `summary` | 因果链一句话（沿用 notes） |
 
 **兼容映射（双向）：**
-- `no_clear_news` ⟺ `market_reaction_type == no_clear_driver`（API 继续返回 no_clear_news 派生值）
-- `causal_news_ids` ⟺ roles 里 `primary_driver` + `secondary_driver` 的 id（继续写入，老消费方不破）
+- `no_clear_news` ⟺ `market_reaction_type == no_news_driver`（API 继续返回 no_clear_news 派生值）
+- `causal_news_ids` ⟺ roles 里 `driver` 的 id（继续写入，老消费方不破）
 
 ## 2. 存储
 
@@ -46,26 +47,25 @@
 - `market_reaction_type` VARCHAR(40)
 - `confidence` FLOAT
 
-**一次性迁移**（schema patch 内，幂等 `WHERE news_roles IS NULL`）：
-- 旧 `causal_news_ids` → 第一条 `primary_driver`、其余 `secondary_driver`
-- 旧 `no_clear_news=1` → `market_reaction_type='no_clear_driver'`
-- `confidence` 留 NULL = 旧样本低保真标记（导出时 `schema_version:1`）
+**一次性迁移**（`database.py`，两步均幂等）：
+- **步骤 1（v1 二元勾选行，`WHERE news_roles IS NULL`）**：`causal_news_ids` 全部 → `driver`（v2.1 不分主次）；`no_clear_news=1` → `market_reaction_type='no_news_driver'`；`confidence` 留 NULL = 旧样本低保真标记（导出时 `schema_version:1`）
+- **步骤 2（v2.0 旧枚举行）**：`news_roles` 值按升级映射归一（`primary_driver`/`secondary_driver`/`amplifier` → `driver`），八分类 `market_reaction_type` → 三分类
 
 ## 3. 自动标注输出契约（单窗口 + 批量同步升级）
 
 ```json
 {
-  "news_roles": {"6515": "primary_driver", "6517": "secondary_driver", "6537": "post_hoc_explanation"},
-  "market_reaction_type": "risk_sentiment",
+  "news_roles": {"6515": "driver", "6517": "driver", "6537": "post_hoc_explanation"},
+  "market_reaction_type": "event_driven",
   "confidence": 0.85,
   "summary": "≤80字因果链"
 }
 ```
 - 未列出的候选 = noise（输出紧凑，候选可上百条）
 - 解析器过滤幻觉 id、非法 role/type，confidence clamp 到 [0,1]
-- `no_clear_news` 由解析器派生（无 primary_driver → true）
-- 原有保守原则 / 跨资产签名 / 对标不可用条款全部保留，把"不选"语义改写为"标对角色"（综述→post_hoc，重复转述→secondary 或 noise，缓和反向→contradictory）
-- 实弹回放双场景升级判定：场景2 期望 6515/6517 ∈ primary/secondary、6537 ∈ post_hoc/noise、type 非 no_clear/emotional
+- `no_clear_news` 由解析器派生（无 `driver` → true）
+- 原有保守原则 / 跨资产签名 / 对标不可用条款全部保留，把"不选"语义改写为"标对角色"（综述→`post_hoc_explanation`，同事件簇的补充/重复转述→`driver` 或 `noise`，**新发生**且方向反向→`contradictory`）
+- 实弹回放双场景升级判定：场景2 期望 6515/6517 标为 `driver`、6537 标为 `post_hoc_explanation` 或 `noise`、type 为 `event_driven`（非 `no_news_driver`）
 
 ## 4. 导出（落 PENDING「标注导出/训练集生成」）
 
@@ -74,9 +74,9 @@
 
 ## 5. 前端（AnnotationsPage v2）
 
-- 候选新闻表：勾选框列 → 角色 `<select>`（六选项，默认噪音）；草稿 batchByKey 增加 news_roles
-- 保存块：no_clear 勾选框 → reaction_type 八选一 `<select>` + 置信度三档按钮组；summary 沿用
-- 推理面板/已标注列表：展示 reaction_type 徽章 + 主驱数
+- 候选新闻表：勾选框列 → 角色 `<select>`（四选项：驱动/方向矛盾/事后解释/噪音，默认噪音）；草稿 batchByKey 增加 news_roles
+- 保存块：reaction_type 三选一 `<select>`（宏观与政策/事件驱动/无新闻驱动）+ 置信度三档按钮组；summary 沿用（`no_clear_news` 由后端从 `market_reaction_type==no_news_driver` 派生，前端不再单独勾选）
+- 推理面板/已标注列表：展示 reaction_type 徽章 + driver 数
 - sessionStorage key 升 `annotations.session.v2`（旧草稿 schema 不兼容，直接弃读）
 - 写回沿用事件驱动 updateDraft（不回退 effect 镜像）
 
