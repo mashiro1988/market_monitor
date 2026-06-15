@@ -5,7 +5,7 @@ import type { NewsItem, PriceWindow } from "../api/types";
 import { MultiLineChart } from "./Charts";
 import { MultiSelectControl, type MultiOption } from "./Controls";
 import { ErrorState, LoadingState } from "./StateViews";
-import { buildNetValueChart, deriveMarkers } from "./windowNetValue";
+import { buildNetValueChart, computeNetValueDomain, deriveMarkers, shiftUtcIso } from "./windowNetValue";
 
 // 与 MarketPage 默认篮子一致；此处独立持久化（key 不同），互不影响。
 const DEFAULT_BASKET = ["YM=F", "NQ=F", "000001.SS", "^N225", "^KS11", "GC=F", "CL=F", "BTC/USDT"];
@@ -34,10 +34,6 @@ function persistBasket(symbols: string[]) {
   }
 }
 
-function shiftIso(iso: string, deltaMinutes: number): string {
-  return new Date(new Date(iso).getTime() + deltaMinutes * 60_000).toISOString();
-}
-
 export function WindowNetValueChart({
   activeWindow,
   preMinutes,
@@ -59,8 +55,8 @@ export function WindowNetValueChart({
 
   const startRaw = activeWindow.window_start.timestamp_utc;
   const endRaw = activeWindow.window_end.timestamp_utc;
-  const startUtc = startRaw ? shiftIso(startRaw, -preMinutes) : null;
-  const endUtc = endRaw ? shiftIso(endRaw, postMinutes) : null;
+  const startUtc = startRaw ? shiftUtcIso(startRaw, -preMinutes) : null;
+  const endUtc = endRaw ? shiftUtcIso(endRaw, postMinutes) : null;
 
   // 本标的强制纳入并去重（即使不在篮子里）。
   const fetchSymbols = useMemo(
@@ -85,6 +81,9 @@ export function WindowNetValueChart({
     () => deriveMarkers(candidateNews, newsRoles, buckets),
     [candidateNews, newsRoles, buckets]
   );
+
+  // 净值聚集在 1.0 附近，按数据实际范围拟合 Y 轴（不锚定 0），否则线被压扁。
+  const yDomain = useMemo(() => computeNetValueDomain(data, keys), [data, keys]);
 
   const symbolOptions: MultiOption[] = useMemo(() => {
     const items = symbolsList.data ?? [];
@@ -113,6 +112,7 @@ export function WindowNetValueChart({
             unit=""
             baseline={1}
             valueFormatter={(v) => v.toFixed(3)}
+            yDomain={yDomain}
             markers={markers}
             highlightKey={highlightKey ?? undefined}
           />

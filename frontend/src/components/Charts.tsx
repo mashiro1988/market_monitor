@@ -29,7 +29,8 @@ export function MultiLineChart({
   markers = [],
   highlightKey,
   baseline,
-  valueFormatter
+  valueFormatter,
+  yDomain
 }: {
   data: ChartPoint[];
   keys: string[];
@@ -39,6 +40,7 @@ export function MultiLineChart({
   highlightKey?: string;
   baseline?: number;
   valueFormatter?: (value: number) => string;
+  yDomain?: [number, number];
 }) {
   if (!data.length || !keys.length) {
     return <EmptyState title="当前区间没有足够数据" />;
@@ -49,7 +51,7 @@ export function MultiLineChart({
         <LineChart data={data} margin={{ left: 0, right: 12, top: 8, bottom: 0 }}>
           <CartesianGrid stroke="rgba(148,163,184,0.14)" vertical={false} />
           <XAxis dataKey="time" tick={{ fill: "#94a3b8", fontSize: 11 }} minTickGap={28} />
-          <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} unit={valueFormatter ? "" : unit} width={48} tickFormatter={valueFormatter} />
+          <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} unit={valueFormatter ? "" : unit} width={48} tickFormatter={valueFormatter} domain={yDomain} allowDataOverflow={yDomain != null} />
           <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #263142", color: "#e2e8f0" }} />
           <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 12 }} />
           {baseline != null ? (

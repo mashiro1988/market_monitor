@@ -76,3 +76,33 @@ export function deriveMarkers(
 
   return collected.sort((a, b) => a.utc.localeCompare(b.utc)).map((c) => c.marker);
 }
+
+// 后端 timestamp_utc 是 naive UTC（无 Z）；显式按 UTC 解析后再做分钟偏移。
+// 否则 new Date(naiveString) 会按浏览器本地时区解释，导致取数窗口整体偏移（UTC+8 → 偏 8 小时）。
+export function shiftUtcIso(iso: string, deltaMinutes: number): string {
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso);
+  const utc = hasTz ? iso : `${iso.replace(" ", "T")}Z`;
+  return new Date(new Date(utc).getTime() + deltaMinutes * 60_000).toISOString();
+}
+
+// 净值线聚集在 1.0 附近、波动很小；recharts 默认 [0,'auto'] 会把线压扁。
+// 按数据实际 min/max 拟合 Y 轴范围（含最小带宽，避免平线退化），不锚定 0。
+export function computeNetValueDomain(
+  data: ChartPoint[],
+  keys: string[]
+): [number, number] | undefined {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const row of data) {
+    for (const key of keys) {
+      const v = row[key];
+      if (typeof v === "number" && Number.isFinite(v)) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+  }
+  if (min === Infinity) return undefined;
+  const pad = Math.max((max - min) * 0.15, 0.002);
+  return [Math.floor((min - pad) * 1000) / 1000, Math.ceil((max + pad) * 1000) / 1000];
+}
