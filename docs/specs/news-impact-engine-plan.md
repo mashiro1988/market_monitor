@@ -66,7 +66,8 @@
 - **新增** `services/news_tagging.py`（LLM 打 topic/direction/magnitude，可批量）；`services/theme_ledger.py`（前向反应度量 + 按 主题×品种 聚合 + 最近 N 次）；`scripts/backfill_ledger.py`（回灌历史）。
 - **改** `models/news.py` 加列 `topic / news_direction / magnitude_tier / tagged_at`；`database.py` 裸 ALTER 补列。
 - **前向反应 = compute-on-read**（`theme_ledger.forward_reaction` 实时从 `price_snapshots` 算，`minutes` 可调），**不落库**——快照持续回补、窗口可变，固化成列反而产生陈旧脏数据。故**无 `forward_reaction_pct` 列**。
-- **取数防饿死**：`topic_recent_reactions` 分页回扫（非固定 limit），避免最近一批同主题新闻落在无价格时段（NQ=F 休市）把更早合格反应饿死。
+- **每小时数据 settle 作业集**（`api/app.py:gap_repair_cycle`，:37）：① gap-repair 补价格洞 → ② 紧接着给未打标新闻打标 + 写 `traditional_open`（纯日历，入库即定）。顺序固定：先补开市时段的洞、再打标。
+- **取数三道护栏**（替代旧分页回扫）：① 只量**反应窗口已走完**的新闻（timestamp ≤ now−minutes，未走完反应不完整且数据未 settle）；② 传统市场品种 SQL 滤 `traditional_open=True`（休市从源头排除）；③ gap-repair 保证开市新闻反应窗有数据。三者叠加 → 候选基本都有反应，直接取 n（留 buffer 吸收限频残缺，真补不上的由 gap-repair 自检告警）。crypto(BTC) 不滤休市。
 - **severity 匹配边界**：`ledger_overview` 仅展示（recent[] 混量级、每条带 magnitude）；强弱/脱敏判定必须由 Phase 4 调 `topic_recent_reactions(magnitude='大')`，禁止直接拿 overview 做判定。
 - **验证**：`tests/test_theme_ledger.py`（9）+ `tests/test_news_tagging.py`（4）；本地端到端 12 条打标→落库→总览跑通；实弹打标正确（美军打击→地缘/利空/大）。
 - **产出**：每主题一条最近 N 次反应线（净 + 振幅 + 量级标注）。

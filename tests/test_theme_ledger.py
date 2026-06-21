@@ -79,22 +79,21 @@ def test_topic_recent_reactions_ordered(session):
     assert all("magnitude" in r and "news_id" in r for r in recent)
 
 
-def test_topic_recent_reactions_not_starved_by_priceless_recents(session):
-    """大量最近同主题新闻无价格反应（休市/周末发的）不能把更早的合格反应饿死。
-    审查复现：30 条无价格 + 3 条有效 → 必须返回 3，不是 0。"""
-    base = datetime(2026, 6, 1, 12, 0)
-    # 3 条更早、有反应
-    for k in range(3):
-        nt = base + timedelta(days=k)
-        _news(session, "地缘冲突", nt)
-        _price(session, "BTC/USDT", nt, 100.0)
-        _price(session, "BTC/USDT", nt + timedelta(minutes=30), 98.0)
-    # 30 条更晚、无任何价格快照（休市时段发的）
-    for k in range(30):
-        _news(session, "地缘冲突", base + timedelta(days=10, minutes=k))
+def test_topic_recent_reactions_excludes_unelapsed_window(session):
+    """反应窗口还没走完(< minutes)的新闻不进——反应不完整、数据可能还没被 gap-repair settle。"""
+    now = datetime(2026, 6, 20, 12, 0)
+    recent = now - timedelta(minutes=5)        # 5 分钟前发的，30min 窗口未走完
+    _news(session, "地缘冲突", recent)
+    _price(session, "BTC/USDT", recent, 100.0)
+    _price(session, "BTC/USDT", recent + timedelta(minutes=5), 99.0)
+    old = now - timedelta(hours=2)             # 2 小时前，已走完
+    _news(session, "地缘冲突", old)
+    _price(session, "BTC/USDT", old, 100.0)
+    _price(session, "BTC/USDT", old + timedelta(minutes=30), 98.0)
     session.commit()
-    recent = theme_ledger.topic_recent_reactions(session, "地缘冲突", "BTC/USDT", n=5)
-    assert len(recent) == 3
+    r = theme_ledger.topic_recent_reactions(session, "地缘冲突", "BTC/USDT", n=5, now=now)
+    assert len(r) == 1
+    assert r[0]["net_pct"] == pytest.approx(-2.0, abs=0.05)
 
 
 def test_nq_ledger_filters_closed_period_news(session):

@@ -78,14 +78,28 @@ def _start_background_scheduler() -> BackgroundScheduler:
             logger.exception("[FastAPI Scheduler] remote_data_cycle failed: {}", exc)
 
     def gap_repair_cycle() -> None:
-        """价格快照缺口自愈：扫近 24h 缺口 → 定向回补 → 复扫 → 企业微信账目。
-        间歇限频 + 滚动回补只追 10 分钟造成的洞，由这里每小时修复（services/gap_repair.py）。"""
+        """每小时数据settle作业集（news-impact-engine Phase 1）：
+        ① 价格快照缺口自愈（扫近 24h 缺口→回补→复扫→企业微信账目，services/gap_repair.py）；
+        ② 紧接着给未打标新闻打主题/方向/量级 + traditional_open（services/news_tagging.py）。
+        顺序固定：先把开市时段的价格洞补齐，再打标——这样台账取数时开市新闻的反应窗一定有数据，
+        无需分页兜底。打标本身是内容+日历判断、不依赖价格，但放在 gap-repair 之后保持作业集一致。"""
         try:
             from services.gap_repair import run_gap_repair
             stats = run_gap_repair()
             logger.info("[FastAPI Scheduler] gap_repair finished: {}", stats)
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] gap_repair failed: {}", exc)
+        try:
+            from services.news_tagging import tag_untagged
+            from database import SessionLocal
+            session = SessionLocal()
+            try:
+                tagged = tag_untagged(session, limit=1500)
+                logger.info("[FastAPI Scheduler] news_tagging finished: {} 条", tagged)
+            finally:
+                session.close()
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] news_tagging failed: {}", exc)
 
     def cmc_bootstrap() -> None:
         """启动后异步检查 CMC 板块映射是否过期(7 天 TTL),过期了就刷新。

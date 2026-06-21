@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from models.news import NewsItem
 from models.price import PriceSnapshot
 from services import market_calendar
+from services.time_utils import utc_now_naive
 
 DEFAULT_REACTION_MINUTES = 30
 
@@ -51,23 +52,24 @@ def forward_reaction(session: Session, symbol: str, news_time: datetime,
     }
 
 
-# 凑够 n 条合格反应时，最多回扫多少条同主题新闻（防"大量休市时段新闻无价格"把更早合格的饿死，
-# 又不至于在超大稀疏历史上无界全表扫）。
-MAX_REACTION_SCAN = 1000
-
-
 def topic_recent_reactions(session: Session, topic: str, symbol: str, n: int = 5,
                            magnitude: str | None = None,
-                           minutes: int = DEFAULT_REACTION_MINUTES) -> list[dict]:
+                           minutes: int = DEFAULT_REACTION_MINUTES,
+                           now: datetime | None = None) -> list[dict]:
     """同主题最近 N 次反应，时间倒序（最近在前）。magnitude 给定则只取同量级实例
-    （severity 匹配：大比大，避免拿小事件没反应误判脱敏）。无价格反应的新闻跳过。
+    （severity 匹配：大比大，避免拿小事件没反应误判脱敏）。
 
-    传统市场品种(NQ 等)先用 traditional_open 在 SQL 里滤掉**休市时段**发的新闻（系统性问题，
-    从源头排除）；剩下的随机快照缺口（限频丢数）才靠分页回扫兜底——回扫到凑够 n 或扫满
-    MAX_REACTION_SCAN。crypto(BTC) 7×24 不滤。"""
+    三道护栏让候选基本都有反应、无需分页回扫（与每小时 gap-repair 自检配套）：
+    1. **只看反应窗口已走完**的新闻（timestamp ≤ now - minutes）——未走完的反应不完整、
+       且数据可能还没被 gap-repair settle。
+    2. 传统市场品种(NQ 等)用 traditional_open 在 SQL 里滤掉**休市时段**发的新闻。
+    3. gap-repair 每小时把开市时段的快照洞补齐 → 开市新闻的反应窗一定有数据。
+    取 n*2 留一点 buffer 吸收限频导致的极少数残缺；剩下真补不上的洞由 gap-repair 自检推送告警。"""
+    cutoff = (now or utc_now_naive()) - timedelta(minutes=minutes)
     base = (
         session.query(NewsItem)
-        .filter(NewsItem.topic == topic, NewsItem.timestamp.isnot(None))
+        .filter(NewsItem.topic == topic, NewsItem.timestamp.isnot(None),
+                NewsItem.timestamp <= cutoff)
         .order_by(NewsItem.timestamp.desc())
     )
     if magnitude is not None:
@@ -76,26 +78,20 @@ def topic_recent_reactions(session: Session, topic: str, symbol: str, n: int = 5
         base = base.filter(NewsItem.traditional_open.is_(True))
 
     out: list[dict] = []
-    offset, chunk = 0, max(40, max(1, n) * 4)
-    while offset < MAX_REACTION_SCAN:
-        batch = base.offset(offset).limit(chunk).all()
-        if not batch:
+    for news in base.limit(max(1, n) * 2).all():
+        r = forward_reaction(session, symbol, news.timestamp, minutes=minutes)
+        if r is None:
+            continue
+        out.append({
+            "news_id": news.id,
+            "time": news.timestamp,
+            "magnitude": news.magnitude_tier,
+            "direction": news.news_direction,
+            "net_pct": r["net_pct"],
+            "range_pct": r["range_pct"],
+        })
+        if len(out) >= n:
             break
-        for news in batch:
-            r = forward_reaction(session, symbol, news.timestamp, minutes=minutes)
-            if r is None:
-                continue
-            out.append({
-                "news_id": news.id,
-                "time": news.timestamp,
-                "magnitude": news.magnitude_tier,
-                "direction": news.news_direction,
-                "net_pct": r["net_pct"],
-                "range_pct": r["range_pct"],
-            })
-            if len(out) >= n:
-                return out
-        offset += chunk
     return out
 
 
