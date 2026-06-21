@@ -79,6 +79,24 @@ def test_topic_recent_reactions_ordered(session):
     assert all("magnitude" in r and "news_id" in r for r in recent)
 
 
+def test_topic_recent_reactions_not_starved_by_priceless_recents(session):
+    """大量最近同主题新闻无价格反应（休市/周末发的）不能把更早的合格反应饿死。
+    审查复现：30 条无价格 + 3 条有效 → 必须返回 3，不是 0。"""
+    base = datetime(2026, 6, 1, 12, 0)
+    # 3 条更早、有反应
+    for k in range(3):
+        nt = base + timedelta(days=k)
+        _news(session, "地缘冲突", nt)
+        _price(session, "BTC/USDT", nt, 100.0)
+        _price(session, "BTC/USDT", nt + timedelta(minutes=30), 98.0)
+    # 30 条更晚、无任何价格快照（休市时段发的）
+    for k in range(30):
+        _news(session, "地缘冲突", base + timedelta(days=10, minutes=k))
+    session.commit()
+    recent = theme_ledger.topic_recent_reactions(session, "地缘冲突", "BTC/USDT", n=5)
+    assert len(recent) == 3
+
+
 def test_topic_recent_reactions_severity_filter(session):
     """severity 匹配：只取同等量级的实例（大比大）。"""
     base = datetime(2026, 6, 1, 12, 0)

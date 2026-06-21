@@ -50,41 +50,59 @@ def forward_reaction(session: Session, symbol: str, news_time: datetime,
     }
 
 
+# 凑够 n 条合格反应时，最多回扫多少条同主题新闻（防"大量休市时段新闻无价格"把更早合格的饿死，
+# 又不至于在超大稀疏历史上无界全表扫）。
+MAX_REACTION_SCAN = 1000
+
+
 def topic_recent_reactions(session: Session, topic: str, symbol: str, n: int = 5,
                            magnitude: str | None = None,
                            minutes: int = DEFAULT_REACTION_MINUTES) -> list[dict]:
     """同主题最近 N 次反应，时间倒序（最近在前）。magnitude 给定则只取同量级实例
-    （severity 匹配：大比大，避免拿小事件没反应误判脱敏）。无价格反应的新闻跳过。"""
-    query = (
+    （severity 匹配：大比大，避免拿小事件没反应误判脱敏）。无价格反应的新闻跳过。
+
+    分页回扫直到凑够 n 条或扫满 MAX_REACTION_SCAN —— 不能用固定 limit(n*4)，否则最近一批
+    同主题新闻若都落在无价格时段（NQ=F 夜间/周末），会把更早的合格反应静默饿死（返回 < n）。"""
+    base = (
         session.query(NewsItem)
         .filter(NewsItem.topic == topic, NewsItem.timestamp.isnot(None))
         .order_by(NewsItem.timestamp.desc())
     )
     if magnitude is not None:
-        query = query.filter(NewsItem.magnitude_tier == magnitude)
+        base = base.filter(NewsItem.magnitude_tier == magnitude)
 
     out: list[dict] = []
-    for news in query.limit(max(1, n) * 4).all():   # 多取些，反应缺失的会被跳过
-        r = forward_reaction(session, symbol, news.timestamp, minutes=minutes)
-        if r is None:
-            continue
-        out.append({
-            "news_id": news.id,
-            "time": news.timestamp,
-            "magnitude": news.magnitude_tier,
-            "direction": news.news_direction,
-            "net_pct": r["net_pct"],
-            "range_pct": r["range_pct"],
-        })
-        if len(out) >= n:
+    offset, chunk = 0, max(40, max(1, n) * 4)
+    while offset < MAX_REACTION_SCAN:
+        batch = base.offset(offset).limit(chunk).all()
+        if not batch:
             break
+        for news in batch:
+            r = forward_reaction(session, symbol, news.timestamp, minutes=minutes)
+            if r is None:
+                continue
+            out.append({
+                "news_id": news.id,
+                "time": news.timestamp,
+                "magnitude": news.magnitude_tier,
+                "direction": news.news_direction,
+                "net_pct": r["net_pct"],
+                "range_pct": r["range_pct"],
+            })
+            if len(out) >= n:
+                return out
+        offset += chunk
     return out
 
 
 def ledger_overview(session: Session, symbol: str, n: int = 5,
                     minutes: int = DEFAULT_REACTION_MINUTES) -> list[dict]:
     """台账总览：对每个有反应数据的主题给出 {topic, count, recent[]}，按 count 倒序。
-    Phase 1 的人可见产出——让你直接看"哪些主题历史上动过价、最近反应趋势"。"""
+    Phase 1 的人可见产出——让你直接看"哪些主题历史上动过价、最近反应趋势"。
+
+    **仅供展示**：recent[] 混了大/中/小量级（每条带 magnitude 字段供人眼分辨），
+    **不要直接拿它做强弱/脱敏判定**——那必须 severity 匹配（spec §0：拿放话比放话、
+    轰炸比轰炸），由 Phase 4 警报层调 `topic_recent_reactions(..., magnitude='大')` 取数。"""
     topics = [
         t[0] for t in
         session.query(NewsItem.topic).filter(NewsItem.topic.isnot(None)).distinct().all()
