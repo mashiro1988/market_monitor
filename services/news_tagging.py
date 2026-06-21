@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import datetime, timedelta
 
 import requests
 from loguru import logger
@@ -149,16 +148,15 @@ def backfill_traditional_open(session: Session) -> int:
     return len(rows)
 
 
-def tag_untagged(session: Session, limit: int = 500, batch_size: int | None = None,
-                 reaction_minutes: int = 30, now: datetime | None = None) -> int:
-    """给"可打标"的新闻分片打标。"可打标" = 未打标 **且反应窗口已走完**
-    （timestamp ≤ now − reaction_minutes）——窗口没走完时反应还测不到，按用户逻辑不放进打标状态。
-    traditional_open 是前置条件，入库已设；这里不再写它。回灌脚本与每小时 job 共用。"""
+def tag_untagged(session: Session, limit: int = 500, batch_size: int | None = None) -> int:
+    """给"可打标"的新闻分片打内容标签。"可打标" = 未打标 **且前置条件 traditional_open 已具备**
+    （入库即设、backfill 兜底）。内容标签(topic/方向/量级)纯看新闻、**不看价格**，所以**不需要等反应
+    窗口走完**——"窗口走完"只约束反应度量(theme_ledger.topic_recent_reactions)与 driver 标注，不约束
+    内容打标。回灌脚本与每小时 settle job 共用。"""
     batch_size = int(batch_size or config.DEEPSEEK_BATCH_SIZE)
-    cutoff = (now or utc_now_naive()) - timedelta(minutes=reaction_minutes)
     todo = (
         session.query(NewsItem)
-        .filter(NewsItem.tagged_at.is_(None), NewsItem.timestamp <= cutoff)
+        .filter(NewsItem.tagged_at.is_(None), NewsItem.traditional_open.isnot(None))
         .order_by(NewsItem.timestamp.desc())
         .limit(max(1, limit))
         .all()

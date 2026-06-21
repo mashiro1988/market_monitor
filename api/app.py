@@ -81,9 +81,9 @@ def _start_background_scheduler() -> BackgroundScheduler:
         """每小时数据settle作业集（news-impact-engine Phase 1），顺序固定：
         ① 价格快照缺口自愈（扫近 24h 缺口→回补→复扫→企业微信账目，services/gap_repair.py）；
         ② 补 traditional_open（纯日历**前置条件**，新闻入库时本应已设，这里兜底历史/漏设的 NULL 行）；
-        ③ 给"可打标"新闻（已补前置条件 + 反应窗口已走完）打主题/方向/量级（services/news_tagging.py）。
-        先补开市时段的价格洞、再确保前置条件、最后打标——台账取数时开市新闻的反应窗一定有数据，无需分页兜底。
-        打标只写内容标签、不再碰 traditional_open（前置条件已在 ② 或入库时定好）。"""
+        ③ 给"可打标"新闻（已补前置条件 traditional_open）打主题/方向/量级（services/news_tagging.py）。
+        先补开市时段的价格洞、再确保前置条件、最后打标。内容标签纯看新闻、不看价格，**不需要等反应
+        窗口走完**——"窗口走完"只约束反应度量与 driver 标注。打标只写内容标签、不再碰 traditional_open。"""
         try:
             from services.gap_repair import run_gap_repair
             stats = run_gap_repair()

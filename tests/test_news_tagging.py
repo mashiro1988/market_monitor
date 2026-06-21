@@ -29,8 +29,10 @@ def session():
     s.close()
 
 
-def _news(s, title, ts=None):
-    n = NewsItem(timestamp=ts or datetime(2026, 6, 1, 12, 0), source="jin10", title=title, content="", language="zh")
+def _news(s, title, ts=None, traditional_open=True):
+    # traditional_open 默认 True：模拟入库时(news_scanner)已把这个前置条件设好。
+    n = NewsItem(timestamp=ts or datetime(2026, 6, 1, 12, 0), source="jin10", title=title,
+                 content="", language="zh", traditional_open=traditional_open)
     s.add(n); s.commit()
     return n
 
@@ -85,29 +87,42 @@ def test_tag_untagged_only_picks_untagged(session, monkeypatch):
     assert fed_ids == {todo.id}
 
 
-def test_tag_untagged_skips_unelapsed_window(session, monkeypatch):
-    """反应窗口没走完的新闻(刚发的)不进打标状态——按用户逻辑'窗口走完才放成可打标'。"""
+def test_tag_untagged_does_not_wait_for_window(session, monkeypatch):
+    """内容标签不看价格 → 刚发的新闻(反应窗口没走完)也照打，不再卡'窗口走完'。"""
     from datetime import timedelta
-    now = datetime(2026, 6, 20, 12, 0)
-    fresh = _news(session, "刚发的", ts=now - timedelta(minutes=5))      # 未走完
-    old = _news(session, "美军轰炸伊朗", ts=now - timedelta(hours=2))     # 已走完
+    fresh = _news(session, "刚发的大事", ts=datetime(2026, 6, 20, 11, 59))  # 1 分钟前
+
+    def fake_call(user_content):
+        return json.dumps({"items": [{"id": fresh.id, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"}]})
+
+    monkeypatch.setattr(news_tagging, "_call_deepseek_tagger", fake_call)
+    count = news_tagging.tag_untagged(session, limit=50)
+    assert count == 1
+    session.refresh(fresh)
+    assert fresh.topic == "地缘冲突"
+
+
+def test_tag_untagged_requires_traditional_open_precondition(session, monkeypatch):
+    """traditional_open 还没定(NULL)的新闻不进打标状态——前置条件未完成不可打标。"""
+    pending = _news(session, "前置条件未定", traditional_open=None)
+    ready = _news(session, "美军轰炸伊朗", traditional_open=True)
 
     captured = {}
 
     def fake_call(user_content):
         captured["content"] = user_content
-        return json.dumps({"items": [{"id": old.id, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"}]})
+        return json.dumps({"items": [{"id": ready.id, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"}]})
 
     monkeypatch.setattr(news_tagging, "_call_deepseek_tagger", fake_call)
-    news_tagging.tag_untagged(session, limit=50, reaction_minutes=30, now=now)
+    news_tagging.tag_untagged(session, limit=50)
     fed_ids = {item["id"] for item in json.loads(captured["content"].split("\n", 1)[1])["news"]}
-    assert fed_ids == {old.id}                  # 只喂了窗口走完的那条
+    assert fed_ids == {ready.id}                 # 只喂了前置条件已具备的那条
 
 
 def test_backfill_traditional_open(session):
     """给 traditional_open 为 NULL 的历史新闻补前置条件（纯日历，幂等）。"""
-    sat = _news(session, "周末发的", ts=datetime(2026, 6, 13, 16, 0))    # 周六 → NQ 休市
-    weekday = _news(session, "周一发的", ts=datetime(2026, 6, 15, 16, 0))  # 周一 12:00 ET → 开
+    sat = _news(session, "周末发的", ts=datetime(2026, 6, 13, 16, 0), traditional_open=None)    # 周六 → NQ 休市
+    weekday = _news(session, "周一发的", ts=datetime(2026, 6, 15, 16, 0), traditional_open=None)  # 周一 12:00 ET → 开
     assert sat.traditional_open is None and weekday.traditional_open is None
     n = news_tagging.backfill_traditional_open(session)
     assert n == 2
