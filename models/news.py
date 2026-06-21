@@ -24,6 +24,11 @@ class NewsItem(Base):
     llm_scored_at = Column(DateTime, nullable=True)
     language = Column(String(5), nullable=False, default="zh")  # zh, en
     categories = Column(String(200), nullable=True)     # 逗号分隔的标签
+    # —— 主题台账内容标签（news-impact-engine Phase 1，LLM 自动打，不看价格）——
+    topic = Column(String(40), nullable=True)            # config.NEWS_TOPICS 之一
+    news_direction = Column(String(8), nullable=True)    # 利多 / 利空 / 中性（相对风险资产）
+    magnitude_tier = Column(String(2), nullable=True)    # 大 / 中 / 小（a-priori 严重度）
+    tagged_at = Column(DateTime, nullable=True)          # 打标时间；NULL = 未打标（回灌待处理）
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

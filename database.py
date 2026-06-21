@@ -49,6 +49,11 @@ def _ensure_sqlite_schema():
                 "llm_importance_reason": "TEXT",
                 "llm_model": "VARCHAR(80)",
                 "llm_scored_at": "DATETIME",
+                # 主题台账内容标签（news-impact-engine Phase 1）
+                "topic": "VARCHAR(40)",
+                "news_direction": "VARCHAR(8)",
+                "magnitude_tier": "VARCHAR(2)",
+                "tagged_at": "DATETIME",
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_items ADD COLUMN {column_name} {column_type}"))
