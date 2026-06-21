@@ -53,10 +53,10 @@ def test_forward_reaction_none_without_data(session):
 
 # ---------- 主题聚合：最近 N 次 ----------
 
-def _news(s, topic, ts, magnitude="大", direction="利空"):
+def _news(s, topic, ts, magnitude="大", direction="利空", traditional_open=True):
     n = NewsItem(timestamp=ts, source="jin10", title=f"{topic}事件", content="", language="zh",
                  topic=topic, magnitude_tier=magnitude, news_direction=direction,
-                 tagged_at=ts)
+                 traditional_open=traditional_open, tagged_at=ts)
     s.add(n)
     return n
 
@@ -95,6 +95,35 @@ def test_topic_recent_reactions_not_starved_by_priceless_recents(session):
     session.commit()
     recent = theme_ledger.topic_recent_reactions(session, "地缘冲突", "BTC/USDT", n=5)
     assert len(recent) == 3
+
+
+def test_nq_ledger_filters_closed_period_news(session):
+    """NQ 这类传统市场品种：休市时段(traditional_open=False)发的新闻直接被滤掉，
+    不进候选；BTC(crypto)则不滤。"""
+    base = datetime(2026, 6, 1, 12, 0)
+    # 休市发的（不该进 NQ 台账）；给它价格也没用
+    _news(session, "地缘冲突", base + timedelta(days=10), traditional_open=False)
+    _price(session, "NQ=F", base + timedelta(days=10), 20000.0)
+    _price(session, "NQ=F", base + timedelta(days=10, minutes=30), 19800.0)
+    # 开市发的（该进）
+    _news(session, "地缘冲突", base, traditional_open=True)
+    _price(session, "NQ=F", base, 20000.0)
+    _price(session, "NQ=F", base + timedelta(minutes=30), 19700.0)
+    session.commit()
+    nq = theme_ledger.topic_recent_reactions(session, "地缘冲突", "NQ=F", n=5)
+    assert len(nq) == 1                                  # 只剩开市那条
+    assert nq[0]["net_pct"] == pytest.approx(-1.5, abs=0.05)
+
+
+def test_crypto_ledger_ignores_traditional_open_flag(session):
+    """BTC 24h：即便某条 traditional_open=False（周末发的）也照样进台账。"""
+    base = datetime(2026, 6, 1, 12, 0)
+    _news(session, "加密生态", base, traditional_open=False)
+    _price(session, "BTC/USDT", base, 100.0)
+    _price(session, "BTC/USDT", base + timedelta(minutes=30), 103.0)
+    session.commit()
+    btc = theme_ledger.topic_recent_reactions(session, "加密生态", "BTC/USDT", n=5)
+    assert len(btc) == 1
 
 
 def test_topic_recent_reactions_severity_filter(session):

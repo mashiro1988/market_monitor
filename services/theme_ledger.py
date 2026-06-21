@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from models.news import NewsItem
 from models.price import PriceSnapshot
+from services import market_calendar
 
 DEFAULT_REACTION_MINUTES = 30
 
@@ -61,8 +62,9 @@ def topic_recent_reactions(session: Session, topic: str, symbol: str, n: int = 5
     """同主题最近 N 次反应，时间倒序（最近在前）。magnitude 给定则只取同量级实例
     （severity 匹配：大比大，避免拿小事件没反应误判脱敏）。无价格反应的新闻跳过。
 
-    分页回扫直到凑够 n 条或扫满 MAX_REACTION_SCAN —— 不能用固定 limit(n*4)，否则最近一批
-    同主题新闻若都落在无价格时段（NQ=F 夜间/周末），会把更早的合格反应静默饿死（返回 < n）。"""
+    传统市场品种(NQ 等)先用 traditional_open 在 SQL 里滤掉**休市时段**发的新闻（系统性问题，
+    从源头排除）；剩下的随机快照缺口（限频丢数）才靠分页回扫兜底——回扫到凑够 n 或扫满
+    MAX_REACTION_SCAN。crypto(BTC) 7×24 不滤。"""
     base = (
         session.query(NewsItem)
         .filter(NewsItem.topic == topic, NewsItem.timestamp.isnot(None))
@@ -70,6 +72,8 @@ def topic_recent_reactions(session: Session, topic: str, symbol: str, n: int = 5
     )
     if magnitude is not None:
         base = base.filter(NewsItem.magnitude_tier == magnitude)
+    if not market_calendar.is_crypto(symbol):
+        base = base.filter(NewsItem.traditional_open.is_(True))
 
     out: list[dict] = []
     offset, chunk = 0, max(40, max(1, n) * 4)

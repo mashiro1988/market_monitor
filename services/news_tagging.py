@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 import config
 from models.news import NewsItem
+from services import market_calendar
 from services.time_utils import utc_now_naive
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
@@ -126,6 +127,8 @@ def tag_news_batch(session: Session, news_list: list[NewsItem]) -> int:
         n.topic = tags["topic"]
         n.news_direction = tags["direction"]
         n.magnitude_tier = tags["magnitude"]
+        # 纯日历推导（非 LLM）：这条新闻发生时传统市场开没开，台账取数据用。
+        n.traditional_open = market_calendar.is_traditional_open(n.timestamp) if n.timestamp else None
         n.tagged_at = now
     session.commit()
     return len(parsed)

@@ -53,6 +53,7 @@ def _ensure_sqlite_schema():
                 "topic": "VARCHAR(40)",
                 "news_direction": "VARCHAR(8)",
                 "magnitude_tier": "VARCHAR(2)",
+                "traditional_open": "BOOLEAN",
                 "tagged_at": "DATETIME",
             }.items():
                 if column_name not in existing:

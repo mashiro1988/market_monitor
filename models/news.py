@@ -28,6 +28,9 @@ class NewsItem(Base):
     topic = Column(String(40), nullable=True)            # config.NEWS_TOPICS 之一
     news_direction = Column(String(8), nullable=True)    # 利多 / 利空 / 中性（相对风险资产）
     magnitude_tier = Column(String(2), nullable=True)    # 大 / 中 / 小（a-priori 严重度）
+    # 这条新闻发生时传统市场(美式期货)开没开。台账给 NQ 这类品种取数时直接滤掉休市时段的，
+    # 免得"休市发的新闻量不到反应"把更早合格反应饿死（见 services/market_calendar.py）。
+    traditional_open = Column(Boolean, nullable=True)
     tagged_at = Column(DateTime, nullable=True)          # 打标时间；NULL = 未打标（回灌待处理）
     created_at = Column(DateTime, default=datetime.utcnow)
 
