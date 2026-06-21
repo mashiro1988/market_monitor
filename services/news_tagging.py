@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime, timedelta
 
 import requests
 from loguru import logger
@@ -127,19 +128,37 @@ def tag_news_batch(session: Session, news_list: list[NewsItem]) -> int:
         n.topic = tags["topic"]
         n.news_direction = tags["direction"]
         n.magnitude_tier = tags["magnitude"]
-        # 纯日历推导（非 LLM）：这条新闻发生时传统市场开没开，台账取数据用。
-        n.traditional_open = market_calendar.is_traditional_open(n.timestamp) if n.timestamp else None
+        # traditional_open 是**前置条件**，新闻入库时就已设好（news_scanner / backfill_traditional_open），
+        # 打标只写内容标签、不碰它。
         n.tagged_at = now
     session.commit()
     return len(parsed)
 
 
-def tag_untagged(session: Session, limit: int = 500, batch_size: int | None = None) -> int:
-    """给未打标（tagged_at IS NULL）的新闻分片打标。回灌脚本与定时 job 共用。"""
+def backfill_traditional_open(session: Session) -> int:
+    """给 traditional_open 为 NULL 的新闻补这个**前置条件**（纯日历、无 LLM，很快）。
+    历史新闻（入库时还没这列）一次性补；返回补的行数，幂等。"""
+    rows = (
+        session.query(NewsItem)
+        .filter(NewsItem.traditional_open.is_(None), NewsItem.timestamp.isnot(None))
+        .all()
+    )
+    for n in rows:
+        n.traditional_open = market_calendar.is_traditional_open(n.timestamp)
+    session.commit()
+    return len(rows)
+
+
+def tag_untagged(session: Session, limit: int = 500, batch_size: int | None = None,
+                 reaction_minutes: int = 30, now: datetime | None = None) -> int:
+    """给"可打标"的新闻分片打标。"可打标" = 未打标 **且反应窗口已走完**
+    （timestamp ≤ now − reaction_minutes）——窗口没走完时反应还测不到，按用户逻辑不放进打标状态。
+    traditional_open 是前置条件，入库已设；这里不再写它。回灌脚本与每小时 job 共用。"""
     batch_size = int(batch_size or config.DEEPSEEK_BATCH_SIZE)
+    cutoff = (now or utc_now_naive()) - timedelta(minutes=reaction_minutes)
     todo = (
         session.query(NewsItem)
-        .filter(NewsItem.tagged_at.is_(None))
+        .filter(NewsItem.tagged_at.is_(None), NewsItem.timestamp <= cutoff)
         .order_by(NewsItem.timestamp.desc())
         .limit(max(1, limit))
         .all()

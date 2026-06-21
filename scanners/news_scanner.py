@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 from database import get_session
 from models.news import NewsItem
+from services import market_calendar
 from scanners.base import BaseSource, NewsRecord
 from scanners.sources.jin10_source import Jin10Source
 from scanners.sources.rss_source import create_rss_sources
@@ -324,6 +325,9 @@ class NewsScanner:
                     llm_scored_at=r.llm_scored_at,
                     language=r.language,
                     categories=r.categories,
+                    # 出生即定：传统市场开没开，纯日历，不依赖打标（news-impact-engine Phase 1，
+                    # 是后续"可打标"判断与台账滤休市的前置条件）。
+                    traditional_open=market_calendar.is_traditional_open(item_ts),
                 )
                 session.add(item)
                 saved += 1

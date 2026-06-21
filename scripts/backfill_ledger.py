@@ -28,11 +28,20 @@ def main():
 
     session = get_session()
     try:
+        # 前置条件：先把 traditional_open 为 NULL 的历史新闻补齐（纯日历、无 LLM）。
+        # 没有这个标，台账取数没法滤休市；打标之前必须先有它。
+        filled = news_tagging.backfill_traditional_open(session)
+        print(f"traditional_open 补齐：{filled} 条")
+
         if not args.no_tag:
-            pending = session.query(NewsItem).filter(NewsItem.tagged_at.is_(None)).count()
+            pending = (
+                session.query(NewsItem)
+                .filter(NewsItem.tagged_at.is_(None))
+                .count()
+            )
             print(f"未打标新闻：{pending} 条；本轮上限 {args.limit}")
             tagged = news_tagging.tag_untagged(session, limit=args.limit)
-            print(f"打标完成：{tagged} 条")
+            print(f"打标完成（仅反应窗口已走完的）：{tagged} 条")
 
         for symbol in [s.strip() for s in args.symbols.split(",") if s.strip()]:
             print(f"\n===== 台账总览 · {symbol} =====")
