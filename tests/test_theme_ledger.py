@@ -103,3 +103,31 @@ def test_rank_percentile():
 
 def test_rank_percentile_empty():
     assert theme_ledger.rank_percentile(1.0, []) is None
+
+
+# ---------- 台账总览 ----------
+
+def test_ledger_overview_groups_by_topic(session):
+    """每个有反应数据的主题 → 一条：count + 最近反应列表，按 count 倒序。"""
+    base = datetime(2026, 6, 1, 12, 0)
+    # 地缘 2 条有反应，通胀 1 条
+    for i, (topic, day, drop) in enumerate([("地缘冲突", 0, 0.015), ("地缘冲突", 5, 0.005), ("通胀数据", 2, 0.008)]):
+        nt = base + timedelta(days=day)
+        _news(session, topic, nt)
+        _price(session, "BTC/USDT", nt, 100.0)
+        _price(session, "BTC/USDT", nt + timedelta(minutes=30), 100.0 * (1 - drop))
+    session.commit()
+    overview = theme_ledger.ledger_overview(session, "BTC/USDT", n=5)
+    by_topic = {o["topic"]: o for o in overview}
+    assert by_topic["地缘冲突"]["count"] == 2
+    assert by_topic["通胀数据"]["count"] == 1
+    assert overview[0]["topic"] == "地缘冲突"          # count 倒序在前
+    assert len(by_topic["地缘冲突"]["recent"]) == 2
+
+
+def test_ledger_overview_skips_topics_without_reactions(session):
+    """打了标但价格无反应数据的主题不出现。"""
+    base = datetime(2026, 6, 1, 12, 0)
+    _news(session, "加密监管", base)   # 没喂价格
+    session.commit()
+    assert theme_ledger.ledger_overview(session, "BTC/USDT", n=5) == []

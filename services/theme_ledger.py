@@ -81,6 +81,24 @@ def topic_recent_reactions(session: Session, topic: str, symbol: str, n: int = 5
     return out
 
 
+def ledger_overview(session: Session, symbol: str, n: int = 5,
+                    minutes: int = DEFAULT_REACTION_MINUTES) -> list[dict]:
+    """台账总览：对每个有反应数据的主题给出 {topic, count, recent[]}，按 count 倒序。
+    Phase 1 的人可见产出——让你直接看"哪些主题历史上动过价、最近反应趋势"。"""
+    topics = [
+        t[0] for t in
+        session.query(NewsItem.topic).filter(NewsItem.topic.isnot(None)).distinct().all()
+    ]
+    out: list[dict] = []
+    for topic in topics:
+        recent = topic_recent_reactions(session, topic, symbol, n=n, minutes=minutes)
+        if not recent:
+            continue
+        out.append({"topic": topic, "count": len(recent), "recent": recent})
+    out.sort(key=lambda o: o["count"], reverse=True)
+    return out
+
+
 def rank_percentile(value: float, population: list[float]) -> float | None:
     """|value| 在 |population| 里的百分位（0-1）= 比它小的占比。population 空 → None。
     用绝对值：判"反应强弱"看幅度大小，不看方向。"""
