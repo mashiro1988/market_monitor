@@ -1190,6 +1190,33 @@ def set_eval_set(session: Session, annotation_id: int, value: bool) -> int:
     return annotation_id
 
 
+_MAGNITUDE_RANK = {"大": 3, "中": 2, "小": 1}
+
+
+def _derive_export_roles(candidates_meta: list[dict], human_roles: dict[int, str]) -> dict[int, str]:
+    """人工 driver 标注 + Phase1 topic/量级 → 每条候选的导出角色 driver/redundant/noise（导出时算，不落库）。
+
+    驱动主题 = 任一被人标 driver 的候选所属 topic；该主题里**量级最大、并列取最早** = driver 代表，
+    同主题其余 = redundant；非驱动主题 / 无 topic = noise。例外：人标 driver 但本身无 topic（Phase1
+    没打上）的候选保留 driver（无法分组）。含义：人标 driver 即指认"这个 topic 在驱动"，代表谁自动定。
+    candidates_meta: [{id, topic, magnitude, time}]（time 可为 None，排最末）。"""
+    out: dict[int, str] = {c["id"]: "noise" for c in candidates_meta}
+    driving_topics = {c["topic"] for c in candidates_meta
+                      if human_roles.get(c["id"]) == "driver" and c["topic"]}
+    # 人标 driver 但无 topic：保留 driver（无法归簇）
+    for c in candidates_meta:
+        if human_roles.get(c["id"]) == "driver" and not c["topic"]:
+            out[c["id"]] = "driver"
+    # 每个驱动主题选代表：量级最大、并列取最早
+    for topic in driving_topics:
+        members = [c for c in candidates_meta if c["topic"] == topic]
+        members.sort(key=lambda c: (-_MAGNITUDE_RANK.get(c["magnitude"], 0), c["time"] or datetime.max))
+        rep_id = members[0]["id"]
+        for c in members:
+            out[c["id"]] = "driver" if c["id"] == rep_id else "redundant"
+    return out
+
+
 def export_training_jsonl(session: Session, days: int = 365, split: str = "train") -> list[str]:
     """标注训练集导出（docs/specs/annotation-v2.md §4）：每行一个窗口样本。
 
@@ -1218,6 +1245,15 @@ def export_training_jsonl(session: Session, days: int = 365, split: str = "train
             session.query(NewsItem).filter(NewsItem.id.in_(cand_ids)).all() if cand_ids else []
         )
         by_id = {n.id: n for n in news_rows}
+        # Phase3a：导出角色按 topic/量级派生（driver 代表 / 同簇 redundant / 其余 noise），
+        # 而非直接用人工 roles。labels.news_roles 仍存人工原始标注（见下）。
+        cand_meta = [{
+            "id": nid,
+            "topic": by_id[nid].topic if nid in by_id else None,
+            "magnitude": by_id[nid].magnitude_tier if nid in by_id else None,
+            "time": by_id[nid].timestamp if nid in by_id else None,
+        } for nid in cand_ids]
+        derived = _derive_export_roles(cand_meta, roles)
         candidates = []
         for nid in cand_ids:
             n = by_id.get(nid)
@@ -1228,7 +1264,7 @@ def export_training_jsonl(session: Session, days: int = 365, split: str = "train
                 "title": (n.title or "") if n else "",
                 "content": (n.content or "")[:1000] if n else "",
                 "llm_score": n.llm_importance if n else None,
-                "causal_role": roles.get(nid, "noise"),
+                "causal_role": derived.get(nid, "noise"),
             })
         selected_ids = _parse_news_ids(row.causal_news_ids)
         record = {

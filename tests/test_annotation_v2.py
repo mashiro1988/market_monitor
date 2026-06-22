@@ -228,6 +228,25 @@ def test_export_jsonl_with_auto_labels(session):
     assert row["eval_set"] is False
 
 
+def test_export_derives_redundant_from_topic(session):
+    """Phase3a：同 topic 两条候选(量级不同)+人标其一 driver → 导出 driver+redundant 各一；代表按量级定。"""
+    session.add(PriceSnapshot(timestamp=W_START, asset_class="crypto", symbol="BTC/USDT", name="BTC/USDT", price=100000.0, source="t"))
+    session.add(PriceSnapshot(timestamp=W_END, asset_class="crypto", symbol="BTC/USDT", name="BTC/USDT", price=98000.0, source="t"))
+    a = NewsItem(timestamp=W_START + timedelta(minutes=5), source="jin10", title="美军打击伊朗",
+                 content="x", language="zh", topic="地缘冲突", magnitude_tier="大")
+    b = NewsItem(timestamp=W_START + timedelta(minutes=8), source="jin10", title="伊朗回应",
+                 content="x", language="zh", topic="地缘冲突", magnitude_tier="中")
+    session.add_all([a, b]); session.commit()
+    annotation_service.upsert_annotation(session, _req(
+        [a.id, b.id], news_roles={b.id: "driver"}, confidence=0.8,     # 人标了"中"量级那条
+    ))
+    row = json.loads(annotation_service.export_training_jsonl(session, days=30)[0])
+    roles = {c["id"]: c["causal_role"] for c in row["candidates"]}
+    assert roles[a.id] == "driver"           # 代表 = 量级大的 a（即便人标的是 b）
+    assert roles[b.id] == "redundant"        # 同主题非代表 → 冗余（训练排除，不当负样本）
+    assert row["labels"]["news_roles"] == {str(b.id): "driver"}   # 人工原始标注保持不变
+
+
 def test_export_split_excludes_eval(session):
     n1, _, _ = _seed(session)
     resp = annotation_service.upsert_annotation(session, _req([n1], selected_news_ids=[n1]))
