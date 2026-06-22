@@ -84,9 +84,10 @@
 - **验证**：`tests/test_annotation_window_scales.py` 整文件重写（7 单档行为用例，含 1-bar 断档拆窗 RED→GREEN）；`tests/test_annotation_windows.py` 断言对齐 5min 断档；全套 189 passed。细化 plan：`docs/specs/news-impact-engine-phase2-plan.md`。
 
 ### Phase 3 — 标注层简化（纯归因）
-- **改** prompt（causal_role 三分类 + topic 分组取「量级最大+最早」为 driver + 同簇冗余排除）；`schemas/annotations.py` 枚举；`database.migrate_legacy_annotations` 升级映射；前端角色下拉；导出（冗余排除负样本）。
-- **A 策略落地**（见 §0 窗口）：标注页只列「已 settle + 已走完」的窗口；已标窗口被 backfill 改动则置「需复核」。
-- **验证**：实弹回放（含 6/11 案例）在三分类下正确；`tests/test_annotation_v2.py` 更新；同簇冗余不进负样本的单测。
+- **3a（taxonomy 3 值 + redundant 导出派生）【已实现】**：`schemas/annotations.py` 枚举 4→3（driver/redundant/noise）+ 新增 `INPUT_CAUSAL_ROLES`=(driver,noise)；落库/LLM 输出校验只收 driver/noise；`migrate_legacy_annotations` 步骤3 把存量 post_hoc/contradictory 移除（归 noise）；两份 prompt 去 post_hoc/contradictory + 版本 v5；**导出 `_derive_export_roles`**：驱动主题里量级最大+最早=driver、同主题其余=redundant（训练排除）、其余=noise；前端角色下拉收敛为 噪音/驱动。细化 plan：`docs/specs/news-impact-engine-phase3a-plan.md`。验证：`tests/test_annotation_v2.py` 更新 + `tests/test_export_redundant.py`；全套 198 passed。
+  - **关键招**：redundant 不落库、不让人/LLM 直接标，导出时按 topic/量级派生 → 免标注页大改（人仍逐条标 driver，语义变成"指认驱动主题"）。
+- **3b（A 策略落地）【待做】**（见 §0 窗口）：标注页只列「已 settle + 已走完」的窗口；已标窗口被 backfill 改动则置「需复核」。**当前窗口仍 compute-on-read、按精确 (start,end) 键匹配标注**，未做 settle/走完门与改动检测。
+- **验证**：实弹回放（含 6/11 案例）在三分类下正确；同簇冗余不进负样本的单测（已覆盖）。
 
 ### Phase 4 — 警报层（两镜像 + 两模式）
 - **新增** `services/impact_alerts.py`：A（脱敏：量级大 + 主题历史会动 + 最近弱，附先例）；B（情绪：无 driver + 趋势）；反应模式（窗口触发）+ 预判模式（给定事件查台账）。`/api/alerts/impact` + 企业微信。
