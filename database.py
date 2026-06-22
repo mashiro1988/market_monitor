@@ -106,6 +106,8 @@ _REACTION_UPGRADE = {
     "technical_move": "no_news_driver", "emotional_noise": "no_news_driver",
     "no_clear_driver": "no_news_driver",
 }
+# news-impact-engine Phase 3a：退场角色（综述/解释/矛盾并入 noise = 从 news_roles 移除）。
+_RETIRED_ROLES = {"post_hoc_explanation", "contradictory"}
 
 
 def migrate_legacy_annotations(conn) -> int:
@@ -154,6 +156,23 @@ def migrate_legacy_annotations(conn) -> int:
                 text("UPDATE news_price_annotations SET news_roles = :roles, "
                      "market_reaction_type = :reaction WHERE id = :id"),
                 {"roles": _json.dumps(new_roles, ensure_ascii=False), "reaction": new_reaction, "id": row[0]},
+            )
+            changed += 1
+
+    # 步骤 3：v2.1 → v3（Phase 3a）：退场角色 post_hoc_explanation / contradictory 移除（归 noise），幂等。
+    rows = conn.execute(text(
+        "SELECT id, news_roles FROM news_price_annotations WHERE news_roles IS NOT NULL"
+    )).fetchall()
+    for row in rows:
+        try:
+            roles = _json.loads(row[1]) if row[1] else {}
+        except (ValueError, TypeError):
+            roles = {}
+        new_roles = {k: v for k, v in roles.items() if v not in _RETIRED_ROLES}
+        if new_roles != roles:
+            conn.execute(
+                text("UPDATE news_price_annotations SET news_roles = :roles WHERE id = :id"),
+                {"roles": _json.dumps(new_roles, ensure_ascii=False), "id": row[0]},
             )
             changed += 1
     return changed

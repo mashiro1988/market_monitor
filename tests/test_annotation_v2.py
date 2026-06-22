@@ -163,6 +163,25 @@ def test_migration_v1_and_v20_rows(session):
     assert migrate_legacy_annotations(session.connection()) == 0
 
 
+def test_migrate_drops_retired_roles(session):
+    """Phase3a：迁移把存量 post_hoc_explanation / contradictory 从 news_roles 移除（归 noise），幂等。"""
+    n1, n2, n3 = _seed(session)
+    session.add(NewsPriceAnnotation(
+        symbol="BTC/USDT", window_start=W_START, window_end=W_END,
+        context_start=W_START, context_end=W_END,
+        news_roles=json.dumps({str(n1): "driver", str(n2): "post_hoc_explanation", str(n3): "contradictory"}),
+        no_clear_news=False,
+    ))
+    session.commit()
+    from database import migrate_legacy_annotations
+    changed = migrate_legacy_annotations(session.connection())
+    session.commit()
+    assert changed == 1
+    row = session.query(NewsPriceAnnotation).first()
+    assert json.loads(row.news_roles) == {str(n1): "driver"}      # 退场角色已移除
+    assert migrate_legacy_annotations(session.connection()) == 0  # 幂等
+
+
 def test_parse_auto_v21_filters_and_derives():
     raw = json.dumps({
         "news_roles": {"1": "driver", "2": "post_hoc_explanation", "99": "driver", "3": "primary_driver"},
