@@ -12,8 +12,9 @@
 
 ## 关键设计澄清（实现前必读）
 
-1. **threshold 现在= "该 15min 窗口必须达到的净幅度"，继承旧 `net_min` 的严格度、不是旧 trigger 的低值。**
-   旧逻辑里 `net_min`(BTC 1.0% / NQ 0.6%) > `threshold`(0.5% / 0.3%)：trigger 只是"进入候选"，net_min 才是"够不够大算事件"。单档塌缩后只剩一个旋钮，**必须取旧 net_min 那一档的值**，否则 0.5% 级别的小腿会全冒出来。spec §0 写"删 net_min（触发阈值已是净门槛）"——这里的落地就是**把 threshold 抬到旧 net_min 水平**。最终值由回放校准（Task 6）。
+1. **threshold 沿用既有 15min 触发阈值（BTC 0.5% / NQ 0.3%），不动数值。**
+   （我曾建议把它抬到旧 `net_min`(1.0/0.6) 以压横跳，2026-06-22 用户否决：阈值就是配的 0.5/0.3。）
+   后果：删 net_min 后，0.5~旧 net_min 区间的小幅净移动现在也会出窗口（旧的二次门槛会把它们丢掉）。是否过噪由 6/10 夜回放定（Task 4），不在代码里预判。
 
 2. **横跳不一定不出窗口——只有"每 15min 净幅度 < threshold"的横跳才不出。**
    用户假设"net≈0 横跳过不了净阈值"只在小振幅横跳成立。若某条腿在 15min 内净幅度 ≥ threshold，它就是一个真窗口；上下交替的大腿会按"变向收口"产出**交替的多个窗口**。这是单档模型的固有行为，靠 threshold 校准压制，不再用 net_min 合并杀。
@@ -181,13 +182,12 @@ Expected: FAIL（旧 `load_price_windows` 仍多尺度 + net_min；`test_subthre
 
 ```python
 # 标注窗口（news-impact-engine Phase 2）：每品种**单** 15min 档。
-# 触发 = 窗口开收净 (末收 − 初开)/初开 ≥ threshold；threshold 即"算一个事件的最小净幅度"
-# （继承旧 net_min 的严格度，非旧低位 trigger）。无 60m 档、无独立 net_min。
-# 阈值由 6/10 夜回放校准（docs/specs/news-impact-engine-phase2-plan.md Task 6）。
+# 触发 = 窗口开收净 (末收 − 初开)/初开 ≥ threshold。沿用既有 15min 触发阈值（BTC 0.5 / NQ 0.3）。
+# 删旧二次 net_min 门槛——0.5~旧 net_min 区间小移动现在也会出窗口，噪音由 6/10 夜回放校准（Task 4）。
 # 显式传 threshold/window 的调试路径不走本配置。
 ANNOTATION_WINDOW_SCALES = {
-    "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 1.0, "pre_minutes": 30}],
-    "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.6, "pre_minutes": 30}],
+    "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 0.5, "pre_minutes": 30}],
+    "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.3, "pre_minutes": 30}],
 }
 
 # 断档阈值：相邻触发扫描点(end_dt)间隔 > 此值 → 上一个窗口走完。

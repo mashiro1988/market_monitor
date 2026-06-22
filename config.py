@@ -110,13 +110,13 @@ NEWS_MAGNITUDE_TIERS = ("大", "中", "小")
 NEWS_DIRECTIONS = ("利多", "利空", "中性")
 
 # 标注窗口（news-impact-engine Phase 2）：每品种**单** 15min 档。
-# 触发 = 窗口开收净 (末收 − 初开)/初开 ≥ threshold；threshold 即"算一个事件的最小净幅度"
-# （继承旧 net_min 的严格度，非旧低位 trigger）。无 60m 档、无独立 net_min。
-# 阈值由 6/10 夜回放校准（docs/specs/news-impact-engine-phase2-plan.md Task 4）。
+# 触发 = 窗口开收净 (末收 − 初开)/初开 ≥ threshold。沿用既有 15min 触发阈值（BTC 0.5 / NQ 0.3）。
+# 删了旧的二次 net_min 门槛——故 0.5~旧 net_min 区间的小幅净移动现在也会出窗口，
+# 噪音程度由 6/10 夜回放校准（docs/specs/news-impact-engine-phase2-plan.md Task 4）。
 # 显式传 threshold/window 的调试路径不走本配置。
 ANNOTATION_WINDOW_SCALES = {
-    "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 1.0, "pre_minutes": 30}],
-    "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.6, "pre_minutes": 30}],
+    "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 0.5, "pre_minutes": 30}],
+    "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.3, "pre_minutes": 30}],
 }
 
 # 标注页「宏观同期对标」清单：(symbol, 中文标签[, 单位])。增减对标资产只改这里。

@@ -80,7 +80,7 @@
 ### Phase 2 — 窗口改单 15min 开收净【小，已实现】
 - **改** `services/annotation_service.py:load_price_windows` + `config.ANNOTATION_WINDOW_SCALES`：删 60m 档与多尺度合并；保留**开收净触发**（现 `change_pct` 即是：`(末收 − 初开)/初开`，初开 = baseline 取 `current−wm` 那格，无需改），删单独的 `net_min` 门槛（触发阈值已是净门槛）。
 - **收口** = `_scale_events` 同向合并逻辑，断档判据由 span-based 改为**扫描点相邻**（`end_dt` 间隔 ≤ `ANNOTATION_EVENT_MERGE_GAP_MINUTES`），默认 60 收紧到 **5**（跳一格即断档）。暂不引入振幅/高低价/双向博弈。
-- **已实现**：单档 15min 开收净触发 + 5min 扫描点断档；删 60m/net_min/跨档合并；窗口仍 compute-on-read。`threshold_pct` 继承旧 net_min 严格度（BTC 1.0 / NQ 0.6），最终值待 6/10 夜回放校准（plan Task 4，非阻塞）。
+- **已实现**：单档 15min 开收净触发 + 5min 扫描点断档；删 60m/net_min/跨档合并；窗口仍 compute-on-read。`threshold_pct` 沿用既有 15min 触发阈值（BTC 0.5 / NQ 0.3）；删 net_min 后 0.5~旧 net_min 区间的小移动也会出窗口，噪音待 6/10 夜回放校准（plan Task 4，非阻塞）。
 - **验证**：`tests/test_annotation_window_scales.py` 整文件重写（7 单档行为用例，含 1-bar 断档拆窗 RED→GREEN）；`tests/test_annotation_windows.py` 断言对齐 5min 断档；全套 189 passed。细化 plan：`docs/specs/news-impact-engine-phase2-plan.md`。
 
 ### Phase 3 — 标注层简化（纯归因）
