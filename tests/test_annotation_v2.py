@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""标注 v2.1：causal_role 四分类（driver/noise/post_hoc/contradictory）+
+"""标注 v2.1→Phase3a：causal_role 三分类（driver/redundant/noise；redundant 导出派生，
+post_hoc/contradictory 退场并入 noise）+
 market_reaction_type 三分类（macro_policy/event_driven/no_news_driver）+
 auto_news_roles/prompt_version/eval_set + 迁移 + JSONL 导出（train/eval split）。
 
@@ -68,15 +69,15 @@ def test_upsert_v21_roundtrip(session):
     n1, n2, n3 = _seed(session)
     resp = annotation_service.upsert_annotation(session, _req(
         [n1, n2, n3],
-        news_roles={n1: "driver", n2: "post_hoc_explanation"},
+        news_roles={n1: "driver"},               # Phase3a：只标 driver；n2 行情描述 = noise（不落库）
         market_reaction_type="event_driven",
         confidence=0.85,
         notes="美军打击导致避险",
-        auto_news_roles={n1: "driver"},          # AI 原始：少标了 n2 的事后解释（人补上的）
+        auto_news_roles={n1: "driver"},
         auto_summary="AI 摘要",
     ))
     d = annotation_service.get_annotation_detail(session, resp.id)
-    assert d.news_roles == {n1: "driver", n2: "post_hoc_explanation"}
+    assert d.news_roles == {n1: "driver"}
     assert d.market_reaction_type == "event_driven"
     assert d.confidence == pytest.approx(0.85)
     assert d.selected_news_ids == [n1]          # 派生：全部 driver
@@ -122,6 +123,14 @@ def test_old_v20_enums_rejected_at_api(session):
         annotation_service.upsert_annotation(session, _req([n1], market_reaction_type="risk_sentiment"))
 
 
+def test_phase3a_rejects_retired_and_derived_roles(session):
+    """Phase3a：退场角色 contradictory/post_hoc_explanation 与派生角色 redundant 都不可手标输入。"""
+    n1, _, _ = _seed(session)
+    for bad in ("contradictory", "post_hoc_explanation", "redundant"):
+        with pytest.raises(ValueError):
+            annotation_service.upsert_annotation(session, _req([n1], news_roles={n1: bad}))
+
+
 def test_migration_v1_and_v20_rows(session):
     """迁移两步：v1 二元行 → driver/no_news_driver；v2.0 旧枚举行 → v2.1 枚举。"""
     n1, n2, _ = _seed(session)
@@ -162,7 +171,7 @@ def test_parse_auto_v21_filters_and_derives():
         "summary": "测试",
     })
     parsed = annotation_service._parse_auto_annotate_v2(raw, {1, 2, 3})
-    assert parsed.news_roles == {1: "driver", 2: "post_hoc_explanation"}   # 99 幻觉、3 旧枚举被丢
+    assert parsed.news_roles == {1: "driver"}   # 2 post_hoc 退场、99 幻觉、3 旧枚举 全被丢
     assert parsed.market_reaction_type == "macro_policy"
     assert parsed.confidence == 1.0
     assert parsed.selected_news_ids == [1]
@@ -178,7 +187,7 @@ def test_export_jsonl_with_auto_labels(session):
     n1, n2, n3 = _seed(session)
     annotation_service.upsert_annotation(session, _req(
         [n1, n2, n3],
-        news_roles={n1: "driver", n2: "post_hoc_explanation"},
+        news_roles={n1: "driver"},               # Phase3a：只标 driver
         market_reaction_type="event_driven",
         confidence=0.85,
         notes="归因链",

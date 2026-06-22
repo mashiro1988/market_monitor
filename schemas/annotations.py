@@ -5,15 +5,16 @@ from pydantic import BaseModel, Field
 from schemas.common import TimeFields
 from schemas.news import NewsItemSchema
 
-# —— 标注 v2.1 标签体系（docs/specs/annotation-v2.md；2026-06-11 与用户讨论定稿）——
-# 每条新闻的因果角色；noise 为默认值，news_roles 里只存非 noise 条目。
-# 不分主次驱动：窗口内主次判断主观且训练价值低，"主次"由日级聚合（幅度×置信度）计算。
+# —— 标注角色（news-impact-engine Phase 3a；取代 annotation-v2.md 四分类）——
+# 导出/训练口径三值；redundant 由 Phase1 topic/量级在**导出时**派生，不可手标/LLM 直出。
+# post_hoc_explanation / contradictory 退场、并入 noise（综述/解释/离题/矛盾一律默认 noise）。
 NEWS_CAUSAL_ROLES = (
-    "driver",                # 驱动（含同事件簇的全部相关报道）
-    "noise",                 # 噪音（默认，不落库；含迟到首报——事件发生在窗口前且已被定价）
-    "post_hoc_explanation",  # 事后解释（价格先动、新闻找理由的行情综述类）
-    "contradictory",         # 方向矛盾（仅限**新发生**的事件、方向与价格真实相反）
+    "driver",     # 驱动代表（驱动主题里 a-priori 量级最大、并列取最早 那条）
+    "redundant",  # 同簇冗余（与 driver 同 topic 的其它报道；导出派生；训练排除、不当负样本）
+    "noise",      # 噪音（默认，不落库）
 )
+# 人/LLM 可直接给的角色（redundant 派生而来，不在此列）。
+INPUT_CAUSAL_ROLES = ("driver", "noise")
 # 窗口级市场反应类型（单轴=驱动源；与 news_roles 闭环：前两类 ⟺ 有 driver）。
 MARKET_REACTION_TYPES = (
     "macro_policy",          # 宏观数据与政策预期（数据公布/央行/官员/财政）

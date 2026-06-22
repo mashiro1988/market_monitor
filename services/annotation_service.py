@@ -14,6 +14,7 @@ import config
 from models.news import NewsItem, NewsPriceAnnotation
 from models.price import PriceSnapshot
 from schemas.annotations import (
+    INPUT_CAUSAL_ROLES,
     MARKET_REACTION_TYPES,
     NEWS_CAUSAL_ROLES,
     AnnotationCreateRequest,
@@ -654,7 +655,7 @@ def _normalize_v2_labels(
     if request.news_roles is not None:
         roles: dict[int, str] = {}
         for nid, role in request.news_roles.items():
-            if role not in NEWS_CAUSAL_ROLES:
+            if role not in INPUT_CAUSAL_ROLES:
                 raise ValueError(f"非法 causal_role: {role!r}")
             if role != "noise":           # noise 是默认值，不落库
                 roles[int(nid)] = role
@@ -900,7 +901,7 @@ def _extract_v2_labels(data: dict, valid_ids: set[int]) -> AutoV2Parsed:
                 continue
             if nid not in valid_ids:
                 continue
-            if isinstance(role, str) and role in NEWS_CAUSAL_ROLES and role != "noise":
+            if isinstance(role, str) and role in INPUT_CAUSAL_ROLES and role != "noise":
                 roles[nid] = role
 
     reaction = data.get("market_reaction_type")
