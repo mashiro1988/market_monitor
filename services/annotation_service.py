@@ -364,11 +364,11 @@ def _nearest_snapshot(rows: list[PriceSnapshot], target_time: datetime, before_t
 
 
 def _scales_for(symbol: str, threshold_pct: float | None, window_minutes: int | None) -> list[dict]:
-    """窗口档位：显式传参（调试路径）→ 单档且**无**净门槛（保持旧语义）；
-    否则用 config.ANNOTATION_WINDOW_SCALES 多档；再退回告警规则单档（净门槛 = 2×阈值）。"""
+    """窗口档位（news-impact-engine Phase 2，单档）：显式传参（调试路径）→ 用传入的 threshold/window；
+    否则用 config.ANNOTATION_WINDOW_SCALES（单 15min 档）；再退回告警规则单档。无 net_min。"""
     if threshold_pct is not None and window_minutes is not None:
         return [{"window_minutes": int(window_minutes), "threshold_pct": float(threshold_pct),
-                 "net_min_pct": 0.0, "pre_minutes": CONTEXT_PRE_MINUTES_DEFAULT}]
+                 "pre_minutes": CONTEXT_PRE_MINUTES_DEFAULT}]
     scales = getattr(config, "ANNOTATION_WINDOW_SCALES", {}).get(symbol)
     if scales:
         return scales
@@ -376,15 +376,18 @@ def _scales_for(symbol: str, threshold_pct: float | None, window_minutes: int | 
     if rule is None:
         return []
     return [{"window_minutes": rule.window_minutes, "threshold_pct": rule.threshold_pct,
-             "net_min_pct": rule.threshold_pct * 2, "pre_minutes": CONTEXT_PRE_MINUTES_DEFAULT}]
+             "pre_minutes": CONTEXT_PRE_MINUTES_DEFAULT}]
 
 
 def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance_minutes: int,
                   scale: dict, merge_gap: timedelta) -> list[dict]:
-    """单档位的触发扫描 + 同向合并 + 净门槛过滤 → 原始窗口 dict 列表。"""
+    """单档触发扫描 + 同向相邻合并 → 原始窗口 dict 列表（news-impact-engine Phase 2）。
+    触发：窗口开收净 = (current − baseline_{T−wm})/baseline ≥ threshold（baseline = 窗口初开盘，含第一根 bar）。
+    合并：同方向 且 扫描点相邻（end_dt 间隔 ≤ merge_gap）→ 并进上一个；
+          变方向 或 扫描点断档（> merge_gap）→ 上一个窗口走完，另起一个。
+    无 net_min——threshold 本身就是该窗口必须达到的净幅度。"""
     wm = int(scale["window_minutes"])
     threshold = float(scale["threshold_pct"])
-    net_min = float(scale.get("net_min_pct", 0.0))
 
     triggers: list[dict] = []
     for current in rows:
@@ -410,7 +413,7 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
     events: list[list[dict]] = []
     for t in triggers:
         if (events and events[-1][-1]["sign"] == t["sign"]
-                and (t["start_dt"] - events[-1][-1]["end_dt"]) <= merge_gap):
+                and (t["end_dt"] - events[-1][-1]["end_dt"]) <= merge_gap):   # 扫描点相邻才并；跳一格即断档
             events[-1].append(t)
         else:
             events.append([t])
@@ -418,12 +421,7 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
     out: list[dict] = []
     for ev in events:
         first, last = ev[0], ev[-1]
-        p_start, p_end = first["price_start"], last["price_end"]
-        if not p_start:
-            continue
-        net = (p_end - p_start) / abs(p_start) * 100
-        # 净变动门槛：横跳来回擦线的事件净变动小，整体丢弃（6/10 夜实测 11 → 3）。
-        if abs(net) < net_min:
+        if not first["price_start"]:
             continue
         out.append({
             "start": first["start_dt"], "end": last["end_dt"],
@@ -441,13 +439,14 @@ def load_price_windows(
     threshold_pct: float | None = None,
     window_minutes: int | None = None,
 ) -> list[PriceWindowSchema]:
-    """多尺度标注窗口（docs/specs/annotation-v2.md）：各档独立触发+合并+净门槛，
-    跨档时间重叠且同向的窗口合并为一个（取并集、候选前置窗取大档）。"""
+    """单 15min 开收净标注窗口（news-impact-engine Phase 2）：开收净触发 + 同向相邻合并、
+    变向/5min 断档收口。窗口 compute-on-read 不落库。显式传 threshold/window 走单档调试路径。"""
     scales = _scales_for(symbol, threshold_pct, window_minutes)
     if not scales:
         return []
     hours = max(1, min(int(hours or 72), 24 * 30))
-    max_wm = max(int(s["window_minutes"]) for s in scales)
+    scale = scales[0]                                  # 单档（Phase 2）
+    max_wm = int(scale["window_minutes"])
     cutoff = utc_now_naive() - timedelta(hours=hours, minutes=max_wm + 10)
     rows = (
         session.query(PriceSnapshot)
@@ -474,22 +473,8 @@ def load_price_windows(
         (row.window_start, row.window_end): row.id for row in annotation_rows
     }
 
-    # 各档独立生成，再跨档合并（重叠 + 同向 → 并集；快冲击同时触发两档时不重复出窗口）
-    raw: list[dict] = []
-    for scale in scales:
-        raw.extend(_scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap))
-    raw.sort(key=lambda w: (w["start"], w["end"]))
-    merged: list[dict] = []
-    for w in raw:
-        target = next((m for m in merged if m["sign"] == w["sign"] and w["start"] <= m["end"] and m["start"] <= w["end"]), None)
-        if target is None:
-            merged.append(dict(w))
-        else:
-            target["start"] = min(target["start"], w["start"])
-            target["end"] = max(target["end"], w["end"])
-            target["segments"] += w["segments"]
-            target["wm"] = max(target["wm"], w["wm"])
-            target["pre"] = max(target["pre"], w["pre"])
+    # 单档（Phase 2）：_scale_events 内部已做同向相邻合并，无跨档合并。
+    merged = _scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap)
 
     windows: list[tuple[datetime, PriceWindowSchema]] = []
     for m in merged:

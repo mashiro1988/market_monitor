@@ -46,27 +46,24 @@ def _call(session):
     return load_price_windows(session, "TEST", hours=24, threshold_pct=0.5, window_minutes=5)
 
 
-def test_two_segments_within_gap_merge_into_one(session):
+def test_short_silence_now_splits(session):
+    """Phase 2：5min 断档下，哪怕只静默 ~15min（旧 60min 合并间隔会并成 1）也拆成 2。"""
     now = utc_now_naive()
     bars = (
-        [(120, 100.0), (115, 101.0), (110, 102.0)]              # 段 A：触发 @-115,-110
-        + [(m, 102.0) for m in (105, 100, 95, 90, 85, 80, 75)]  # 静默期，无触发
-        + [(70, 103.0), (65, 104.0)]                            # 段 B：与 A 静默间隔 35min<60
+        [(120, 100.0), (115, 101.0), (110, 102.0)]             # 段 A：触发 @-115,-110
+        + [(105, 102.0), (100, 102.0)]                         # 静默 ~15min（< 旧 60，但 > 5）
+        + [(95, 103.0), (90, 104.0)]                           # 段 B：触发 @-95,-90
     )
     _seed(session, now, bars)
-    wins = _call(session)
-    assert len(wins) == 1
-    w = wins[0]
-    assert w.segment_count == 4
-    assert w.change_pct == pytest.approx(4.0, abs=0.05)         # (104-100)/100
+    assert len(_call(session)) == 2                            # end_dt 间隔 15min > 5 → 断档拆开
 
 
 def test_two_segments_beyond_gap_split(session):
     now = utc_now_naive()
     bars = (
         [(160, 100.0), (155, 101.0), (150, 102.0)]              # 段 A
-        + [(m, 102.0) for m in range(145, 45, -5)]              # 长静默期（>60min）
-        + [(40, 103.0), (35, 104.0)]                            # 段 B：与 A 间隔 >60 → 拆开
+        + [(m, 102.0) for m in range(145, 45, -5)]              # 长静默期
+        + [(40, 103.0), (35, 104.0)]                            # 段 B：与 A 间隔远 > 5min → 拆开
     )
     _seed(session, now, bars)
     wins = _call(session)

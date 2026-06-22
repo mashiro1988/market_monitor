@@ -109,20 +109,14 @@ NEWS_MAGNITUDE_TIERS = ("大", "中", "小")
 # 方向：相对风险资产（BTC/纳指）的应然影响。
 NEWS_DIRECTIONS = ("利多", "利空", "中性")
 
-# 标注窗口多尺度规则（2026-06-11 与用户定稿，阈值按近 5 天分布校准）：
-# 每品种若干档 {窗口分钟, 触发阈值%, 净变动门槛%, 候选前置分钟}。
-# 15m 档捕快冲击；60m 档捕慢趋势（长窗口对快照缺口鲁棒——6/10 夜 -1.02% 慢跌即靠它）。
-# 净门槛过滤横跳：同向合并后 |净变动| 低于门槛的窗口整体丢弃（6/10 夜实测 11 窗口 → 3 真实事件）。
-# 显式传 threshold/window 参数的调试路径不走本配置、不做净过滤。
+# 标注窗口（news-impact-engine Phase 2）：每品种**单** 15min 档。
+# 触发 = 窗口开收净 (末收 − 初开)/初开 ≥ threshold；threshold 即"算一个事件的最小净幅度"
+# （继承旧 net_min 的严格度，非旧低位 trigger）。无 60m 档、无独立 net_min。
+# 阈值由 6/10 夜回放校准（docs/specs/news-impact-engine-phase2-plan.md Task 4）。
+# 显式传 threshold/window 的调试路径不走本配置。
 ANNOTATION_WINDOW_SCALES = {
-    "BTC/USDT": [
-        {"window_minutes": 15, "threshold_pct": 0.5, "net_min_pct": 1.0, "pre_minutes": 30},
-        {"window_minutes": 60, "threshold_pct": 1.2, "net_min_pct": 1.5, "pre_minutes": 60},
-    ],
-    "NQ=F": [
-        {"window_minutes": 15, "threshold_pct": 0.3, "net_min_pct": 0.6, "pre_minutes": 30},
-        {"window_minutes": 60, "threshold_pct": 0.75, "net_min_pct": 1.0, "pre_minutes": 60},
-    ],
+    "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 1.0, "pre_minutes": 30}],
+    "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.6, "pre_minutes": 30}],
 }
 
 # 标注页「宏观同期对标」清单：(symbol, 中文标签[, 单位])。增减对标资产只改这里。
@@ -351,8 +345,9 @@ ALERT_PRICE_MAX_STALENESS_MINUTES = int(os.getenv("ALERT_PRICE_MAX_STALENESS_MIN
 # ============================================================
 # 标注事件合并
 # ============================================================
-# 相邻同方向异动段的静默间隔 ≤ 此分钟数则并为同一事件窗口（合成一个跨段窗口）。
-ANNOTATION_EVENT_MERGE_GAP_MINUTES = int(os.getenv("ANNOTATION_EVENT_MERGE_GAP_MINUTES", "60"))
+# 断档阈值（news-impact-engine Phase 2）：相邻触发扫描点(end_dt)间隔 > 此分钟数 → 上一个窗口走完、另起一个。
+# 5min = 一个快照步长（跳一格即断档）。开市丢快照造成的虚假劈窗由 gap-repair 补洞后 compute-on-read 自愈。
+ANNOTATION_EVENT_MERGE_GAP_MINUTES = int(os.getenv("ANNOTATION_EVENT_MERGE_GAP_MINUTES", "5"))
 
 # ============================================================
 # Dune Analytics 配置（保留）

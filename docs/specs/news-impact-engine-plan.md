@@ -77,11 +77,11 @@
 - **验证**：`tests/test_theme_ledger.py`（9）+ `tests/test_news_tagging.py`（4）；本地端到端 12 条打标→落库→总览跑通；实弹打标正确（美军打击→地缘/利空/大）。
 - **产出**：每主题一条最近 N 次反应线（净 + 振幅 + 量级标注）。
 
-### Phase 2 — 窗口改单 15min 开收净【小】
+### Phase 2 — 窗口改单 15min 开收净【小，已实现】
 - **改** `services/annotation_service.py:load_price_windows` + `config.ANNOTATION_WINDOW_SCALES`：删 60m 档与多尺度合并；保留**开收净触发**（现 `change_pct` 即是：`(末收 − 初开)/初开`，初开 = baseline 取 `current−wm` 那格，无需改），删单独的 `net_min` 门槛（触发阈值已是净门槛）。
-- **收口** = 现 `_scale_events` 同向+merge_gap 合并逻辑原样保留，**只把 `ANNOTATION_EVENT_MERGE_GAP_MINUTES` 由 60 收紧到 5**（断档=一个快照步长）。暂不引入振幅/高低价/双向博弈。
-- **改/删** `tests/test_annotation_window_scales.py`（多尺度用例 → 单档开收净 + 5min 断档用例）。
-- **验证**：回放脚本在 6/10 夜重跑，确认横跳被压（净≈0 不出窗口）、真实方向性波动被抓；阈值按结果定。
+- **收口** = `_scale_events` 同向合并逻辑，断档判据由 span-based 改为**扫描点相邻**（`end_dt` 间隔 ≤ `ANNOTATION_EVENT_MERGE_GAP_MINUTES`），默认 60 收紧到 **5**（跳一格即断档）。暂不引入振幅/高低价/双向博弈。
+- **已实现**：单档 15min 开收净触发 + 5min 扫描点断档；删 60m/net_min/跨档合并；窗口仍 compute-on-read。`threshold_pct` 继承旧 net_min 严格度（BTC 1.0 / NQ 0.6），最终值待 6/10 夜回放校准（plan Task 4，非阻塞）。
+- **验证**：`tests/test_annotation_window_scales.py` 整文件重写（7 单档行为用例，含 1-bar 断档拆窗 RED→GREEN）；`tests/test_annotation_windows.py` 断言对齐 5min 断档；全套 189 passed。细化 plan：`docs/specs/news-impact-engine-phase2-plan.md`。
 
 ### Phase 3 — 标注层简化（纯归因）
 - **改** prompt（causal_role 三分类 + topic 分组取「量级最大+最早」为 driver + 同簇冗余排除）；`schemas/annotations.py` 枚举；`database.migrate_legacy_annotations` 升级映射；前端角色下拉；导出（冗余排除负样本）。
