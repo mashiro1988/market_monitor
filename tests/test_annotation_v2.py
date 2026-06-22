@@ -273,3 +273,10 @@ def test_context_pre_minutes_respected(session):
     ))
     row = session.query(NewsPriceAnnotation).filter(NewsPriceAnnotation.id == resp.id).first()
     assert row.context_start == W_START - timedelta(minutes=60)
+
+
+def test_prompts_drop_retired_roles():
+    """Phase3a：两份自动标注 prompt 不再提 post_hoc/contradictory；版本号已 bump。"""
+    for p in (annotation_service.AUTO_ANNOTATE_SYSTEM_PROMPT, annotation_service.AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT):
+        assert "post_hoc" not in p and "contradictory" not in p
+    assert annotation_service.ANNOTATION_PROMPT_VERSION != "v4-20260612"

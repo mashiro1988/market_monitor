@@ -173,6 +173,5 @@ def test_prompts_document_reference_changes():
         # "reference change 无明显变化"拒选。
         assert "不能用来排除" in prompt
         assert "纯事件判断" in prompt
-        # contradictory 是关系标签非因果标签——v3 prompt 被模型解读为"需确信新闻是
-        # 价格变化的唯一因素"，导致该标签永不可达（2026-06-11 BTC 逆势窗口实证）。
-        assert "不是因果标签" in prompt
+        # （Phase3a：contradictory 角色退场，原"不是因果标签"断言随之移除——
+        #  方向相反的消息现一律默认 noise，见 news-impact-engine-phase3a-plan）
