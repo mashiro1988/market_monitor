@@ -54,12 +54,11 @@ function loadStored(): Partial<StoredState> {
   }
 }
 
-// —— v2.1 标签字典（与 schemas/annotations.py 的枚举一一对应；2026-06-11 定稿）——
+// —— 标签字典（Phase3a：人只标 driver；redundant 由后台导出派生、不在此列；
+//    post_hoc/contradictory 退场，并入 noise）——
 const ROLE_OPTIONS = [
   { value: "noise", label: "噪音" },
   { value: "driver", label: "驱动" },
-  { value: "post_hoc_explanation", label: "事后解释" },
-  { value: "contradictory", label: "方向矛盾" },
 ] as const;
 
 const REACTION_OPTIONS = [
