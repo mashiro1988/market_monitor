@@ -6,15 +6,13 @@ from schemas.common import TimeFields
 from schemas.news import NewsItemSchema
 
 # —— 标注角色（news-impact-engine Phase 3a；取代 annotation-v2.md 四分类）——
-# 导出/训练口径三值；redundant 由 Phase1 topic/量级在**导出时**派生，不可手标/LLM 直出。
+# 三值，人/LLM 逐条直接标（noise 为默认值，news_roles 里只存非 noise）。
 # post_hoc_explanation / contradictory 退场、并入 noise（综述/解释/离题/矛盾一律默认 noise）。
 NEWS_CAUSAL_ROLES = (
-    "driver",     # 驱动代表（驱动主题里 a-priori 量级最大、并列取最早 那条）
-    "redundant",  # 同簇冗余（与 driver 同 topic 的其它报道；导出派生；训练排除、不当负样本）
+    "driver",     # 驱动：触发/推动本窗口异动的主事件（同事件簇里最主要的一条）
+    "redundant",  # 同簇冗余：与 driver 同一事件簇的其它相关报道；训练时排除、不当负样本
     "noise",      # 噪音（默认，不落库）
 )
-# 人/LLM 可直接给的角色（redundant 派生而来，不在此列）。
-INPUT_CAUSAL_ROLES = ("driver", "noise")
 # 窗口级市场反应类型（单轴=驱动源；与 news_roles 闭环：前两类 ⟺ 有 driver）。
 MARKET_REACTION_TYPES = (
     "macro_policy",          # 宏观数据与政策预期（数据公布/央行/官员/财政）

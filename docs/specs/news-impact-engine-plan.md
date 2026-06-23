@@ -32,13 +32,14 @@
 - **标注绑定 = A 策略（用户 2026-06-22 定）**：① 只有**「已 settle（gap-repair 跑过该时段）且已走完」**的窗口才放出来给人标，暂定/尾部窗口不可标；② 标注冻结边界（`NewsPriceAnnotation` 已存 `window_start/end`）；③ 若之后 backfill 让某个**已标**窗口实质变化（边界挪 / 劈 / 并）→ 标「需复核」推给人，**不静默改、不静默丢**。台账反应侧不受影响（无人工绑定，保持 compute-on-read）。
 
 ### 标注 · 纯归因（Goal 1，简化）
-- `causal_role` 存储 **3 个值**（contradictory 与 post_hoc 均退场）：
-  - **driver** 驱动代表 — 半自动：人/LLM 确认"哪个 topic 驱动该窗口"，该 topic 里 **a-priori 量级最大 + 时间最早** 那条自动当 driver。
-  - **redundant** 同簇冗余 — 全自动：topic 与 driver 同簇但非代表 → 自动归此，**从负样本排除（绝不当 noise）**。由 topic tag 分组得到，不需单独去重引擎。
-  - **noise** 噪音 — 默认：topic 非驱动主题 → 自动（含泛泛综述/财经早餐）。
-- 去掉 post_hoc 安全：综述当不上 driver（量级低 + 时间晚，选不上代表）；评论同驱动主题的 → 自动 redundant；离题综述 → noise。"别把解释当驱动"由结构保证，无需单独标。
-- 人实际只动一件事：**标出哪个 topic 驱动**。driver/redundant/noise 全由规则自动派生。
-- 无 driver = 情绪（Axis B）。topic/方向/量级/反应全自动。
+> **2026-06-23 修订**：redundant 改为**人/LLM 逐条直接标**（沿用既有 per-news 路径），**否决**了早先"导出时按 topic/量级自动派生代表"的方案——用户嫌那套"代表可能被换掉"太复杂、不直观。
+- `causal_role` 存储 **3 个值**（contradictory 与 post_hoc 均退场、并入 noise），人/LLM 逐条标：
+  - **driver** 驱动 — 触发/推动窗口异动的**主**事件（同一事件簇里信息量最大 / 最主要的**一条**）。
+  - **redundant** 同簇冗余 — 与 driver 同一事件簇的**其它**相关报道（首报/补充/后续/不同来源转述）；**从负样本排除（不当 noise）**。人/LLM 选，不按量级自动派生。
+  - **noise** 噪音 — 默认：与窗口无关（含综述/解释/离题/方向相反/财经早餐）。
+- 去掉 post_hoc/contradictory：综述/解释/矛盾一律 noise；同簇相关报道用 redundant 表达"相关但非主驱动、别当负样本"。
+- 人逐条标 driver/redundant（未标 = noise），LLM 也给建议；导出时 candidates.causal_role = 所标角色，不再二次派生。
+- 无 driver = 情绪（Axis B）。topic/方向/量级/反应仍全自动（Phase 1）。
 
 ### 警报 · 两个镜像
 核心：**所有警报 = 台账「预期」vs「实际」对比，只有两个方向**。纯计算，非模型能力。
@@ -84,8 +85,8 @@
 - **验证**：`tests/test_annotation_window_scales.py` 整文件重写（7 单档行为用例，含 1-bar 断档拆窗 RED→GREEN）；`tests/test_annotation_windows.py` 断言对齐 5min 断档；全套 189 passed。细化 plan：`docs/specs/news-impact-engine-phase2-plan.md`。
 
 ### Phase 3 — 标注层简化（纯归因）
-- **3a（taxonomy 3 值 + redundant 导出派生）【已实现】**：`schemas/annotations.py` 枚举 4→3（driver/redundant/noise）+ 新增 `INPUT_CAUSAL_ROLES`=(driver,noise)；落库/LLM 输出校验只收 driver/noise；`migrate_legacy_annotations` 步骤3 把存量 post_hoc/contradictory 移除（归 noise）；两份 prompt 去 post_hoc/contradictory + 版本 v5；**导出 `_derive_export_roles`**：驱动主题里量级最大+最早=driver、同主题其余=redundant（训练排除）、其余=noise；前端角色下拉收敛为 噪音/驱动。细化 plan：`docs/specs/news-impact-engine-phase3a-plan.md`。验证：`tests/test_annotation_v2.py` 更新 + `tests/test_export_redundant.py`；全套 198 passed。
-  - **关键招**：redundant 不落库、不让人/LLM 直接标，导出时按 topic/量级派生 → 免标注页大改（人仍逐条标 driver，语义变成"指认驱动主题"）。
+- **3a（taxonomy 3 值，driver/redundant/noise 逐条直接标）【已实现】**：`schemas/annotations.py` 枚举 4→3（driver/redundant/noise）；落库/LLM 输出校验收 driver/redundant；`migrate_legacy_annotations` 步骤3 把存量 post_hoc/contradictory 移除（归 noise）；两份 prompt 去 post_hoc/contradictory、加 redundant（同簇冗余）+ 版本 v6；导出 candidates.causal_role = 所标角色（redundant 训练排除）；前端角色下拉 噪音/驱动/同簇冗余。验证：`tests/test_annotation_v2.py` 更新；全套 193 passed。
+  - **2026-06-23 反转**：早先实现过"导出时按 topic/量级自动派生 redundant 代表"（`_derive_export_roles` + `test_export_redundant.py`），用户嫌太复杂 → 改回 redundant 可手标/LLM标，那套派生与其测试已删除。
 - **3b（A 策略落地）【待做】**（见 §0 窗口）：标注页只列「已 settle + 已走完」的窗口；已标窗口被 backfill 改动则置「需复核」。**当前窗口仍 compute-on-read、按精确 (start,end) 键匹配标注**，未做 settle/走完门与改动检测。
 - **验证**：实弹回放（含 6/11 案例）在三分类下正确；同簇冗余不进负样本的单测（已覆盖）。
 

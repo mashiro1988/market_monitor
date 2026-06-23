@@ -1,5 +1,7 @@
 # Phase 3a — 标注层简化（taxonomy 3 值 + redundant 导出派生）Implementation Plan
 
+> ⚠️ **2026-06-23 部分作废**：本 plan 的 **Task 3「导出时按 topic/量级派生 redundant」已被用户否决并回滚**（嫌"代表可能被换掉"太复杂）。现状以 spec `news-impact-engine-plan.md` §标注 为准：**redundant 由人/LLM 逐条直接标**，`_derive_export_roles` 与 `test_export_redundant.py` 已删除，输入校验收 driver/redundant（无 `INPUT_CAUSAL_ROLES`），prompt 版本 v6。Task 1（去退场角色，但保留 redundant 可输入）/ Task 2（迁移）/ Task 4（prompt 去 post_hoc/contradictory）/ Task 5（前端）仍有效。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把标注 causal_role 从 4 值（driver/noise/post_hoc_explanation/contradictory）收敛到 **3 值（driver/redundant/noise）**，其中 **redundant 在导出时由 Phase-1 topic/量级自动派生**，contradictory 与 post_hoc_explanation 退场（并入 noise）。

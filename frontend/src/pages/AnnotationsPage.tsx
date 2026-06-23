@@ -54,11 +54,11 @@ function loadStored(): Partial<StoredState> {
   }
 }
 
-// —— 标签字典（Phase3a：人只标 driver；redundant 由后台导出派生、不在此列；
-//    post_hoc/contradictory 退场，并入 noise）——
+// —— 标签字典（Phase3a：人/LLM 逐条标 driver/redundant；post_hoc/contradictory 退场并入 noise）——
 const ROLE_OPTIONS = [
   { value: "noise", label: "噪音" },
   { value: "driver", label: "驱动" },
+  { value: "redundant", label: "同簇冗余" },
 ] as const;
 
 const REACTION_OPTIONS = [

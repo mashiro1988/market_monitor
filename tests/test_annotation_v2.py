@@ -123,12 +123,18 @@ def test_old_v20_enums_rejected_at_api(session):
         annotation_service.upsert_annotation(session, _req([n1], market_reaction_type="risk_sentiment"))
 
 
-def test_phase3a_rejects_retired_and_derived_roles(session):
-    """Phase3a：退场角色 contradictory/post_hoc_explanation 与派生角色 redundant 都不可手标输入。"""
-    n1, _, _ = _seed(session)
-    for bad in ("contradictory", "post_hoc_explanation", "redundant"):
+def test_phase3a_roles_driver_redundant_noise(session):
+    """Phase3a：driver/redundant 可手标/LLM标；contradictory/post_hoc_explanation 退场被拒。"""
+    n1, n2, n3 = _seed(session)
+    for bad in ("contradictory", "post_hoc_explanation"):
         with pytest.raises(ValueError):
             annotation_service.upsert_annotation(session, _req([n1], news_roles={n1: bad}))
+    # driver + redundant 都能落库
+    resp = annotation_service.upsert_annotation(session, _req(
+        [n1, n2, n3], news_roles={n1: "driver", n2: "redundant"}, confidence=0.8,
+    ))
+    d = annotation_service.get_annotation_detail(session, resp.id)
+    assert d.news_roles == {n1: "driver", n2: "redundant"}
 
 
 def test_migration_v1_and_v20_rows(session):
@@ -184,13 +190,13 @@ def test_migrate_drops_retired_roles(session):
 
 def test_parse_auto_v21_filters_and_derives():
     raw = json.dumps({
-        "news_roles": {"1": "driver", "2": "post_hoc_explanation", "99": "driver", "3": "primary_driver"},
+        "news_roles": {"1": "driver", "2": "redundant", "99": "driver", "3": "primary_driver"},
         "market_reaction_type": "macro_policy",
         "confidence": 1.7,
         "summary": "测试",
     })
     parsed = annotation_service._parse_auto_annotate_v2(raw, {1, 2, 3})
-    assert parsed.news_roles == {1: "driver"}   # 2 post_hoc 退场、99 幻觉、3 旧枚举 全被丢
+    assert parsed.news_roles == {1: "driver", 2: "redundant"}   # redundant 保留；99 幻觉、3 旧枚举丢
     assert parsed.market_reaction_type == "macro_policy"
     assert parsed.confidence == 1.0
     assert parsed.selected_news_ids == [1]
@@ -228,23 +234,17 @@ def test_export_jsonl_with_auto_labels(session):
     assert row["eval_set"] is False
 
 
-def test_export_derives_redundant_from_topic(session):
-    """Phase3a：同 topic 两条候选(量级不同)+人标其一 driver → 导出 driver+redundant 各一；代表按量级定。"""
-    session.add(PriceSnapshot(timestamp=W_START, asset_class="crypto", symbol="BTC/USDT", name="BTC/USDT", price=100000.0, source="t"))
-    session.add(PriceSnapshot(timestamp=W_END, asset_class="crypto", symbol="BTC/USDT", name="BTC/USDT", price=98000.0, source="t"))
-    a = NewsItem(timestamp=W_START + timedelta(minutes=5), source="jin10", title="美军打击伊朗",
-                 content="x", language="zh", topic="地缘冲突", magnitude_tier="大")
-    b = NewsItem(timestamp=W_START + timedelta(minutes=8), source="jin10", title="伊朗回应",
-                 content="x", language="zh", topic="地缘冲突", magnitude_tier="中")
-    session.add_all([a, b]); session.commit()
+def test_export_keeps_manual_redundant(session):
+    """Phase3a：人/LLM 直接标的 driver/redundant 原样进导出 candidates.causal_role，未标的为 noise。"""
+    n1, n2, n3 = _seed(session)
     annotation_service.upsert_annotation(session, _req(
-        [a.id, b.id], news_roles={b.id: "driver"}, confidence=0.8,     # 人标了"中"量级那条
+        [n1, n2, n3], news_roles={n1: "driver", n2: "redundant"}, confidence=0.8,
     ))
     row = json.loads(annotation_service.export_training_jsonl(session, days=30)[0])
     roles = {c["id"]: c["causal_role"] for c in row["candidates"]}
-    assert roles[a.id] == "driver"           # 代表 = 量级大的 a（即便人标的是 b）
-    assert roles[b.id] == "redundant"        # 同主题非代表 → 冗余（训练排除，不当负样本）
-    assert row["labels"]["news_roles"] == {str(b.id): "driver"}   # 人工原始标注保持不变
+    assert roles[n1] == "driver"
+    assert roles[n2] == "redundant"          # 同簇冗余：训练排除、非负样本
+    assert roles[n3] == "noise"              # 未标 → 默认 noise（负样本）
 
 
 def test_export_split_excludes_eval(session):
@@ -276,7 +276,8 @@ def test_context_pre_minutes_respected(session):
 
 
 def test_prompts_drop_retired_roles():
-    """Phase3a：两份自动标注 prompt 不再提 post_hoc/contradictory；版本号已 bump。"""
+    """Phase3a：两份 prompt 不再提 post_hoc/contradictory，但解释 redundant；版本号已 bump。"""
     for p in (annotation_service.AUTO_ANNOTATE_SYSTEM_PROMPT, annotation_service.AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT):
         assert "post_hoc" not in p and "contradictory" not in p
+        assert "redundant" in p              # redundant 现为可标角色，prompt 必须解释
     assert annotation_service.ANNOTATION_PROMPT_VERSION != "v4-20260612"
