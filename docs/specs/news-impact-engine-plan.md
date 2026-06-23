@@ -87,7 +87,7 @@
 ### Phase 3 — 标注层简化（纯归因）
 - **3a（taxonomy 3 值，driver/redundant/noise 逐条直接标）【已实现】**：`schemas/annotations.py` 枚举 4→3（driver/redundant/noise）；落库/LLM 输出校验收 driver/redundant；`migrate_legacy_annotations` 步骤3 把存量 post_hoc/contradictory 移除（归 noise）；两份 prompt 去 post_hoc/contradictory、加 redundant（同簇冗余）+ 版本 v6；导出 candidates.causal_role = 所标角色（redundant 训练排除）；前端角色下拉 噪音/驱动/同簇冗余。验证：`tests/test_annotation_v2.py` 更新；全套 193 passed。
   - **2026-06-23 反转**：早先实现过"导出时按 topic/量级自动派生 redundant 代表"（`_derive_export_roles` + `test_export_redundant.py`），用户嫌太复杂 → 改回 redundant 可手标/LLM标，那套派生与其测试已删除。
-- **3b（A 策略落地）【待做】**（见 §0 窗口）：标注页只列「已 settle + 已走完」的窗口；已标窗口被 backfill 改动则置「需复核」。**当前窗口仍 compute-on-read、按精确 (start,end) 键匹配标注**，未做 settle/走完门与改动检测。
+- **3b（A 策略落地）【已实现】**（见 §0 窗口，细化 plan `news-impact-engine-phase3b-plan.md`）：① `PriceWindowSchema.annotatable` —— `window_end ≤ now − ANNOTATION_SETTLE_MARGIN_MINUTES`（默认 90min，覆盖 gap-repair settle + 走完缓冲）才可标，尾部/暂定窗口前端置灰禁选；③ `AnnotationListItem.needs_review` —— 标注 id 不在当前重算窗口的 annotation_id 集合里（被 backfill 劈/并/挪了边界）→ 前端显「需复核」，不静默改/丢。窗口仍 compute-on-read。验证：`tests/test_annotation_windows.py`（annotatable 门）+ `tests/test_annotation_v2.py`（needs_review）；全套 195 passed + 前端构建通过。
 - **验证**：实弹回放（含 6/11 案例）在三分类下正确；同簇冗余不进负样本的单测（已覆盖）。
 
 ### Phase 4 — 警报层（两镜像 + 两模式）
