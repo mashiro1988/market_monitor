@@ -235,6 +235,7 @@ export type PriceWindow = {
   change_pct: number;
   segment_count: number;
   annotation_id: number | null;
+  annotatable?: boolean;  // Phase3b：已 settle+走完才可标；尾部/暂定窗口 false（置灰）
   is_primary: boolean;  // 合并事件窗口恒 True
   context_pre_minutes?: number;  // 候选前置窗（15m 档 30 / 60m 档 60）
   references?: ReferenceChange[];  // 宏观同期对标（纳指/原油/黄金…）
@@ -331,6 +332,7 @@ export type AnnotationListItem = {
   market_reaction_type?: string | null;
   confidence?: number | null;
   eval_set?: boolean;
+  needs_review?: boolean;  // Phase3b：窗口边界被数据回补改动，请重看
   labeler: string | null;
   notes: string | null;
   created_at: TimeFields;

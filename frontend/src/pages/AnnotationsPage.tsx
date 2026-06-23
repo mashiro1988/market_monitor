@@ -635,14 +635,18 @@ export function AnnotationsPage() {
                     {groups.map(({ primary }) => {
                       const key = windowKey(primary);
                       const isActive = key === activeKey;
+                      const locked = primary.annotatable === false;   // Phase3b：未 settle/走完，不可标
                       const tone = primary.change_pct >= 0 ? "up" : "down";
                       const sign = primary.change_pct > 0 ? "+" : "";
                       return (
                         <li key={key}>
                           <button
                             type="button"
-                            className={`window-item ${tone}${isActive ? " active" : ""}`}
-                            onClick={() => setActiveKey(key)}
+                            className={`window-item ${tone}${isActive ? " active" : ""}${locked ? " locked" : ""}`}
+                            onClick={() => { if (!locked) setActiveKey(key); }}
+                            disabled={locked}
+                            title={locked ? "窗口尚未 settle / 走完，稍后再标" : undefined}
+                            style={locked ? { opacity: 0.5 } : undefined}
                             onMouseEnter={(e) => showPricePeek(e, primary)}
                             onMouseLeave={hidePricePeek}
                           >
@@ -653,6 +657,7 @@ export function AnnotationsPage() {
                             <span className="window-item-pct">
                               {sign}{primary.change_pct.toFixed(2)}%
                             </span>
+                            {locked ? <span className="window-item-lock" title="尚未 settle">⏳</span> : null}
                             {primary.references?.length ? (
                               <span className="window-item-refs" title="同期宏观对标（纳指/原油/黄金）">
                                 {primary.references.map((ref) => {
@@ -771,7 +776,15 @@ export function AnnotationsPage() {
               {
                 key: "window",
                 header: "时间窗口",
-                cell: (row) => `${row.window_start.timestamp_bj?.slice(5, 16)} → ${row.window_end.timestamp_bj?.slice(11, 16)}`
+                cell: (row) => (
+                  <span>
+                    {row.window_start.timestamp_bj?.slice(5, 16)} → {row.window_end.timestamp_bj?.slice(11, 16)}
+                    {row.needs_review ? (
+                      <span style={{ color: "#d97706", fontWeight: 600, marginLeft: 6 }}
+                            title="窗口边界已被数据回补改动，请重看">需复核</span>
+                    ) : null}
+                  </span>
+                )
               },
               {
                 key: "chg",
