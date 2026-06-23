@@ -275,6 +275,39 @@ def test_context_pre_minutes_respected(session):
     assert row.context_start == W_START - timedelta(minutes=60)
 
 
+def test_list_annotations_needs_review(session):
+    """Phase3b A策略③：已标 (start,end) 对不上当前重算窗口 → needs_review=True；对得上 → False。"""
+    now = annotation_service.utc_now_naive().replace(second=0, microsecond=0)
+    # BTC 15min 窗口（config scale wm15/threshold0.5）：-2% 急跌
+    for mago, p in [(40, 100000.0), (35, 100000.0), (30, 100000.0), (25, 100000.0),
+                    (20, 99000.0), (15, 98000.0), (10, 98000.0), (5, 98000.0)]:
+        session.add(PriceSnapshot(timestamp=now - timedelta(minutes=mago),
+                                  asset_class="crypto", symbol="BTC/USDT", name="BTC/USDT", price=p, source="t"))
+    session.commit()
+    wins = annotation_service.load_price_windows(session, "BTC/USDT", hours=24)
+    assert wins, "需要至少一个窗口来测 needs_review"
+    w = wins[0]
+    # 正常：按该窗口边界标注 → id 能对上 → needs_review=False
+    annotation_service.upsert_annotation(session, AnnotationCreateRequest(
+        symbol="BTC/USDT", window_start_utc=w.window_start.timestamp_utc,
+        window_end_utc=w.window_end.timestamp_utc, threshold_pct=0.5,
+        candidate_news_ids=[], selected_news_ids=[], no_clear_news=True,
+    ))
+    # 幽灵：边界对不上任何窗口（挪 5 小时）→ needs_review=True
+    session.add(NewsPriceAnnotation(
+        symbol="BTC/USDT", window_start=now - timedelta(hours=5),
+        window_end=now - timedelta(hours=5) + timedelta(minutes=15),
+        context_start=now, context_end=now, change_pct=-2.0,
+        news_roles=json.dumps({}), no_clear_news=True, created_at=now, updated_at=now,
+    ))
+    session.commit()
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=24)
+    normal = [it for it in items if it.window_end.timestamp_utc == w.window_end.timestamp_utc]
+    ghost = [it for it in items if it.window_end.timestamp_utc != w.window_end.timestamp_utc]
+    assert normal and normal[0].needs_review is False
+    assert ghost and ghost[0].needs_review is True
+
+
 def test_prompts_drop_retired_roles():
     """Phase3a：两份 prompt 不再提 post_hoc/contradictory，但解释 redundant；版本号已 bump。"""
     for p in (annotation_service.AUTO_ANNOTATE_SYSTEM_PROMPT, annotation_service.AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT):

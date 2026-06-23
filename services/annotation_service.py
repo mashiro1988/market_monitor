@@ -742,6 +742,16 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
         ref_rows = _load_reference_rows(session, earliest - timedelta(minutes=tolerance_minutes + 5))
     else:
         ref_rows = {}
+    # Phase3b A策略③：当前重算窗口里"边界还对得上"的标注 id（按 symbol 缓存）。
+    # 一条标注的 id 不在其中 = 它的 (start,end) 被 backfill 劈/并/挪了 → needs_review。
+    cur_ids_by_symbol: dict[str, set[int]] = {}
+
+    def _cur_ann_ids(sym: str) -> set[int]:
+        if sym not in cur_ids_by_symbol:
+            wins = load_price_windows(session, sym, hours)
+            cur_ids_by_symbol[sym] = {w.annotation_id for w in wins if w.annotation_id is not None}
+        return cur_ids_by_symbol[sym]
+
     items: list[AnnotationListItem] = []
     for row in rows:
         selected_ids = _parse_news_ids(row.causal_news_ids)
@@ -758,6 +768,7 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
             market_reaction_type=row.market_reaction_type,
             confidence=row.confidence,
             eval_set=bool(row.eval_set),
+            needs_review=(row.id not in _cur_ann_ids(row.symbol)),
             labeler=row.labeler,
             notes=row.notes,
             created_at=timestamp_pair(row.created_at),

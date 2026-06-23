@@ -199,6 +199,7 @@ class AnnotationListItem(BaseModel):
     market_reaction_type: str | None = None
     confidence: float | None = None
     eval_set: bool = False
+    needs_review: bool = False         # Phase3b A策略③：窗口边界被 backfill 改动、当前重算窗口对不上
     labeler: str | None
     notes: str | None
     created_at: TimeFields
