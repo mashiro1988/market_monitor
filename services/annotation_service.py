@@ -472,6 +472,8 @@ def load_price_windows(
     # 单档（Phase 2）：_scale_events 内部已做同向相邻合并，无跨档合并。
     merged = _scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap)
 
+    # Phase3b A策略①：window_end 早于此线才算「已 settle + 已走完」、可标。
+    settle_cutoff = utc_now_naive() - timedelta(minutes=int(getattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 90)))
     windows: list[tuple[datetime, PriceWindowSchema]] = []
     for m in merged:
         p_start = price_at.get(m["start"])
@@ -492,6 +494,7 @@ def load_price_windows(
             change_pct=net_pct,
             segment_count=m["segments"],
             annotation_id=annotation_index.get((m["start"], m["end"])),
+            annotatable=(m["end"] <= settle_cutoff),
             is_primary=True,
             context_pre_minutes=m["pre"],
             references=_reference_changes_for_window(ref_rows, m["start"], m["end"], tolerance_minutes, symbol),

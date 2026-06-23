@@ -55,6 +55,7 @@ class PriceWindowSchema(BaseModel):
     change_pct: float
     segment_count: int = 1
     annotation_id: int | None = None  # 已标注则为对应 NewsPriceAnnotation.id
+    annotatable: bool = True            # Phase3b A策略①：已 settle+走完（window_end ≤ now−余量）才可标
     is_primary: bool = True            # 合并事件窗口恒 True（不再发 secondary）
     context_pre_minutes: int = 30      # 候选新闻前置窗（按档位：15m 档 30 / 60m 档 60）
     references: list[ReferenceChange] = Field(default_factory=list)  # 宏观同期对标（纳指/原油/黄金…）

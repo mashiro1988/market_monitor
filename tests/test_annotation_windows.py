@@ -58,6 +58,17 @@ def test_short_silence_now_splits(session):
     assert len(_call(session)) == 2                            # end_dt 间隔 15min > 5 → 断档拆开
 
 
+def test_window_annotatable_gate(session, monkeypatch):
+    """Phase3b A策略①：窗口 window_end ≤ now − 余量 才 annotatable；尾部/暂定窗口不可标。"""
+    monkeypatch.setattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 90)
+    now = utc_now_naive()
+    _seed(session, now, [(300, 100.0), (295, 101.0)])           # 远窗口：结束于 ~295min 前 → 可标
+    _seed(session, now, [(20, 100.0), (15, 101.0)])             # 近窗口：结束于 ~15min 前 → 不可标
+    wins = _call(session)
+    assert any(w.annotatable for w in wins)                     # 远窗口可标
+    assert any(not w.annotatable for w in wins)                 # 近窗口不可标
+
+
 def test_two_segments_beyond_gap_split(session):
     now = utc_now_naive()
     bars = (
