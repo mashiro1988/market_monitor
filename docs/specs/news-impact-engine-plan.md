@@ -25,7 +25,7 @@
 
 ### 窗口 · 单 15min（触发=开收净，非振幅）
 - **一个** 15min 窗口，触发用**窗口开收净变动**：`(窗口末收盘 − 窗口初开盘)/窗口初开盘 ≥ 阈值`；方向 = 净变动符号。**初开盘**是窗口**起点边界**那一格的价（含第一根 bar 自己的移动；用初收盘会砍掉第一根 bar）。无 1h、无多尺度、无单独净门槛（触发阈值本身就是净门槛）。
-- **收口规则（= 现 `_scale_events` 合并逻辑）**：同方向且连续 → 并进上一个窗口；**变了方向、或断了档 → 上一个窗口走完**，另起一个。**断档 = 触发间隔 > 5min**（一个快照步长；旧的 60min merge_gap 收紧到 5min，靠每小时 gap-repair 补洞而非宽容窗扛数据缺口）。
+- **收口规则（= 现 `_scale_events` 合并逻辑）**：同方向且**覆盖区间相邻** → 并进上一个窗口；**变了方向、或区间断档 → 上一个窗口走完**，另起一个。**断档判据用 `start_dt`**：新触发的 `start_dt`（= current−wm，覆盖区间起点）与上一窗 `end_dt` 间隔 > `merge_gap`(默认 5min) 才算断。**绝不能用 `end_dt` 间隔**——每个触发覆盖 [current−wm, current]、窗口 start 也回看 wm，用 end_dt 会无视这段覆盖，把一根没触发的**连续行情误拆成两个重叠窗口**（2026-06-27 线上实测 BTC 20:50→21:15 与 21:10→21:25 重叠误拆，已修）。旧 60min merge_gap 收紧到 5min。
 - **暂不纳入高/低价**（用户 2026-06-21 定）：触发只看开收净、不看窗口内振幅(高低差)。好处：net≈0 的横跳本来就过不了净阈值、不出窗口，**天然规避了"方向不明该不该收口"的歧义**——所以也暂不做「双向博弈」状态。振幅/双向博弈留到以后真有需要再加。
 - 数据限制：现仅存 5min 收盘价。**窗口初开盘** = 窗口起点边界(T−wm)那格快照（仅存收盘价时，它等于前一根 bar 的收盘 ≈ 第一根 bar 的开盘）；**窗口末收盘** = 末格快照。本期不改 OHLC 存储。
 - **窗口不落库，每次 compute-on-read 重算**（按 单品种 × 最近 N 小时，默认 72h、无窗口表；单品种 72h≈864 格，毫秒级），自动吸收 backfill。**否决**了"持久化已定窗口"的替代方案。
@@ -80,8 +80,8 @@
 
 ### Phase 2 — 窗口改单 15min 开收净【小，已实现】
 - **改** `services/annotation_service.py:load_price_windows` + `config.ANNOTATION_WINDOW_SCALES`：删 60m 档与多尺度合并；保留**开收净触发**（现 `change_pct` 即是：`(末收 − 初开)/初开`，初开 = baseline 取 `current−wm` 那格，无需改），删单独的 `net_min` 门槛（触发阈值已是净门槛）。
-- **收口** = `_scale_events` 同向合并逻辑，断档判据由 span-based 改为**扫描点相邻**（`end_dt` 间隔 ≤ `ANNOTATION_EVENT_MERGE_GAP_MINUTES`），默认 60 收紧到 **5**（跳一格即断档）。暂不引入振幅/高低价/双向博弈。
-- **已实现**：单档 15min 开收净触发 + 5min 扫描点断档；删 60m/net_min/跨档合并；窗口仍 compute-on-read。`threshold_pct` 沿用既有 15min 触发阈值（BTC 0.5 / NQ 0.3）；删 net_min 后 0.5~旧 net_min 区间的小移动也会出窗口，噪音待 6/10 夜回放校准（plan Task 4，非阻塞）。
+- **收口** = `_scale_events` 同向合并逻辑，断档判据用 **`start_dt`（覆盖区间相邻）**：新触发 `start_dt` 与上一窗 `end_dt` 间隔 ≤ `ANNOTATION_EVENT_MERGE_GAP_MINUTES`(默认 60→**5**) 则并。**不可用 `end_dt` 间隔**（会把连续行情误拆成重叠窗口，见 §0 窗口）。暂不引入振幅/高低价/双向博弈。
+- **已实现**：单档 15min 开收净触发 + 覆盖区间相邻合并(start_dt、gap 5min)；删 60m/net_min/跨档合并；窗口仍 compute-on-read。`threshold_pct` 沿用既有 15min 触发阈值（BTC 0.5 / NQ 0.3）。**2026-06-27 修**：合并判据曾误用 end_dt 间隔致重叠窗口被误拆，已改回 start_dt。
 - **验证**：`tests/test_annotation_window_scales.py` 整文件重写（7 单档行为用例，含 1-bar 断档拆窗 RED→GREEN）；`tests/test_annotation_windows.py` 断言对齐 5min 断档；全套 189 passed。细化 plan：`docs/specs/news-impact-engine-phase2-plan.md`。
 
 ### Phase 3 — 标注层简化（纯归因）

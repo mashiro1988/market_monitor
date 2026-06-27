@@ -379,8 +379,10 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
                   scale: dict, merge_gap: timedelta) -> list[dict]:
     """单档触发扫描 + 同向相邻合并 → 原始窗口 dict 列表（news-impact-engine Phase 2）。
     触发：窗口开收净 = (current − baseline_{T−wm})/baseline ≥ threshold（baseline = 窗口初开盘，含第一根 bar）。
-    合并：同方向 且 扫描点相邻（end_dt 间隔 ≤ merge_gap）→ 并进上一个；
-          变方向 或 扫描点断档（> merge_gap）→ 上一个窗口走完，另起一个。
+    合并：同方向 且 **覆盖区间相邻**（新触发 start_dt 与上一窗 end_dt 间隔 ≤ merge_gap）→ 并进上一个；
+          变方向 或 区间断档（> merge_gap）→ 上一个窗口走完，另起一个。
+    **必须用 start_dt（不是 end_dt）**：每个触发覆盖 [current−wm, current]，窗口 start 也回看 wm；用 end_dt 比
+    会无视这段覆盖、把一根没触发的连续行情误拆成两个**重叠**窗口（线上实测 BTC 20:50→21:15 与 21:10→21:25）。
     无 net_min——threshold 本身就是该窗口必须达到的净幅度。"""
     wm = int(scale["window_minutes"])
     threshold = float(scale["threshold_pct"])
@@ -409,7 +411,7 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
     events: list[list[dict]] = []
     for t in triggers:
         if (events and events[-1][-1]["sign"] == t["sign"]
-                and (t["end_dt"] - events[-1][-1]["end_dt"]) <= merge_gap):   # 扫描点相邻才并；跳一格即断档
+                and (t["start_dt"] - events[-1][-1]["end_dt"]) <= merge_gap):   # 覆盖区间相邻才并（防重叠拆窗）
             events[-1].append(t)
         else:
             events.append([t])

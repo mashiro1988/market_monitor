@@ -1,5 +1,7 @@
 # Phase 2 — 窗口改单 15min 开收净 Implementation Plan
 
+> ⚠️ **2026-06-27 更正**：本 plan 通篇把"断档"写成**扫描点 `end_dt` 间隔**，这是**错的**——会把一根没触发的连续行情拆成两个**重叠**窗口（线上实测 BTC 20:50→21:15 与 21:10→21:25）。正确判据是 **`start_dt`（覆盖区间相邻）**：新触发 `start_dt` 与上一窗 `end_dt` 间隔 ≤ merge_gap 才并。现状以 `_scale_events` 代码与 spec §0 窗口 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把多尺度(15m+60m)+净门槛的标注窗口检测，简化为**单个 15min、开收净触发、5min 断档**的窗口检测。

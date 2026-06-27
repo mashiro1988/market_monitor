@@ -75,20 +75,32 @@ def test_subthreshold_chop_no_window(session):
     assert load_price_windows(session, "TEST", hours=24) == []
 
 
-def test_gap_one_bar_splits_into_two(session):
-    """同向两段急跌，中间**只隔一根**不触发的 bar(扫描点间隔 10min > 5) → 2 个窗口。
-    这条专门区分新旧合并判据：旧 start_dt-based(gap=5)会把这俩并成 1，
-    新 end_dt-based 在跳一格(10min)就断档 → 2。"""
-    # bar4 跌到 9880（触发 c=20/25/30）；bar7 仍 9880(不触发,断档)；bar8 跌到 9760(触发 c=40/45/50)。
+def test_single_skipped_bar_merges_no_overlap(session):
+    """同向急跌中途只有一根 bar 没触发（15min 净瞬时回到阈下）：两段的覆盖区间仍**重叠**
+    （seg2 的 start_dt 早于 seg1 的 end_dt）→ 必须并成 **1** 个窗口，绝不能产出两个重叠窗口。
+    线上实测 bug：BTC 20:50→21:15 与 21:10→21:25 重叠却被拆开（end_dt-based 合并判据之误）。"""
+    # bar4 跌到 9880(触发 bar4/5/6)；bar7 一根没触发；bar8 再跌到 9760(触发 bar8/9/10)。
     prices = (
         [10000.0, 10000.0, 10000.0, 10000.0]   # bars 0-3
-        + [9880.0, 9880.0, 9880.0, 9880.0]      # bars 4-7：-1.2%，bar7 是断档 bar
+        + [9880.0, 9880.0, 9880.0, 9880.0]      # bars 4-7：-1.2%，bar7 一根没触发
         + [9760.0, 9760.0, 9760.0]              # bars 8-10：再 -1.2%
         + [9760.0, 9760.0, 9760.0]              # bars 11-13 平尾
     )
     _series(session, prices)
     wins = load_price_windows(session, "TEST", hours=24)
-    assert len(wins) == 2
+    assert len(wins) == 1                       # 覆盖区间重叠 → 并成一个
+
+
+def test_long_pause_splits_into_two(session):
+    """同向两段急跌，中间**真正静默够久**（覆盖区间不再重叠、区间间隔 > 5min）→ 才拆成 2。"""
+    prices = (
+        [10000.0, 10000.0, 10000.0, 10000.0]                       # bars 0-3
+        + [9880.0, 9880.0, 9880.0, 9880.0, 9880.0, 9880.0, 9880.0]  # bars 4-10：-1.2% 后长平台
+        + [9760.0, 9760.0, 9760.0]                                 # bars 11-13：再 -1.2%
+    )
+    _series(session, prices)
+    wins = load_price_windows(session, "TEST", hours=24)
+    assert len(wins) == 2                       # 覆盖区间不重叠、间隔 > 5min → 拆开
 
 
 def test_continuous_same_direction_merges(session):
