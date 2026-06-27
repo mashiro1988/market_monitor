@@ -55,6 +55,9 @@ def to_news_schema(item: NewsItem) -> NewsItemSchema:
         language=item.language,
         categories=item.categories,
         is_jin10_important=is_jin10_important(item),
+        topic=item.topic,
+        magnitude_tier=item.magnitude_tier,
+        news_direction=item.news_direction,
         **timestamp_pair(item.timestamp),
     )
 

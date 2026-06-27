@@ -19,6 +19,10 @@ class NewsItemSchema(TimeFields):
     language: str
     categories: str | None = None
     is_jin10_important: bool = False
+    # —— Phase 1 内容标签（news_tagging 打，标注页展示用）——
+    topic: str | None = None            # 主题（NEWS_TOPICS 之一）
+    magnitude_tier: str | None = None   # a-priori 量级 大/中/小
+    news_direction: str | None = None   # 对风险资产应然方向 利多/利空/中性
 
 
 class NewsResponse(BaseModel):

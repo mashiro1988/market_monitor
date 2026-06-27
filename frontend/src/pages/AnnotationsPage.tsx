@@ -542,6 +542,24 @@ export function AnnotationsPage() {
     { key: "time", header: "时间", cell: (row: NewsItem) => row.timestamp_bj?.slice(5, 16) },
     { key: "source", header: "来源", cell: (row: NewsItem) => row.source },
     { key: "score", header: "LLM", cell: (row: NewsItem) => row.llm_importance ?? "—" },
+    {
+      key: "tags",
+      header: "内容标签",
+      cell: (row: NewsItem) => {
+        if (!row.topic && !row.magnitude_tier && !row.news_direction)
+          return <span className="muted-text small">未打标</span>;
+        const dirColor =
+          row.news_direction === "利多" ? "#16a34a" :
+          row.news_direction === "利空" ? "#dc2626" : "var(--text-muted, #888)";
+        return (
+          <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}>
+            {row.topic ? <span>{row.topic}</span> : null}
+            {row.magnitude_tier ? <span style={{ fontWeight: 700 }}>{row.magnitude_tier}</span> : null}
+            {row.news_direction ? <span style={{ color: dirColor }}>{row.news_direction}</span> : null}
+          </span>
+        );
+      }
+    },
     { key: "title", header: "标题", cell: (row: NewsItem) => row.title }
   ], [newsRoles, setNewsRole]);
 

@@ -87,6 +87,9 @@ export type NewsItem = TimeFields & {
   language: string;
   categories: string | null;
   is_jin10_important: boolean;
+  topic: string | null;            // Phase 1 内容标签：主题
+  magnitude_tier: string | null;   // a-priori 量级 大/中/小
+  news_direction: string | null;   // 应然方向 利多/利空/中性
 };
 
 export type NewsResponse = {
