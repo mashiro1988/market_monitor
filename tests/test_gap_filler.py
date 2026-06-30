@@ -26,3 +26,26 @@ def test_gapfill_anchor_table_created_and_upsertable(session):
     row = session.get(GapfillAnchor, "NQ=F")
     assert row.real_close == 22000.0 and row.perp_price == 706.0
     assert row.updated_at is not None   # Task 3 的锚点时效比较依赖此字段在 INSERT 后非 None
+
+def test_fetch_instrument_bars_parses_closed_bars_ascending(monkeypatch):
+    from scanners.sources.okx_source import OkxPriceSource, PerpBar
+    src = OkxPriceSource.__new__(OkxPriceSource)          # 绕过 __init__（不建真 exchange）
+    src.proxy = ""
+    monkeypatch.setattr(src, "_make_exchange", lambda: object())
+    # OKX candle: [ts(start,ms), o,h,l,c, vol, volCcy, volCcyQuote, confirm]；newest-first
+    canned = {
+        "QQQ-USDT-SWAP": [
+            ["1782700200000","705","707","704","706","10","0","0","1"],   # 较新
+            ["1782699900000","704","706","703","705","9","0","0","1"],    # 较旧
+        ],
+        "XAU-USDT-SWAP": [["1782700200000","4085","4090","4080","4088","1","0","0","1"]],
+    }
+    monkeypatch.setattr(src, "_fetch_candles",
+                        lambda exchange, inst_id, limit=12: canned.get(inst_id, []))
+    out = src.fetch_instrument_bars(["QQQ-USDT-SWAP", "XAU-USDT-SWAP"])
+    assert isinstance(out["QQQ-USDT-SWAP"][0], PerpBar)
+    closes = [b.close for b in out["QQQ-USDT-SWAP"]]
+    assert closes == [705.0, 706.0]                       # 升序（旧→新）
+    assert out["XAU-USDT-SWAP"][-1].close == 4088.0
+    from datetime import datetime
+    assert out["XAU-USDT-SWAP"][-1].bar_end == datetime.utcfromtimestamp(1782700200000/1000 + 300)
