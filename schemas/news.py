@@ -39,3 +39,10 @@ class NewsSourceMeta(BaseModel):
     key: str
     name: str
     language: str
+
+
+class NewsTagUpdateRequest(BaseModel):
+    """人工修正一条新闻的内容标签（标注页 PATCH /api/news/{id}/tags）。三项可选，给哪项改哪项。"""
+    topic: str | None = None
+    magnitude_tier: str | None = None
+    news_direction: str | None = None

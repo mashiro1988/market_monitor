@@ -35,8 +35,8 @@ function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（角色/反应类型/notes）
 // + 当前选中窗口 + 标注人。切到别的页面再回来不会丢；标注保存成功后该 key 会被清理。
-// v2：标签体系升级（docs/specs/annotation-v2.md），旧 v1 草稿 schema 不兼容，直接弃读。
-const STORAGE_KEY = "annotations.session.v2";
+// Phase3a：标签体系升级为 driver/redundant/noise；旧 v2 草稿里可能残留 retired roles，直接弃读。
+const STORAGE_KEY = "annotations.session.phase3a";
 
 type StoredState = {
   batchByKey: [string, AutoAnnotateBatchItem][];
@@ -319,10 +319,8 @@ export function AnnotationsPage() {
         };
         // 派生兼容字段（与后端 _derive_compat_fields 同口径）
         const roleIds = Object.keys(merged.news_roles).map(Number);
-        const selected = roleIds.filter((id) => merged.news_roles[id] === "primary_driver")
-          .concat(roleIds.filter((id) => merged.news_roles[id] === "secondary_driver"));
-        const noClear = !roleIds.some((id) => merged.news_roles[id] === "primary_driver")
-          || merged.market_reaction_type === "no_clear_driver";
+        const selected = roleIds.filter((id) => merged.news_roles[id] === "driver");
+        const noClear = selected.length === 0 || merged.market_reaction_type === "no_news_driver";
         const full: AutoAnnotateBatchItem = { ...merged, selected_news_ids: selected, no_clear_news: noClear };
         // 用户把窗口清回全空且无 AI 痕迹 → 删草稿而不是存空条目（保持「没动过=无草稿」语义，
         // 批量自动标注的 pending 列表也依赖这一点）。
@@ -410,6 +408,14 @@ export function AnnotationsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["annotation-list"] });
     }
+  });
+
+  // 内容标签：库（下拉选项）+ 人工改一条新闻的标签
+  const tagOptions = useQuery({ queryKey: ["tag-options"], queryFn: api.tagOptions, staleTime: 60 * 60_000 });
+  const updateTags = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: { topic?: string; magnitude_tier?: string; news_direction?: string } }) =>
+      api.updateNewsTags(id, body),
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["context-news"] }); }
   });
 
   const autoAnnotate = useMutation({
@@ -544,24 +550,34 @@ export function AnnotationsPage() {
     { key: "score", header: "LLM", cell: (row: NewsItem) => row.llm_importance ?? "—" },
     {
       key: "tags",
-      header: "内容标签",
+      header: "内容标签（可改）",
       cell: (row: NewsItem) => {
-        if (!row.topic && !row.magnitude_tier && !row.news_direction)
-          return <span className="muted-text small">未打标</span>;
+        const opts = tagOptions.data;
         const dirColor =
           row.news_direction === "利多" ? "#16a34a" :
-          row.news_direction === "利空" ? "#dc2626" : "var(--text-muted, #888)";
+          row.news_direction === "利空" ? "#dc2626" : undefined;
+        const sel = (val: string | null, list: string[] | undefined, field: "topic" | "magnitude_tier" | "news_direction", color?: string) => (
+          <select
+            value={val ?? ""}
+            style={{ fontSize: 11, padding: "1px 2px", color, maxWidth: field === "topic" ? 96 : 56 }}
+            onChange={(e) => updateTags.mutate({ id: row.id, body: { [field]: e.target.value } })}
+            title={field === "topic" ? "主题" : field === "magnitude_tier" ? "量级" : "方向"}
+          >
+            <option value="">{field === "topic" ? "未打标" : "—"}</option>
+            {(list ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        );
         return (
-          <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}>
-            {row.topic ? <span>{row.topic}</span> : null}
-            {row.magnitude_tier ? <span style={{ fontWeight: 700 }}>{row.magnitude_tier}</span> : null}
-            {row.news_direction ? <span style={{ color: dirColor }}>{row.news_direction}</span> : null}
+          <span style={{ display: "inline-flex", gap: 3, alignItems: "center", flexWrap: "wrap" }}>
+            {sel(row.topic, opts?.topics, "topic")}
+            {sel(row.magnitude_tier, opts?.magnitudes, "magnitude_tier")}
+            {sel(row.news_direction, opts?.directions, "news_direction", dirColor)}
           </span>
         );
       }
     },
     { key: "title", header: "标题", cell: (row: NewsItem) => row.title }
-  ], [newsRoles, setNewsRole]);
+  ], [newsRoles, setNewsRole, tagOptions.data, updateTags]);
 
   return (
     <section>
