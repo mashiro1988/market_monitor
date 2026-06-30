@@ -329,7 +329,22 @@ export function MarketPage() {
                     </div>
                     <strong>{formatPrice(item)}</strong>
                     {item.source?.startsWith(OKX_GAPFILL_SOURCE) && (
-                      <span className="badge-proxy" title="OKX 永续休市代理价">代理价</span>
+                      <span
+                        className="badge-proxy"
+                        title="OKX 永续休市代理价"
+                        style={{
+                          alignSelf: "flex-start",
+                          fontSize: 11,
+                          lineHeight: 1.4,
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          color: "#94a3b8",
+                          background: "rgba(148,163,184,0.16)",
+                          border: "1px solid rgba(148,163,184,0.3)",
+                        }}
+                      >
+                        代理价
+                      </span>
                     )}
                     <div className="mini-stats">
                       <Stat label="5m" value={pct(item.change_5m)} tone={tone(item.change_5m)} />
