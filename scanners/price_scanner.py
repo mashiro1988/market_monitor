@@ -159,13 +159,14 @@ class PriceScanner:
                 existing_rows = session.query(
                     PriceSnapshot.timestamp,
                     PriceSnapshot.price,
+                    PriceSnapshot.source,
                 ).filter(
                     PriceSnapshot.symbol == symbol,
                     PriceSnapshot.timestamp >= min_ts,
                     PriceSnapshot.timestamp <= max_ts,
                 ).all()
-                existing_prices = {ts: price for ts, price in existing_rows}
-                existing_timestamps = set(existing_prices)
+                existing_meta = {ts: (price, src) for ts, price, src in existing_rows}
+                existing_timestamps = set(existing_meta)
 
                 prev = session.query(PriceSnapshot).filter(
                     PriceSnapshot.symbol == symbol,
@@ -175,8 +176,33 @@ class PriceScanner:
 
                 for r, snap_ts in symbol_records:
                     if snap_ts in existing_timestamps:
-                        if existing_prices.get(snap_ts) is not None:
-                            last_price = existing_prices[snap_ts]
+                        ex_price, ex_source = existing_meta[snap_ts]
+                        incoming_is_real = not r.source.startswith(config.GAPFILL_SOURCE)
+                        existing_is_gapfill = bool(ex_source) and ex_source.startswith(config.GAPFILL_SOURCE)
+                        if incoming_is_real and existing_is_gapfill:
+                            # 真实覆盖同槽合成：取 ORM 行原地更新（不能 add，否则撞唯一索引整批回滚）
+                            row = session.query(PriceSnapshot).filter_by(symbol=symbol, timestamp=snap_ts).first()
+                            if row is not None:
+                                prev_price = r.prev_price
+                                change_pct = r.change_pct
+                                if prev_price is None and last_price is not None:
+                                    prev_price = last_price
+                                    if prev_price:
+                                        change_pct = ((r.price - prev_price) / abs(prev_price)) * 100
+                                row.asset_class = r.asset_class
+                                row.name = r.name
+                                row.price = r.price
+                                row.prev_price = prev_price
+                                row.change_pct = change_pct
+                                row.volume = r.volume
+                                row.source = r.source
+                                existing_meta[snap_ts] = (r.price, r.source)
+                                last_price = r.price          # 链推进到真实价
+                                inserted += 1
+                            continue
+                        # 既有真实 / 入库为合成 → 维持原跳过逻辑
+                        if ex_price is not None:
+                            last_price = ex_price
                         continue
 
                     prev_price = r.prev_price
