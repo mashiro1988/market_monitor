@@ -7,12 +7,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============================================================
-# 代理配置（运行入口显式检测可用性）
+# 代理配置（自动检测可用性）
 # ============================================================
 _PROXY_URL = os.getenv("PROXY_URL", "http://127.0.0.1:4780")
-PROXY_AVAILABLE = False
-PROXY = ""
-_RUNTIME_CONFIGURED = False
 
 
 def _check_proxy(url: str, timeout: float = 2.0) -> bool:
@@ -32,23 +29,13 @@ def _check_proxy(url: str, timeout: float = 2.0) -> bool:
         return False
 
 
-def setup_runtime(*, force: bool = False) -> str:
-    """检测代理并设置本进程运行时环境；普通 import 不触发 socket 探测。"""
-    global PROXY_AVAILABLE, PROXY, _RUNTIME_CONFIGURED
-    if _RUNTIME_CONFIGURED and not force:
-        return PROXY
+PROXY_AVAILABLE = _check_proxy(_PROXY_URL)
+PROXY = _PROXY_URL if PROXY_AVAILABLE else ""
 
-    PROXY_AVAILABLE = _check_proxy(_PROXY_URL)
-    PROXY = _PROXY_URL if PROXY_AVAILABLE else ""
-    if PROXY:
-        os.environ.setdefault("HTTP_PROXY", PROXY)
-        os.environ.setdefault("HTTPS_PROXY", PROXY)
-    else:
-        # 代理不可用时清除环境变量，避免库自动使用代理
-        for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-            os.environ.pop(key, None)
-    _RUNTIME_CONFIGURED = True
-    return PROXY
+if not PROXY_AVAILABLE:
+    # 代理不可用时清除环境变量，避免库自动使用代理
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        os.environ.pop(key, None)
 
 
 def proxies() -> dict:

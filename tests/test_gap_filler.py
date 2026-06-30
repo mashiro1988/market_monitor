@@ -25,3 +25,4 @@ def test_gapfill_anchor_table_created_and_upsertable(session):
     session.commit()
     row = session.get(GapfillAnchor, "NQ=F")
     assert row.real_close == 22000.0 and row.perp_price == 706.0
+    assert row.updated_at is not None   # Task 3 的锚点时效比较依赖此字段在 INSERT 后非 None
