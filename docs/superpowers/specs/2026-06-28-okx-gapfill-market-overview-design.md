@@ -139,7 +139,7 @@ R0 整段（最长 ~49h）冻结，隐含"期货–ETF 基差近似恒定"假设
 `_fetch_candles`(okx_source.py:61)、`_closed_candle_points`(72-95) 对 instId 无关，可直接复用。但 `_make_record`(232-245) 硬编码 crypto。故 `fetch_instrument_bars` 只返回 `PerpBar(bar_end, close)`，合成记录的 symbol/asset_class/name/price/source 全由 `GapFiller` 按 `ONCHAIN_GAPFILL` + 该 symbol 最近真实快照构造。
 
 ### 6.2 exchange 与代理前置
-`fetch_instrument_bars` 内部 `_make_exchange()` 建**一次** exchange、循环三 instId（一轮一个，非每品种重建）。`OkxPriceSource.proxy` 在 `__init__` 固定为 `config.PROXY`（仅 `setup_runtime()` 后非空）；`GapFiller` 复用扫描进程内的 `okx` 实例即满足前置。**需确认部署服务器（腾讯云日本）对 OKX 可达**（§1.1 本地观测非部署保证）。
+`fetch_instrument_bars` 内部 `_make_exchange()` 建**一次** exchange、循环三 instId（一轮一个，非每品种重建）。`OkxPriceSource.proxy` 在 `__init__` 固定为 `config.PROXY`；`config.PROXY` 在 **import 时即时探测**（模块级 `_check_proxy` socket 探测，无惰性 `setup_runtime`——不要新增），`GapFiller` 复用扫描进程内的 `okx` 实例即满足前置。**需确认部署服务器（腾讯云日本）对 OKX 可达**（§1.1 本地观测非部署保证）。
 
 ### 6.3 perp 自身陈旧检测
 `_pick_last_closed` 无陈旧守卫，OKX 卡顿会返回旧 bar，叠加去重 → 合成静默平直却报成功。故 §4.2 用 `scan_time - bar_end ≤ PERP_FRESH_MIN`（默认 12）过滤；无新鲜 bar 则跳过+warn。
