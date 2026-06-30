@@ -3,6 +3,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -19,7 +20,7 @@ export type ChartPoint = {
 };
 
 // 结构化标记输入（windowNetValue.ChartMarker 含 title，结构兼容此处可直接传入）。
-export type ChartMarkerInput = { time: string; role: "driver" | "contradictory" };
+export type ChartMarkerInput = { time: string; role: "driver" };
 
 export function MultiLineChart({
   data,
@@ -30,7 +31,8 @@ export function MultiLineChart({
   highlightKey,
   baseline,
   valueFormatter,
-  yDomain
+  yDomain,
+  shadedBands
 }: {
   data: ChartPoint[];
   keys: string[];
@@ -41,6 +43,7 @@ export function MultiLineChart({
   baseline?: number;
   valueFormatter?: (value: number) => string;
   yDomain?: [number, number];
+  shadedBands?: { x1: string; x2: string; label?: string }[];
 }) {
   if (!data.length || !keys.length) {
     return <EmptyState title="当前区间没有足够数据" />;
@@ -61,10 +64,14 @@ export function MultiLineChart({
             <ReferenceLine
               key={`${marker.time}-${marker.role}-${index}`}
               x={marker.time}
-              stroke={marker.role === "driver" ? "#22c55e" : "#ef4444"}
+              stroke="#22c55e"
               strokeWidth={2}
-              strokeDasharray={marker.role === "contradictory" ? "6 4" : undefined}
             />
+          ))}
+          {(shadedBands ?? []).map((b, i) => (
+            <ReferenceArea key={`band-${i}`} x1={b.x1} x2={b.x2}
+              strokeOpacity={0} fill="rgba(148,163,184,0.14)"
+              label={b.label ? { value: b.label, position: "insideTop", fill: "#94a3b8", fontSize: 11 } : undefined} />
           ))}
           {keys.map((key, index) => (
             <Line

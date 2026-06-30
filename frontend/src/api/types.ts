@@ -35,11 +35,14 @@ export type MarketLatestResponse = {
   last_updated: TimeFields | null;
 };
 
+export const OKX_GAPFILL_SOURCE = "okx_gapfill"; // 须与后端 config.GAPFILL_SOURCE 保持一致
+
 export type MarketHistoryPoint = TimeFields & {
   symbol: string;
   name: string;
   price: number;
   normalized_pct: number | null;
+  source?: string | null;
 };
 
 export type MarketHistorySeries = {
@@ -277,11 +280,11 @@ export type AutoAnnotateRequest = {
 };
 
 export type AutoAnnotateResponse = {
-  selected_news_ids: number[];      // 派生兼容字段（primary+secondary）
-  no_clear_news: boolean;           // 派生兼容字段（无 primary）
-  news_roles: Record<number, string>;        // v2：{news_id: causal_role}，只含非 noise
-  market_reaction_type: string | null;       // v2：八分类
-  confidence: number | null;                 // v2：0-1
+  selected_news_ids: number[];      // 派生兼容字段（全部 driver）
+  no_clear_news: boolean;           // 派生兼容字段（无 driver 或 no_news_driver）
+  news_roles: Record<number, string>;        // Phase3a：{news_id: causal_role}，只含非 noise
+  market_reaction_type: string | null;       // 三分类：macro_policy / event_driven / no_news_driver
+  confidence: number | null;                 // 0-1
   summary: string;
   reasoning: string;
   model: string;
