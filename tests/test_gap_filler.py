@@ -47,5 +47,6 @@ def test_fetch_instrument_bars_parses_closed_bars_ascending(monkeypatch):
     closes = [b.close for b in out["QQQ-USDT-SWAP"]]
     assert closes == [705.0, 706.0]                       # 升序（旧→新）
     assert out["XAU-USDT-SWAP"][-1].close == 4088.0
-    from datetime import datetime
-    assert out["XAU-USDT-SWAP"][-1].bar_end == datetime.utcfromtimestamp(1782700200000/1000 + 300)
+    from datetime import datetime, timezone
+    expected = datetime.fromtimestamp(1782700200000/1000 + 300, timezone.utc).replace(tzinfo=None)
+    assert out["XAU-USDT-SWAP"][-1].bar_end == expected   # 镜像生产 _closed_candle_points 的口径
