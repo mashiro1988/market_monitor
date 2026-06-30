@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Download, Maximize2, Minimize2, Play } from "lucide-react";
 import { api } from "../api/client";
 import type { MarketHistoryResponse, MarketLatestItem, MarketTableRow } from "../api/types";
+import { OKX_GAPFILL_SOURCE } from "../api/types";
 import { MultiLineChart, type ChartPoint } from "../components/Charts";
 import { Button, MultiSelectControl, PageHeader, SelectControl, Stat } from "../components/Controls";
 import type { MultiOption } from "../components/Controls";
@@ -126,6 +127,55 @@ function pct(value: number | null | undefined) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+export function deriveShadedBands(history: MarketHistoryResponse): { x1: string; x2: string; label?: string }[] {
+  // Build a map from utcMinute → { time (BJT slice), isGap }
+  // A utcMinute is a gap if ANY point across ALL series has source starting with OKX_GAPFILL_SOURCE.
+  const byUtc = new Map<string, { time: string; isGap: boolean }>();
+  history.series.forEach((series) => {
+    series.points.forEach((point) => {
+      if (!point.timestamp_utc) return;
+      const utcMinute = point.timestamp_utc.slice(0, 16);
+      const displayTime = point.timestamp_bj?.slice(5, 16) ?? utcMinute;
+      const isGapPoint = typeof point.source === "string" && point.source.startsWith(OKX_GAPFILL_SOURCE);
+      const existing = byUtc.get(utcMinute);
+      if (!existing) {
+        byUtc.set(utcMinute, { time: displayTime, isGap: isGapPoint });
+      } else if (isGapPoint) {
+        existing.isGap = true;
+      }
+    });
+  });
+
+  // Sort by UTC key (lexicographic = chronological for ISO-style strings)
+  const sorted = Array.from(byUtc.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, v]) => v);
+
+  // Group maximal contiguous runs of isGap === true into bands
+  const bands: { x1: string; x2: string; label?: string }[] = [];
+  let runStart: string | null = null;
+  let runLast: string | null = null;
+
+  for (const entry of sorted) {
+    if (entry.isGap) {
+      if (runStart === null) runStart = entry.time;
+      runLast = entry.time;
+    } else {
+      if (runStart !== null && runLast !== null) {
+        bands.push({ x1: runStart, x2: runLast, label: "休市代理价(OKX 永续)" });
+        runStart = null;
+        runLast = null;
+      }
+    }
+  }
+  // Close any open run at end of series
+  if (runStart !== null && runLast !== null) {
+    bands.push({ x1: runStart, x2: runLast, label: "休市代理价(OKX 永续)" });
+  }
+
+  return bands;
+}
+
 function buildHistoryChart(history?: MarketHistoryResponse): { data: ChartPoint[]; keys: string[] } {
   if (!history) return { data: [], keys: [] };
   // 合并键用 UTC 截到分钟（ISO 8601 字典序即时间序，Map.values() 保留插入顺序，
@@ -246,6 +296,7 @@ export function MarketPage() {
   }, [tableHours, tableAssetClasses]);
 
   const chart = buildHistoryChart(history.data);
+  const shadedBands = history.data ? deriveShadedBands(history.data) : [];
 
   return (
     <section>
@@ -277,6 +328,9 @@ export function MarketPage() {
                       <code>{item.symbol}</code>
                     </div>
                     <strong>{formatPrice(item)}</strong>
+                    {item.source?.startsWith(OKX_GAPFILL_SOURCE) && (
+                      <span className="badge-proxy" title="OKX 永续休市代理价">代理价</span>
+                    )}
                     <div className="mini-stats">
                       <Stat label="5m" value={pct(item.change_5m)} tone={tone(item.change_5m)} />
                       <Stat label="1h" value={pct(item.change_1h)} tone={tone(item.change_1h)} />
@@ -319,7 +373,7 @@ export function MarketPage() {
         ) : chartSymbols.length === 0 ? (
           <EmptyState title="请选择至少一个品种" />
         ) : (
-          <MultiLineChart data={chart.data} keys={chart.keys} />
+          <MultiLineChart data={chart.data} keys={chart.keys} shadedBands={shadedBands} />
         )}
       </section>
 
