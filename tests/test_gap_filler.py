@@ -50,3 +50,39 @@ def test_fetch_instrument_bars_parses_closed_bars_ascending(monkeypatch):
     from datetime import datetime, timezone
     expected = datetime.fromtimestamp(1782700200000/1000 + 300, timezone.utc).replace(tzinfo=None)
     assert out["XAU-USDT-SWAP"][-1].bar_end == expected   # 镜像生产 _closed_candle_points 的口径
+
+
+from datetime import datetime, timedelta
+from models.price import PriceSnapshot
+from models.gapfill_anchor import GapfillAnchor
+from scanners.sources.okx_source import PerpBar
+
+NOW = datetime(2026, 6, 26, 21, 0)   # 周五交易时段
+
+class FakeOkx:
+    def __init__(self, bars): self._bars = bars
+    def fetch_instrument_bars(self, inst_ids, limit=12): return self._bars
+
+def _real(session, symbol, ts, price, source="yfinance", asset_class="futures", name=None):
+    session.add(PriceSnapshot(timestamp=ts, asset_class=asset_class, symbol=symbol,
+                              name=name or symbol, price=price, source=source))
+
+def test_live_updates_anchor_no_fill(session, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "ONCHAIN_GAPFILL", {"NQ=F": {"okx_inst": "QQQ-USDT-SWAP"}})
+    _real(session, "NQ=F", NOW, 22000.0)        # 新鲜真实 bar
+    session.commit()
+    bars = {"QQQ-USDT-SWAP": [PerpBar(bar_end=NOW, close=706.0)]}   # bar_end 对齐
+    from scanners.gap_filler import GapFiller
+    written = GapFiller().run(session, FakeOkx(bars), NOW + timedelta(minutes=1))
+    assert written == 0                          # live 不补
+    a = session.get(GapfillAnchor, "NQ=F")
+    assert a is not None and a.real_close == 22000.0 and a.perp_price == 706.0
+
+def test_future_dated_real_row_ignored_for_latest(session):
+    _real(session, "NQ=F", NOW, 22000.0)
+    _real(session, "NQ=F", NOW + timedelta(minutes=10), 99999.0)    # 未来戳 fallback 行
+    session.commit()
+    from scanners.gap_filler import GapFiller
+    real = GapFiller()._latest_real(session, "NQ=F", NOW + timedelta(minutes=1))
+    assert real.price == 22000.0                 # 未来戳行不被选为 latest
