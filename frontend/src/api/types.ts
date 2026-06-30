@@ -35,11 +35,14 @@ export type MarketLatestResponse = {
   last_updated: TimeFields | null;
 };
 
+export const OKX_GAPFILL_SOURCE = "okx_gapfill"; // 须与后端 config.GAPFILL_SOURCE 保持一致
+
 export type MarketHistoryPoint = TimeFields & {
   symbol: string;
   name: string;
   price: number;
   normalized_pct: number | null;
+  source?: string | null;
 };
 
 export type MarketHistorySeries = {

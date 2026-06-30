@@ -210,6 +210,22 @@ PRICE_SOURCES = {
 }
 
 # ============================================================
+# 休市补点（gap-fill）：休市时段用 OKX 永续代理价补连续点
+# 详见 docs/superpowers/specs/2026-06-28-okx-gapfill-market-overview-design.md
+# ============================================================
+ONCHAIN_GAPFILL = {
+    "NQ=F": {"okx_inst": "QQQ-USDT-SWAP"},   # 纳指100：QQQ ETF 永续（同底层指数）
+    "CL=F": {"okx_inst": "CL-USDT-SWAP"},    # WTI 原油
+    "GC=F": {"okx_inst": "XAU-USDT-SWAP"},   # 现货黄金
+}
+GAPFILL_SOURCE = "okx_gapfill"   # 合成点 source 哨兵；后端一律引用本常量
+GAPFILL_ENABLED = os.getenv("GAPFILL_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+GAPFILL_STALENESS_MINUTES = int(os.getenv("GAPFILL_STALENESS_MINUTES", "60"))   # 真实 bar 超此分钟数判休市
+GAPFILL_PERP_FRESH_MINUTES = int(os.getenv("GAPFILL_PERP_FRESH_MINUTES", "12")) # perp 自身新鲜度
+GAPFILL_STEP_PCT = float(os.getenv("GAPFILL_STEP_PCT", "0.05"))   # 单根 5m 跳变上限（抓坏价）
+GAPFILL_SEAM_PCT = float(os.getenv("GAPFILL_SEAM_PCT", "0.15"))   # 补点段首点 seam 上限（抓坏锚点）
+
+# ============================================================
 # 新闻源配置
 # ============================================================
 NEWS_SOURCES = {

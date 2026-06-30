@@ -182,6 +182,7 @@ def get_history(
             PriceSnapshot.name,
             PriceSnapshot.asset_class,
             PriceSnapshot.price,
+            PriceSnapshot.source,
         )
         .filter(PriceSnapshot.timestamp >= start, PriceSnapshot.timestamp <= end)
         .order_by(PriceSnapshot.timestamp.asc())
@@ -212,6 +213,7 @@ def get_history(
                 name=row.name,
                 price=row.price,
                 normalized_pct=normalized[index] if index < len(normalized) else None,
+                source=row.source,
                 **timestamp_pair(row.timestamp),
             )
             for index, row in enumerate(bucket["rows"])

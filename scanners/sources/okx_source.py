@@ -6,12 +6,18 @@ OKX 数据源 - 通过 ccxt raw API 获取加密货币价格
 2. 合约不存在时补 OKX 现货：BTC-USDT
 """
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 import ccxt
 from loguru import logger
 
 from scanners.base import BaseSource, PriceRecord
 import config
+
+
+class PerpBar(NamedTuple):
+    bar_end: datetime   # UTC naive，5m bar 收盘时刻
+    close: float
 
 
 class OkxPriceSource(BaseSource):
@@ -283,6 +289,28 @@ class OkxPriceSource(BaseSource):
         if not records:
             logger.warning("[OKX] 历史回补未产出任何记录")
         return records
+
+    def fetch_instrument_bars(self, inst_ids: list[str], limit: int = 12) -> dict[str, list[PerpBar]]:
+        """取若干 instId 的已收盘 5m bar（升序）。供 GapFiller 用；返回原始 (bar_end, close)，
+        不构造 crypto PriceRecord。一次建 exchange、循环复用。"""
+        out: dict[str, list[PerpBar]] = {inst: [] for inst in inst_ids}
+        try:
+            exchange = self._make_exchange()
+        except Exception as e:
+            logger.error(f"[OKX] gapfill 初始化交易所失败: {type(e).__name__}: {e}")
+            return out
+        for inst_id in inst_ids:
+            try:
+                candles = self._fetch_candles(exchange, inst_id, limit=limit)
+                pts = self._closed_candle_points(candles)   # (start_ms, bar_end, close, vol)，newest-first
+                out[inst_id] = sorted(
+                    (PerpBar(bar_end=p[1], close=p[2]) for p in pts),
+                    key=lambda b: b.bar_end,
+                )
+            except Exception as e:
+                logger.error(f"[OKX] gapfill 取 {inst_id} 失败: {type(e).__name__}: {e}")
+                out[inst_id] = []
+        return out
 
     def health_check(self) -> bool:
         try:

@@ -11,6 +11,7 @@ from scanners.sources.yfinance_source import YFinancePriceSource
 from scanners.sources.okx_source import OkxPriceSource
 from scanners.sources.coingecko_source import CoinGeckoPriceSource
 from scanners.sources.cnbc_bond_source import CnbcBondQuoteSource
+from scanners.gap_filler import GapFiller
 import config
 
 
@@ -22,6 +23,7 @@ class PriceScanner:
         self.okx = OkxPriceSource()              # 加密货币主源：OKX 合约优先，现货补位
         self.coingecko = CoinGeckoPriceSource()  # 加密货币备用源：OKX 缺失时使用实时价
         self.cnbc_bonds = CnbcBondQuoteSource()   # 美/日债收益率：CNBC 行情 API（海外可达）
+        self.gap_filler = GapFiller()
 
     def scan(self) -> list[PriceRecord]:
         """执行一次完整的价格扫描"""
@@ -46,6 +48,18 @@ class PriceScanner:
 
         # 写入数据库
         self._save_records(all_records, scan_time)
+
+        # 休市补点：真实写库后，用 OKX 永续补休市空档（独立 session，失败不影响扫描结果）
+        try:
+            gap_session = get_session()
+            try:
+                n = self.gap_filler.run(gap_session, self.okx, scan_time)
+                if n:
+                    logger.info(f"[PriceScanner] gap-fill 写出 {n} 条休市代理点")
+            finally:
+                gap_session.close()
+        except Exception as e:
+            logger.error(f"[PriceScanner] gap-fill 失败: {type(e).__name__}: {e}")
 
         logger.info(f"[PriceScanner] 扫描完成，共 {len(all_records)} 条价格记录")
         return all_records
@@ -159,13 +173,14 @@ class PriceScanner:
                 existing_rows = session.query(
                     PriceSnapshot.timestamp,
                     PriceSnapshot.price,
+                    PriceSnapshot.source,
                 ).filter(
                     PriceSnapshot.symbol == symbol,
                     PriceSnapshot.timestamp >= min_ts,
                     PriceSnapshot.timestamp <= max_ts,
                 ).all()
-                existing_prices = {ts: price for ts, price in existing_rows}
-                existing_timestamps = set(existing_prices)
+                existing_meta = {ts: (price, src) for ts, price, src in existing_rows}
+                existing_timestamps = set(existing_meta)
 
                 prev = session.query(PriceSnapshot).filter(
                     PriceSnapshot.symbol == symbol,
@@ -175,8 +190,33 @@ class PriceScanner:
 
                 for r, snap_ts in symbol_records:
                     if snap_ts in existing_timestamps:
-                        if existing_prices.get(snap_ts) is not None:
-                            last_price = existing_prices[snap_ts]
+                        ex_price, ex_source = existing_meta[snap_ts]
+                        incoming_is_real = not r.source.startswith(config.GAPFILL_SOURCE)
+                        existing_is_gapfill = bool(ex_source) and ex_source.startswith(config.GAPFILL_SOURCE)
+                        if incoming_is_real and existing_is_gapfill:
+                            # 真实覆盖同槽合成：取 ORM 行原地更新（不能 add，否则撞唯一索引整批回滚）
+                            row = session.query(PriceSnapshot).filter_by(symbol=symbol, timestamp=snap_ts).first()
+                            if row is not None:
+                                prev_price = r.prev_price
+                                change_pct = r.change_pct
+                                if prev_price is None and last_price is not None:
+                                    prev_price = last_price
+                                    if prev_price:
+                                        change_pct = ((r.price - prev_price) / abs(prev_price)) * 100
+                                row.asset_class = r.asset_class
+                                row.name = r.name
+                                row.price = r.price
+                                row.prev_price = prev_price
+                                row.change_pct = change_pct
+                                row.volume = r.volume
+                                row.source = r.source
+                                existing_meta[snap_ts] = (r.price, r.source)
+                                last_price = r.price          # 链推进到真实价
+                                inserted += 1
+                            continue
+                        # 既有真实 / 入库为合成 → 维持原跳过逻辑
+                        if ex_price is not None:
+                            last_price = ex_price
                         continue
 
                     prev_price = r.prev_price
