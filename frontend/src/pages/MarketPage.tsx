@@ -128,6 +128,7 @@ function pct(value: number | null | undefined) {
 }
 
 export function deriveShadedBands(history: MarketHistoryResponse): { x1: string; x2: string; label?: string }[] {
+  if (!history?.series) return [];
   // Build a map from utcMinute → { time (BJT slice), isGap }
   // A utcMinute is a gap if ANY point across ALL series has source starting with OKX_GAPFILL_SOURCE.
   const byUtc = new Map<string, { time: string; isGap: boolean }>();

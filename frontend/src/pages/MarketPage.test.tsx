@@ -35,5 +35,13 @@ describe("deriveShadedBands", () => {
       ]}] } as any;
     const bands = deriveShadedBands(history);
     expect(bands.length).toBe(2);
+    expect(bands[0].x1).toBe("06-27 05:00");
+    expect(bands[0].x2).toBe("06-27 05:00");
+    expect(bands[1].x1).toBe("06-27 07:00");
+    expect(bands[1].x2).toBe("06-27 07:00");
+  });
+
+  it("returns empty array when history.series is missing", () => {
+    expect(deriveShadedBands({} as any)).toEqual([]);
   });
 });
