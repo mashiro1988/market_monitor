@@ -11,6 +11,7 @@ from scanners.sources.yfinance_source import YFinancePriceSource
 from scanners.sources.okx_source import OkxPriceSource
 from scanners.sources.coingecko_source import CoinGeckoPriceSource
 from scanners.sources.cnbc_bond_source import CnbcBondQuoteSource
+from scanners.gap_filler import GapFiller
 import config
 
 
@@ -22,6 +23,7 @@ class PriceScanner:
         self.okx = OkxPriceSource()              # 加密货币主源：OKX 合约优先，现货补位
         self.coingecko = CoinGeckoPriceSource()  # 加密货币备用源：OKX 缺失时使用实时价
         self.cnbc_bonds = CnbcBondQuoteSource()   # 美/日债收益率：CNBC 行情 API（海外可达）
+        self.gap_filler = GapFiller()
 
     def scan(self) -> list[PriceRecord]:
         """执行一次完整的价格扫描"""
@@ -46,6 +48,18 @@ class PriceScanner:
 
         # 写入数据库
         self._save_records(all_records, scan_time)
+
+        # 休市补点：真实写库后，用 OKX 永续补休市空档（独立 session，失败不影响扫描结果）
+        try:
+            gap_session = get_session()
+            try:
+                n = self.gap_filler.run(gap_session, self.okx, scan_time)
+                if n:
+                    logger.info(f"[PriceScanner] gap-fill 写出 {n} 条休市代理点")
+            finally:
+                gap_session.close()
+        except Exception as e:
+            logger.error(f"[PriceScanner] gap-fill 失败: {type(e).__name__}: {e}")
 
         logger.info(f"[PriceScanner] 扫描完成，共 {len(all_records)} 条价格记录")
         return all_records

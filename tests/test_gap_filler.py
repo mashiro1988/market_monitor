@@ -189,3 +189,42 @@ def test_seam_guard_rejects_bad_anchor_first_point(session, monkeypatch):
     from scanners.gap_filler import GapFiller
     assert GapFiller().run(session, FakeOkx(bars), gap + timedelta(minutes=1)) == 0
     assert session.query(PriceSnapshot).filter_by(symbol="NQ=F", timestamp=gap).first() is None
+
+
+def test_scan_invokes_gapfiller_after_save(monkeypatch):
+    import config
+    import scanners.price_scanner as ps
+    from types import SimpleNamespace
+
+    # Build scanner without calling __init__ (avoids network source constructors)
+    scanner = ps.PriceScanner.__new__(ps.PriceScanner)
+    scanner.yfinance = SimpleNamespace(fetch=lambda: [], name="yfinance")
+    scanner.okx = SimpleNamespace(fetch=lambda: [], name="okx")
+    scanner.coingecko = SimpleNamespace()
+    scanner.cnbc_bonds = SimpleNamespace(fetch=lambda: [], name="cnbc_bonds")
+
+    # _fetch_safe returns [] for all sources → no crypto records → no missing_crypto call
+    monkeypatch.setattr(scanner, "_fetch_safe", lambda src: [])
+    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: 0)
+
+    # Ensure no missing crypto triggers _fetch_coingecko_symbols
+    monkeypatch.setattr(config, "PRICE_SOURCES", {"crypto": {}})
+
+    # Provide a sentinel session for gap_filler
+    captured = {}
+    sentinel_session = SimpleNamespace(close=lambda: captured.update({"closed": True}))
+    monkeypatch.setattr(ps, "get_session", lambda: sentinel_session)
+
+    def fake_run(session, okx_source, scan_time):
+        captured["session"] = session
+        captured["okx"] = okx_source
+        captured["scan_time"] = scan_time
+        return 0
+
+    scanner.gap_filler = SimpleNamespace(run=fake_run)
+    scanner.scan()
+
+    assert captured["okx"] is scanner.okx
+    assert captured["session"] is sentinel_session
+    assert isinstance(captured["scan_time"], datetime)
+    assert captured.get("closed") is True   # gap-fill session 被关闭
