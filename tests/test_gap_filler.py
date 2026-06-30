@@ -171,3 +171,21 @@ def test_future_dated_perp_bar_not_used(session, monkeypatch):
     future = {"QQQ-USDT-SWAP": [PerpBar(bar_end=scan + timedelta(minutes=30), close=710.0)]}
     from scanners.gap_filler import GapFiller
     assert GapFiller().run(session, FakeOkx(future), scan) == 0
+
+def test_seam_guard_rejects_bad_anchor_first_point(session, monkeypatch):
+    """隔离 seam 守卫：放宽 step、收紧 seam，使首点偏离落在 (seam, step) 区间，
+    确认补点段首点偏离最近真实收盘 > seam_pct 时被拒（疑似坏锚点）。"""
+    _setup_single(monkeypatch)
+    import config
+    monkeypatch.setattr(config, "GAPFILL_STEP_PCT", 0.30)   # 放宽步进，让 seam 成为决定因素
+    monkeypatch.setattr(config, "GAPFILL_SEAM_PCT", 0.15)
+    fri = NOW
+    _real(session, "NQ=F", fri, 22000.0)
+    session.add(GapfillAnchor(symbol="NQ=F", real_ts=fri, real_close=22000.0, perp_price=706.0))
+    session.commit()
+    gap = fri + timedelta(hours=10)
+    # synthetic = 847.2 * 22000/706 ≈ 26399 → 偏离 22000 约 +20%（>seam 15%，<step 30%）
+    bars = {"QQQ-USDT-SWAP": [PerpBar(bar_end=gap, close=847.2)]}
+    from scanners.gap_filler import GapFiller
+    assert GapFiller().run(session, FakeOkx(bars), gap + timedelta(minutes=1)) == 0
+    assert session.query(PriceSnapshot).filter_by(symbol="NQ=F", timestamp=gap).first() is None

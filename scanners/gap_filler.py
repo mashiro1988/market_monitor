@@ -92,7 +92,7 @@ class GapFiller:
 
     def _fill(self, session, symbol, latest, real) -> int:
         anchor = session.get(GapfillAnchor, symbol)
-        if anchor is None or not anchor.perp_price:
+        if anchor is None or not anchor.perp_price or not anchor.real_close:
             return 0
         # 同槽已有（含上一轮合成或回补真实）→ 不重复写、不覆盖
         if session.query(PriceSnapshot).filter_by(symbol=symbol, timestamp=latest.bar_end).first() is not None:
