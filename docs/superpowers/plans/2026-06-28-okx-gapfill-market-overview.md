@@ -839,9 +839,24 @@ git commit -m "feat(gapfill): get_history 逐点透出 source"
 
 - [ ] **Step 1: 写失败测试（默认行为不变 + 传 shadedBands 渲染 ReferenceArea）**
 
+> **jsdom 注意（reviewer 确认的真风险）**：jsdom 下 `ResponsiveContainer` 尺寸为 0，recharts 会跳过渲染 `<LineChart>` 子元素（line/area），`.recharts-reference-area` 查不到。仓库现有 `Charts.test.tsx` 只断言 `.chart-shell` 外壳、`WindowNetValueChart.test.tsx` 断言 SVG 外的文本，**无断言 recharts SVG 内部元素的先例**。故本测试**必须 mock `ResponsiveContainer` 注入固定尺寸**，让子元素真正渲染：
+
 ```tsx
 // frontend/src/components/Charts.test.tsx（追加）
+import React from "react";
 import { render } from "@testing-library/react";
+import { vi } from "vitest";
+
+// 给 LineChart 注入显式 width/height，否则 jsdom 下 recharts 不渲染子元素
+vi.mock("recharts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("recharts")>();
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: any) =>
+      React.cloneElement(children, { width: 800, height: 400 }),
+  };
+});
+
 import { MultiLineChart } from "./Charts";
 
 const data = [
@@ -865,7 +880,7 @@ it("renders a ReferenceArea when shadedBands passed", () => {
   expect(container.querySelectorAll(".recharts-reference-area").length).toBeGreaterThan(0);
 });
 ```
-> 若仓库无 recharts 渲染测试先例，用 ResponsiveContainer 在 jsdom 下尺寸为 0 可能不渲染子元素——参照既有 `Charts.test.tsx`/`WindowNetValueChart.test.tsx` 的渲染封装（可能 mock ResponsiveContainer 尺寸）。实现测试前先看这两个文件的既有套路并复用。
+> 实现前先看 `Charts.test.tsx`/`WindowNetValueChart.test.tsx` 既有套路；若它们已有 ResponsiveContainer 的 mock 约定则复用之，避免重复 mock 冲突。若 `.recharts-reference-area` 类名在当前 recharts 版本下不稳，退而给 `<ReferenceArea>` 加 `ifOverflow`/自定义 `label` 文本并断言该文本存在。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -922,9 +937,9 @@ import { deriveShadedBands } from "./MarketPage";
 it("derives band endpoints from gapfill-sourced points using existing time strings", () => {
   const history = {
     series: [{ symbol: "NQ=F", name: "纳指", asset_class: "futures", points: [
-      { timestamp_bj: "2026-06-27 04:00", timestamp_utc: "...", symbol: "NQ=F", name: "纳指", price: 1, normalized_pct: 0, source: "yfinance" },
-      { timestamp_bj: "2026-06-27 05:00", timestamp_utc: "...", symbol: "NQ=F", name: "纳指", price: 1, normalized_pct: 0.5, source: "okx_gapfill" },
-      { timestamp_bj: "2026-06-27 06:00", timestamp_utc: "...", symbol: "NQ=F", name: "纳指", price: 1, normalized_pct: 0.8, source: "okx_gapfill" },
+      { timestamp_bj: "2026-06-27 04:00:00", timestamp_utc: "...", symbol: "NQ=F", name: "纳指", price: 1, normalized_pct: 0, source: "yfinance" },
+      { timestamp_bj: "2026-06-27 05:00:00", timestamp_utc: "...", symbol: "NQ=F", name: "纳指", price: 1, normalized_pct: 0.5, source: "okx_gapfill" },
+      { timestamp_bj: "2026-06-27 06:00:00", timestamp_utc: "...", symbol: "NQ=F", name: "纳指", price: 1, normalized_pct: 0.8, source: "okx_gapfill" },
     ]}],
   } as any;
   const bands = deriveShadedBands(history);
