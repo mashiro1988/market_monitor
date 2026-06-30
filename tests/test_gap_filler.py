@@ -86,3 +86,88 @@ def test_future_dated_real_row_ignored_for_latest(session):
     from scanners.gap_filler import GapFiller
     real = GapFiller()._latest_real(session, "NQ=F", NOW + timedelta(minutes=1))
     assert real.price == 22000.0                 # 未来戳行不被选为 latest
+
+
+def _setup_single(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "ONCHAIN_GAPFILL", {"NQ=F": {"okx_inst": "QQQ-USDT-SWAP"}})
+
+def test_fill_writes_synthetic_at_futures_magnitude(session, monkeypatch):
+    _setup_single(monkeypatch)
+    fri_close = NOW
+    _real(session, "NQ=F", fri_close, 22000.0)
+    session.add(GapfillAnchor(symbol="NQ=F", real_ts=fri_close, real_close=22000.0, perp_price=706.0))
+    session.commit()
+    gap_time = fri_close + timedelta(hours=10)
+    bars = {"QQQ-USDT-SWAP": [PerpBar(bar_end=gap_time, close=710.0)]}
+    from scanners.gap_filler import GapFiller
+    written = GapFiller().run(session, FakeOkx(bars), gap_time + timedelta(minutes=1))
+    assert written == 1
+    syn = session.query(PriceSnapshot).filter_by(symbol="NQ=F", timestamp=gap_time).one()
+    assert syn.source == "okx_gapfill"
+    assert syn.asset_class == "futures"
+    assert syn.price == pytest.approx(710.0 * 22000.0 / 706.0, rel=1e-6)
+
+def test_fill_skipped_without_anchor(session, monkeypatch):
+    _setup_single(monkeypatch)
+    _real(session, "NQ=F", NOW, 22000.0)
+    session.commit()
+    bars = {"QQQ-USDT-SWAP": [PerpBar(bar_end=NOW + timedelta(hours=10), close=710.0)]}
+    from scanners.gap_filler import GapFiller
+    assert GapFiller().run(session, FakeOkx(bars), NOW + timedelta(hours=10, minutes=1)) == 0
+
+def test_step_guard_rejects_single_jump(session, monkeypatch):
+    _setup_single(monkeypatch)
+    fri = NOW
+    _real(session, "NQ=F", fri, 22000.0)
+    session.add(GapfillAnchor(symbol="NQ=F", real_ts=fri, real_close=22000.0, perp_price=706.0))
+    t1 = fri + timedelta(hours=10)
+    session.add(PriceSnapshot(timestamp=t1, asset_class="futures", symbol="NQ=F",
+                              name="NQ=F", price=22124.0, source="okx_gapfill"))
+    session.commit()
+    t2 = t1 + timedelta(minutes=5)
+    bad = {"QQQ-USDT-SWAP": [PerpBar(bar_end=t2, close=800.0)]}   # 单步 +12%
+    from scanners.gap_filler import GapFiller
+    assert GapFiller().run(session, FakeOkx(bad), t2 + timedelta(minutes=1)) == 0
+    assert session.query(PriceSnapshot).filter_by(symbol="NQ=F", timestamp=t2).first() is None
+
+def test_gradual_large_move_not_rejected(session, monkeypatch):
+    """周末渐进大行情(由许多正常小步构成)必须被写入，不能被步进防呆误杀。"""
+    _setup_single(monkeypatch)
+    fri = NOW
+    _real(session, "NQ=F", fri, 22000.0)
+    session.add(GapfillAnchor(symbol="NQ=F", real_ts=fri, real_close=22000.0, perp_price=706.0))
+    session.commit()
+    from scanners.gap_filler import GapFiller
+    gf = GapFiller()
+    perp = 706.0
+    base_t = fri + timedelta(hours=2)
+    written_total = 0
+    for i in range(40):                       # 40 步 × +1% ≈ 累计 +48%，但每步仅 +1%
+        perp *= 1.01
+        t = base_t + timedelta(minutes=5*i)
+        written_total += gf.run(session, FakeOkx({"QQQ-USDT-SWAP": [PerpBar(bar_end=t, close=perp)]}), t + timedelta(minutes=1))
+    assert written_total == 40                # 全部写入，无一被毙
+    last = session.query(PriceSnapshot).filter_by(symbol="NQ=F").order_by(PriceSnapshot.timestamp.desc()).first()
+    assert last.price > 22000.0 * 1.4         # 累计大涨被如实补出
+
+def test_perp_stale_skipped(session, monkeypatch):
+    _setup_single(monkeypatch)
+    _real(session, "NQ=F", NOW, 22000.0)
+    session.add(GapfillAnchor(symbol="NQ=F", real_ts=NOW, real_close=22000.0, perp_price=706.0))
+    session.commit()
+    scan = NOW + timedelta(hours=10)
+    stale = {"QQQ-USDT-SWAP": [PerpBar(bar_end=scan - timedelta(hours=2), close=710.0)]}  # perp 自身 2h 旧
+    from scanners.gap_filler import GapFiller
+    assert GapFiller().run(session, FakeOkx(stale), scan) == 0
+
+def test_future_dated_perp_bar_not_used(session, monkeypatch):
+    """Part A 回归：未来戳 perp bar 不应被当作 fresh、不应补点。"""
+    _setup_single(monkeypatch)
+    _real(session, "NQ=F", NOW, 22000.0)
+    session.add(GapfillAnchor(symbol="NQ=F", real_ts=NOW, real_close=22000.0, perp_price=706.0))
+    session.commit()
+    scan = NOW + timedelta(hours=10)
+    future = {"QQQ-USDT-SWAP": [PerpBar(bar_end=scan + timedelta(minutes=30), close=710.0)]}
+    from scanners.gap_filler import GapFiller
+    assert GapFiller().run(session, FakeOkx(future), scan) == 0

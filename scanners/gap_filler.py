@@ -60,7 +60,7 @@ class GapFiller:
         return None
 
     def _handle(self, session, symbol, inst_id, bars, scan_time) -> int:
-        fresh = [b for b in bars if scan_time - b.bar_end <= self.perp_fresh]
+        fresh = [b for b in bars if timedelta(0) <= scan_time - b.bar_end <= self.perp_fresh]
         if not fresh:
             logger.warning(f"[GapFiller] {symbol} perp {inst_id} 无新鲜 bar，跳过")
             return 0
@@ -91,5 +91,33 @@ class GapFiller:
             anchor.perp_price = perp
 
     def _fill(self, session, symbol, latest, real) -> int:
-        # Task 4 实现
-        return 0
+        anchor = session.get(GapfillAnchor, symbol)
+        if anchor is None or not anchor.perp_price:
+            return 0
+        # 同槽已有（含上一轮合成或回补真实）→ 不重复写、不覆盖
+        if session.query(PriceSnapshot).filter_by(symbol=symbol, timestamp=latest.bar_end).first() is not None:
+            return 0
+        synthetic = latest.close * (anchor.real_close / anchor.perp_price)
+        prev = (
+            session.query(PriceSnapshot)
+            .filter(PriceSnapshot.symbol == symbol, PriceSnapshot.timestamp < latest.bar_end)
+            .order_by(PriceSnapshot.timestamp.desc())
+            .first()
+        )
+        prev_price = prev.price if prev else None
+        # 步进防呆：单根 5m 相对上一点跳变 > STEP_PCT → 坏价，跳过
+        if prev_price and abs(synthetic / prev_price - 1) > self.step_pct:
+            logger.warning(f"[GapFiller] {symbol} 合成单步跳变过大({synthetic:.2f} vs {prev_price:.2f})，跳过")
+            return 0
+        # 首点 seam 防呆：补点段第一根（上一点是真实）应≈最近真实收盘
+        if (prev is None or not prev.source.startswith(self.source)) and real.price:
+            if abs(synthetic / real.price - 1) > self.seam_pct:
+                logger.warning(f"[GapFiller] {symbol} 补点首点 seam 过大，疑似坏锚点，跳过")
+                return 0
+        change_pct = ((synthetic - prev_price) / prev_price * 100) if prev_price else None
+        session.add(PriceSnapshot(
+            timestamp=latest.bar_end, asset_class=real.asset_class, symbol=symbol,
+            name=real.name, price=synthetic, prev_price=prev_price,
+            change_pct=change_pct, source=self.source,
+        ))
+        return 1
