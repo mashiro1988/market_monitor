@@ -20,7 +20,7 @@ export type ChartPoint = {
 };
 
 // 结构化标记输入（windowNetValue.ChartMarker 含 title，结构兼容此处可直接传入）。
-export type ChartMarkerInput = { time: string; role: "driver" };
+export type ChartMarkerInput = { time: string; role: "driver" | "contradictory" };
 
 export function MultiLineChart({
   data,
@@ -64,8 +64,9 @@ export function MultiLineChart({
             <ReferenceLine
               key={`${marker.time}-${marker.role}-${index}`}
               x={marker.time}
-              stroke="#22c55e"
+              stroke={marker.role === "driver" ? "#22c55e" : "#ef4444"}
               strokeWidth={2}
+              strokeDasharray={marker.role === "contradictory" ? "6 4" : undefined}
             />
           ))}
           {(shadedBands ?? []).map((b) => (
