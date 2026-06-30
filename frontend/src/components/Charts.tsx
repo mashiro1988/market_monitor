@@ -68,8 +68,8 @@ export function MultiLineChart({
               strokeWidth={2}
             />
           ))}
-          {(shadedBands ?? []).map((b, i) => (
-            <ReferenceArea key={`band-${i}`} x1={b.x1} x2={b.x2}
+          {(shadedBands ?? []).map((b) => (
+            <ReferenceArea key={`band-${b.x1}-${b.x2}`} x1={b.x1} x2={b.x2}
               strokeOpacity={0} fill="rgba(148,163,184,0.14)"
               label={b.label ? { value: b.label, position: "insideTop", fill: "#94a3b8", fontSize: 11 } : undefined} />
           ))}
