@@ -104,3 +104,18 @@ def test_symbols_renamed_symbol_appears_once_with_latest_meta(session):
     matches = [s for s in market_service.get_symbols(session) if s.symbol == "US_10Y"]
     assert len(matches) == 1
     assert matches[0].name == "美国10年期国债收益率"
+
+
+def test_history_exposes_source(session):
+    from datetime import timedelta
+    now = utc_now_naive()
+    start = now - timedelta(hours=4)
+    _add(session, "NQ=F", start - timedelta(hours=1), 22000.0, asset_class="futures")  # 基准
+    _add(session, "NQ=F", start + timedelta(minutes=5), 22010.0, asset_class="futures")
+    session.add(PriceSnapshot(timestamp=start + timedelta(minutes=10), asset_class="futures",
+                              symbol="NQ=F", name="NQ=F", price=22050.0, source="okx_gapfill"))
+    session.commit()
+    resp = market_service.get_history(session, symbols=["NQ=F"], hours=4)
+    pts = resp.series[0].points
+    assert pts[-1].source == "okx_gapfill"
+    assert pts[0].source == "test"          # 真实点 source 透出（_add 用 source="test"）

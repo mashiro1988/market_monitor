@@ -28,6 +28,7 @@ class MarketHistoryPoint(TimeFields):
     name: str
     price: float
     normalized_pct: float | None = None
+    source: str | None = None
 
 
 class MarketHistorySeries(BaseModel):
