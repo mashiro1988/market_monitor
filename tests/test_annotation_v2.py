@@ -309,8 +309,11 @@ def test_list_annotations_needs_review(session):
 
 
 def test_prompts_drop_retired_roles():
-    """Phase3a：两份 prompt 不再提 post_hoc/contradictory，但解释 redundant；版本号已 bump。"""
+    """prompt 现状：无 post_hoc/contradictory/market_reaction_type；含 redundant + confidence + 派生信号；版本已 bump。"""
     for p in (annotation_service.AUTO_ANNOTATE_SYSTEM_PROMPT, annotation_service.AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT):
         assert "post_hoc" not in p and "contradictory" not in p
-        assert "redundant" in p              # redundant 现为可标角色，prompt 必须解释
+        assert "market_reaction_type" not in p          # Part A：市场反应类型退场
+        assert "redundant" in p                          # redundant 可标角色
+        assert "confidence" in p                         # confidence 保留（训模型用）
+        assert "correlations" in p and "trigger_move_start_bj" in p and "pre_window_move_pct" in p  # Part B 派生信号
     assert annotation_service.ANNOTATION_PROMPT_VERSION != "v4-20260612"
