@@ -10,14 +10,14 @@
 ---
 
 ## Part A — 砍掉 market_reaction_type + confidence（精简）
-**理由**：`market_reaction_type` 与 driver 的 topic 冗余（no_news_driver = 没 driver；macro vs event = 看 driver 的 topic）；`confidence` 用户从不看。砍完标注 = 逐条 driver/redundant/noise + 备注。
+**理由**：`market_reaction_type` 与 driver 的 topic 冗余（no_news_driver = 没 driver；macro vs event = 看 driver 的 topic）→ 删。**`confidence` 保留**（用户 2026-06-28 更正：训模型时作样本置信权重有用）。砍完标注 = 逐条 driver/redundant/noise + **置信度** + 备注。
 
-- **前端**：`AnnotationsPage` 去掉「市场反应类型」下拉 + 「归因置信度」档位；已标列表的「归因」列只留驱动条数。
-- **prompt**：两份 auto-annotate prompt 去掉 market_reaction_type + confidence 的输出与说明（顺带把 prompt 砍小）。
-- **service**：`_normalize_v2_labels` 不再要求 reaction/confidence；`no_clear_news` 改为**从"有没有 driver"派生**（无 driver → true），不再看 reaction。`_extract_v2_labels` 停止解析这俩（prompt 不吐了）。
-- **导出**：`schema_version` 现靠 `confidence is not None` 区分新旧低保真 → 改成靠 `labeler/prompt_version` 判（新行有、旧 v1 行没有）。历史行的 reaction/confidence **原值照出**（不丢历史信号），新行为空。
-- **DB / schema**：`NewsPriceAnnotation.market_reaction_type/confidence` 列**保留置空、不删**（历史有值，删要迁移+丢数据）；`AnnotationCreateRequest/Detail/ListItem` 的这俩字段保留为可选（前端不再传/显）。
-- **测试**：更新 prompt 守卫（不再断言含 reaction/confidence）、导出 schema_version、no_clear 派生、既有 upsert/parse 用例。
+- **前端【已做，commit ec39b44 + 修正】**：`AnnotationsPage` 去掉「市场反应类型」下拉；**保留「归因置信度」档位**；已标列表「归因」列去掉反应徽章、保留驱动条数 + 置信度。
+- **prompt（Part B 里做）**：两份 auto-annotate prompt 去掉 **market_reaction_type**（保留 confidence 输出）。
+- **service（Part B 里做）**：`no_clear_news` 改为**从"有没有 driver"派生**（无 driver → true），不再看 reaction。confidence 照旧解析/落库。
+- **导出**：`schema_version` 仍靠 `confidence is not None` 判（confidence 保留 → **无需改**）。
+- **DB / schema**：`market_reaction_type` 列保留置空、不删（历史有值）；confidence 列继续用。
+- **测试（Part B）**：prompt 守卫（不含 market_reaction_type、仍含 confidence）、no_clear 派生。
 
 ## Part B(#1) — ±1h 取数 + 相关性 + prompt 强化
 ### B1 窗口拉宽

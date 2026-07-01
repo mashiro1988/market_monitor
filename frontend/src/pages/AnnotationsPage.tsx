@@ -61,6 +61,13 @@ const ROLE_OPTIONS = [
   { value: "redundant", label: "同簇冗余" },
 ] as const;
 
+// 置信度三档（高/中/低 → 固定数值）；保留——训模型时作样本置信权重用。
+const CONFIDENCE_TIERS = [
+  { value: 0.9, label: "高" },
+  { value: 0.65, label: "中" },
+  { value: 0.3, label: "低" },
+] as const;
+
 
 function rolesEqual(a: Record<number, string>, b: Record<number, string>): boolean {
   const ka = Object.keys(a);
@@ -715,6 +722,28 @@ export function AnnotationsPage() {
 
             {activeWindow ? (
               <div className="annotation-save-block">
+                <div className="field">
+                  <span>归因置信度</span>
+                  <div className="confidence-tiers">
+                    {CONFIDENCE_TIERS.map((tier) => (
+                      <button
+                        key={tier.label}
+                        type="button"
+                        className={`tier-btn ${confidence === tier.value ? "active" : ""}`}
+                        onClick={() => {
+                          const next = confidence === tier.value ? null : tier.value;
+                          setConfidence(next);
+                          updateDraft({ confidence: next });
+                        }}
+                      >
+                        {tier.label}
+                      </button>
+                    ))}
+                    {confidence != null && !CONFIDENCE_TIERS.some((t) => t.value === confidence) ? (
+                      <span className="muted-text small">AI: {confidence.toFixed(2)}</span>
+                    ) : null}
+                  </div>
+                </div>
                 <label className="field full">
                   <span>备注 / 因果归因</span>
                   <textarea
@@ -795,6 +824,7 @@ export function AnnotationsPage() {
                     {row.selected_count > 0
                       ? <span className="muted-text small">驱动 {row.selected_count} 条</span>
                       : row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
+                    {row.confidence != null ? <span className="muted-text small"> · {row.confidence.toFixed(2)}</span> : null}
                   </span>
                 )
               },
