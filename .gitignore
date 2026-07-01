@@ -9,6 +9,7 @@
 *.pyd
 __pycache__/
 .pytest_cache/
+.pytest_tmp/
 *.egg-info/
 .venv/
 venv/
@@ -27,6 +28,7 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+.vite/
 .npm-cache/
 /package-lock.json
 

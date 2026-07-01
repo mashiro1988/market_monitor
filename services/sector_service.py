@@ -80,13 +80,12 @@ def _load_pivot_cached(market: str) -> Optional[dict]:
 def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
     """返回最新 snapshot 的所有 sector_returns 行，按 ret_24h 降序（NaN 末尾）。
 
-    sector_returns 的写入由两条触发路径保证新鲜:
-    1. **post-pull 同步触发**（主路径）: remote_puller 拉到新 pivot 后立刻跑 scanner.
-       DB 跟 pivot cache 的最新 bar 几乎实时对齐（差不到 1 秒）。
-    2. **小时 cron 兜底**（CronTrigger(minute=32)）: 主触发失败时由此修复.
+    sector_returns 当前只由 post-pull 同步触发写入: remote_puller 拉到新 pivot
+    后立刻跑 scanner。若 post-pull 的 sector_scan 失败，同一个 cutoff 目前不会
+    自动重扫，直到下一个 pivot cutoff 或手动触发 scanner。
 
-    /api/sectors/{cat}/tokens 仍然从 pivot 现算，但因为 (1) 几乎在 pull 完成的同一秒
-    就让 DB 同步了，两者 snapshot_at 在绝大多数时刻是一致的（除非用户恰好在 pull
+    /api/sectors/{cat}/tokens 仍然从 pivot 现算；正常 post-pull 成功时 DB 几乎
+    同步更新，两者 snapshot_at 在绝大多数时刻是一致的（除非用户恰好在 pull
     过程中那 5-30s 窗口里拿到不一致的快照）。
     """
     latest_snap = session.execute(

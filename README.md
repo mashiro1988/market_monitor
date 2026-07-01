@@ -129,6 +129,7 @@ python -m pytest
 
 ```bash
 cd frontend
+cmd /c npm.cmd test
 cmd /c npm.cmd run typecheck
 cmd /c npm.cmd run build
 ```
