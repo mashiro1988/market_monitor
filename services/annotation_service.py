@@ -136,6 +136,33 @@ def _reference_changes_for_annotation(
     refs = _reference_changes_for_window(ref_rows, window_start, window_end, tolerance_minutes, symbol)
     return _reference_changes_payload(refs)
 
+
+def _window_signals_payload(session: Session, symbol: str,
+                            window_start: datetime, window_end: datetime) -> dict:
+    """喂给 auto-annotate reasoner 的窗口派生信号（annotation-refinements Part B）：
+    - correlations：本品种与各对标在 **±1h** 上的 Pearson 相关（5min 收益率）——判"在跟谁走"。
+    - trigger_move_start_bj / _pct：窗口内**首个显著波动 5min bar** 的起点（真加速触发时点）。
+    - pre_window_move_pct：窗口前 1h 净变动（识别情绪反转：前猛涨、窗口猛跌 = 情绪挤压）。"""
+    from services import window_signals
+    corr_start = window_start - timedelta(minutes=60)
+    corr_end = window_end + timedelta(minutes=60)
+    correlations: dict[str, float] = {}
+    for entry in config.ANNOTATION_REFERENCE_ASSETS:
+        ref_symbol, label = entry[0], entry[1]
+        if ref_symbol == symbol:
+            continue
+        r = window_signals.pearson_correlation(session, symbol, ref_symbol, corr_start, corr_end)
+        if r is not None:
+            correlations[label] = round(r, 2)
+    trig = window_signals.first_trigger_segment(session, symbol, window_start, window_end)
+    pre = window_signals.pre_window_move(session, symbol, window_start, minutes=60)
+    return {
+        "correlations": correlations,
+        "trigger_move_start_bj": (trig["start"] + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M") if trig else None,
+        "trigger_move_pct": round(trig["pct"], 2) if trig else None,
+        "pre_window_move_pct": round(pre, 2) if pre is not None else None,
+    }
+
 # 每个标注窗口前后取的候选新闻范围：默认向前 30 分钟（2026-06-11 从 15 放宽：
 # 慢反应场景消息常早于触发点），向后 30 分钟。60m 档窗口由 ANNOTATION_WINDOW_SCALES
 # 的 pre_minutes 指定前 60；请求里带 context_pre_minutes 即覆盖默认。
@@ -795,6 +822,7 @@ def _build_auto_annotate_user_payload(
     price_end: float | None,
     change_pct: float | None,
     reference_changes: dict[str, str | None] | None = None,
+    signals: dict | None = None,
 ) -> str:
     """组装喂给 reasoner 的用户消息。控制总长度，避免 token 超标。"""
     items = []
@@ -819,6 +847,7 @@ def _build_auto_annotate_user_payload(
             "price_end": price_end,
             "change_pct": change_pct,
             "reference_changes": reference_changes or {},
+            **(signals or {}),
         },
         "candidate_news": items,
     }
@@ -985,6 +1014,7 @@ def auto_annotate(session: Session, request: AutoAnnotateRequest) -> AutoAnnotat
         ((end_snapshot.price - start_snapshot.price) / abs(start_snapshot.price) * 100)
         if start_snapshot and end_snapshot and start_snapshot.price else None,
         reference_changes=_reference_changes_for_annotation(session, window_start, window_end, request.symbol),
+        signals=_window_signals_payload(session, request.symbol, window_start, window_end),
     )
 
     logger.info(
@@ -1086,6 +1116,7 @@ def _build_auto_annotate_batch_user_payload(
             "reference_changes": _reference_changes_for_annotation(
                 session, window_start, window_end, w.symbol, ref_rows=ref_rows,
             ),
+            **_window_signals_payload(session, w.symbol, window_start, window_end),
             "candidates": candidates_payload,
         })
         window_metas.append({
