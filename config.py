@@ -115,8 +115,8 @@ NEWS_DIRECTIONS = ("利多", "利空", "中性")
 # 噪音程度由 6/10 夜回放校准（docs/specs/news-impact-engine-phase2-plan.md Task 4）。
 # 显式传 threshold/window 的调试路径不走本配置。
 ANNOTATION_WINDOW_SCALES = {
-    "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 0.5, "pre_minutes": 30}],
-    "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.3, "pre_minutes": 30}],
+    "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 0.5, "pre_minutes": 60}],
+    "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.3, "pre_minutes": 60}],
 }
 
 # 标注页「宏观同期对标」清单：(symbol, 中文标签[, 单位])。增减对标资产只改这里。

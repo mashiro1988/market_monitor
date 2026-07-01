@@ -166,8 +166,10 @@ def _window_signals_payload(session: Session, symbol: str,
 # 每个标注窗口前后取的候选新闻范围：默认向前 30 分钟（2026-06-11 从 15 放宽：
 # 慢反应场景消息常早于触发点），向后 30 分钟。60m 档窗口由 ANNOTATION_WINDOW_SCALES
 # 的 pre_minutes 指定前 60；请求里带 context_pre_minutes 即覆盖默认。
-CONTEXT_PRE_MINUTES_DEFAULT = 30
-CONTEXT_POST_MINUTES_DEFAULT = 30
+# ±1h（annotation-refinements Part B）：候选新闻窗口拉宽到窗口前后各 60min，
+# 兜底市场滞后反应（driver 在窗口前较久）+ 新闻源迟报（driver 在窗口后较久才推）。
+CONTEXT_PRE_MINUTES_DEFAULT = 60
+CONTEXT_POST_MINUTES_DEFAULT = 60
 
 
 def _annotation_news_sources() -> list[str]:

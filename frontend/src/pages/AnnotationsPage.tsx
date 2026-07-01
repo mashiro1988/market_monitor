@@ -220,14 +220,14 @@ export function AnnotationsPage() {
     [unannotatedPrimaries, activeKey]
   );
 
-  const activePre = activeWindow?.context_pre_minutes ?? 30;   // 多尺度：15m 档前 30 / 60m 档前 60
+  const activePre = activeWindow?.context_pre_minutes ?? 60;   // Part B：候选新闻窗口 ±1h
   const contextNews = useQuery({
     queryKey: ["context-news", activeWindow?.window_start.timestamp_utc, activeWindow?.window_end.timestamp_utc, activePre],
     queryFn: () => api.contextNews({
       window_start_utc: activeWindow!.window_start.timestamp_utc!,
       window_end_utc: activeWindow!.window_end.timestamp_utc!,
       pre_minutes: activePre,
-      post_minutes: 30
+      post_minutes: 60
     }),
     enabled: Boolean(activeWindow)
   });
@@ -644,7 +644,7 @@ export function AnnotationsPage() {
               <WindowNetValueChart
                 activeWindow={activeWindow}
                 preMinutes={activePre}
-                postMinutes={30}
+                postMinutes={60}
                 candidateNews={contextNews.data?.items ?? []}
                 newsRoles={newsRoles}
               />
@@ -703,7 +703,7 @@ export function AnnotationsPage() {
                 <header className="annotation-pair-panel-head">
                   <span>候选新闻</span>
                   <span>
-                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前${activePre}/后30 分钟`}
+                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前${activePre}/后60 分钟`}
                   </span>
                 </header>
                 <div className="annotation-pair-panel-body">
