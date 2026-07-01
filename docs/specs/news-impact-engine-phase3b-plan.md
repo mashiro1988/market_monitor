@@ -12,8 +12,8 @@
 
 ## 关键设计决策（实现前必读）
 
-1. **`annotatable` = 时间余量门**，不引入 per-window settle 列。`window_end ≤ now − ANNOTATION_SETTLE_MARGIN_MINUTES`。默认 **90min**：gap-repair 在每小时 :37 扫近 24h，窗口结束后最坏 ~60min 才被下一轮 settle，再加 ~30min「走完」缓冲。用户每日次日复盘，90min 延迟无感。可配。
-2. **不过滤、只打 flag**：非 annotatable 的尾部/暂定窗口仍返回，但 `annotatable=false`，前端置灰禁止标注（比直接隐藏更可懂——用户能看到"有个新窗口但还没 settle"）。
+1. **`annotatable` = 只冻结最新那一个窗口**（2026-06-28 简化，用户："只冻结最新的窗口就好了，逻辑清晰明了"）。判据：`window_end == max(所有窗口的 end)` **且** `window_end > now − ANNOTATION_SETTLE_MARGIN_MINUTES` → 该窗口 `annotatable=false`（还在生长边缘，可能随新 bar 合并/延伸）；**其余窗口一律可标**。更早的窗口后面都已有更晚窗口出现 → 天然判定「已走完」。最新窗口若超过余量没动（收盘/静默）也判走完、可标，不会被无限冻结。余量默认 **30min**（原 90min 是"settle+走完"双重缓冲，简化后只需覆盖单窗 live 边缘抖动）。backfill 改动已标窗口边界由 `needs_review` 兜底。可配。
+2. **不过滤、只打 flag**：被冻结的最新窗口仍返回，但 `annotatable=false`，前端置灰禁止标注（比直接隐藏更可懂——用户能看到"有个新窗口但还在走"）。
 3. **`needs_review` 判据**：某条已标注的 `(window_start, window_end)` **不在**当前重算窗口的 (start,end) 集合里 → 被 backfill 改了边界/劈/并 → `needs_review=true`。在 `list_annotations` 里按 symbol 分组、每 symbol 重算一次窗口比对。阈值变化导致的不匹配也归入复核（合理：窗口定义变了就该重看）。
 4. **不静默改/丢**：`needs_review` 只是个**提示 flag**，标注数据原样保留，由人决定改不改。导出不受影响。
 

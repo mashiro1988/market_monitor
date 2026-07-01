@@ -508,8 +508,12 @@ def load_price_windows(
     # 单档（Phase 2）：_scale_events 内部已做同向相邻合并，无跨档合并。
     merged = _scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap)
 
-    # Phase3b A策略①：window_end 早于此线才算「已 settle + 已走完」、可标。
-    settle_cutoff = utc_now_naive() - timedelta(minutes=int(getattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 90)))
+    # A策略①（2026-06-28 简化）：**只冻结「最新且仍在生长边缘」的那一个窗口**——它后面还没有更晚的
+    # 窗口/价格来确认它走完，可能随新 bar 继续合并。更早的窗口后面都已有更晚窗口 → 已走完 → 可标。
+    # 例外：最新窗口若已很久没动（收盘/静默，超过 live 余量）也判走完、可标。已标窗口被 backfill 改动
+    # 由 needs_review 兜底，不靠冻结。
+    latest_end = max((m["end"] for m in merged), default=None)
+    live_edge_cutoff = utc_now_naive() - timedelta(minutes=int(getattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 30)))
     windows: list[tuple[datetime, PriceWindowSchema]] = []
     for m in merged:
         p_start = price_at.get(m["start"])
@@ -530,7 +534,7 @@ def load_price_windows(
             change_pct=net_pct,
             segment_count=m["segments"],
             annotation_id=annotation_index.get((m["start"], m["end"])),
-            annotatable=(m["end"] <= settle_cutoff),
+            annotatable=not (m["end"] == latest_end and m["end"] > live_edge_cutoff),
             is_primary=True,
             context_pre_minutes=m["pre"],
             references=_reference_changes_for_window(ref_rows, m["start"], m["end"], tolerance_minutes, symbol),

@@ -365,9 +365,9 @@ ALERT_PRICE_MAX_STALENESS_MINUTES = int(os.getenv("ALERT_PRICE_MAX_STALENESS_MIN
 # 5min = 一个快照步长（跳一格即断档）。开市丢快照造成的虚假劈窗由 gap-repair 补洞后 compute-on-read 自愈。
 ANNOTATION_EVENT_MERGE_GAP_MINUTES = int(os.getenv("ANNOTATION_EVENT_MERGE_GAP_MINUTES", "5"))
 
-# 标注 settle 余量（news-impact-engine Phase 3b，A 策略）：窗口结束后至少过这么久才放给人标——
-# 覆盖 gap-repair 每小时 :37 settle（最坏 ~60min）+「走完」缓冲；用户次日复盘，90min 延迟无感。
-ANNOTATION_SETTLE_MARGIN_MINUTES = int(os.getenv("ANNOTATION_SETTLE_MARGIN_MINUTES", "90"))
+# 最新窗口 live 余量（A 策略①，2026-06-28 简化）：**只**冻结最新那个窗口，且仅当它结束于此余量内
+# （还在生长边缘、可能随新 bar 合并）。超过此余量没动（收盘/静默）就判走完、可标。更早窗口一律可标。
+ANNOTATION_SETTLE_MARGIN_MINUTES = int(os.getenv("ANNOTATION_SETTLE_MARGIN_MINUTES", "30"))
 
 # ============================================================
 # Dune Analytics 配置（保留）
