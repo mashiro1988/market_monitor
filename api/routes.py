@@ -23,6 +23,7 @@ from schemas.annotations import (
     AnnotationSymbol,
     AutoAnnotateBatchRequest,
     AutoAnnotateBatchResponse,
+    AutoAnnotateRefineRequest,
     AutoAnnotateRequest,
     AutoAnnotateResponse,
     ContextNewsResponse,
@@ -373,6 +374,17 @@ def delete_annotation(annotation_id: int, db: Session = Depends(get_db)) -> Dele
 def annotation_auto(request: AutoAnnotateRequest, db: Session = Depends(get_db)) -> AutoAnnotateResponse:
     try:
         return annotation_service.auto_annotate(db, request)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
+    except RuntimeError as exc:
+        raise ApiError("AUTO_ANNOTATE_FAILED", str(exc), status_code=502) from exc
+
+
+@router.post("/annotations/auto/refine", response_model=AutoAnnotateResponse)
+def annotation_auto_refine(request: AutoAnnotateRefineRequest, db: Session = Depends(get_db)) -> AutoAnnotateResponse:
+    """互动重标：带上一轮输出 + 用户纠正，多轮对话再调 reasoner。不写库。"""
+    try:
+        return annotation_service.auto_annotate_refine(db, request)
     except ValueError as exc:
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
     except RuntimeError as exc:

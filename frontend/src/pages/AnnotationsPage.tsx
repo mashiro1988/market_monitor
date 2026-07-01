@@ -409,15 +409,7 @@ export function AnnotationsPage() {
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["context-news"] }); }
   });
 
-  const autoAnnotate = useMutation({
-    mutationFn: () => api.autoAnnotate({
-      symbol: activeWindow!.symbol,
-      window_start_utc: activeWindow!.window_start.timestamp_utc!,
-      window_end_utc: activeWindow!.window_end.timestamp_utc!,
-      threshold_pct: rule?.threshold_pct ?? 0,
-      context_pre_minutes: activePre
-    }),
-    onSuccess: (result) => {
+  const applyAutoResult = useCallback((result: AutoAnnotateResponse) => {
       setAutoResult(result);
       setNewsRoles(result.news_roles ?? {});
       setReactionType(result.market_reaction_type ?? null);
@@ -449,7 +441,34 @@ export function AnnotationsPage() {
           duration_seconds: result.duration_seconds
         });
       }
-    }
+  }, [activeWindow, activeKey]);
+
+  const autoAnnotate = useMutation({
+    mutationFn: () => api.autoAnnotate({
+      symbol: activeWindow!.symbol,
+      window_start_utc: activeWindow!.window_start.timestamp_utc!,
+      window_end_utc: activeWindow!.window_end.timestamp_utc!,
+      threshold_pct: rule?.threshold_pct ?? 0,
+      context_pre_minutes: activePre
+    }),
+    onSuccess: applyAutoResult,
+  });
+
+  // 互动重标：把当前角色/摘要/置信度作为「上一轮」+ 用户纠正，多轮对话再调 reasoner。
+  const [refineMessage, setRefineMessage] = useState("");
+  const refine = useMutation({
+    mutationFn: () => api.autoAnnotateRefine({
+      symbol: activeWindow!.symbol,
+      window_start_utc: activeWindow!.window_start.timestamp_utc!,
+      window_end_utc: activeWindow!.window_end.timestamp_utc!,
+      threshold_pct: rule?.threshold_pct ?? 0,
+      context_pre_minutes: activePre,
+      prior_news_roles: newsRoles,
+      prior_summary: notes,
+      prior_confidence: confidence,
+      user_message: refineMessage,
+    }),
+    onSuccess: (result) => { applyAutoResult(result); setRefineMessage(""); },
   });
 
   // 批量自动标注：把**还没缓存过结果**的未标注 primary 分片调 /api/annotations/auto-batch，
@@ -623,6 +642,24 @@ export function AnnotationsPage() {
             reasoning={autoResult.reasoning}
           />
         ) : null}
+
+        {/* 互动重标：不认可当前标注/推理时，打一句纠正让模型重标（多轮对话） */}
+        {activeWindow && (autoResult || Object.keys(newsRoles).length > 0) ? (
+          <div className="annotation-refine-row" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+            <input
+              type="text"
+              value={refineMessage}
+              onChange={(e) => setRefineMessage(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && refineMessage.trim() && !refine.isPending) refine.mutate(); }}
+              placeholder="不认可就纠正模型，例：driver 标错了，应该是「美军打击」那条及其同簇冗余"
+              style={{ flex: 1, fontSize: 13, padding: "4px 8px" }}
+            />
+            <Button disabled={!refineMessage.trim() || refine.isPending} onClick={() => refine.mutate()}>
+              {refine.isPending ? "重标中..." : "让模型重标"}
+            </Button>
+          </div>
+        ) : null}
+        {refine.error ? <ErrorState error={refine.error} /> : null}
 
         {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
       </section>

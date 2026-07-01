@@ -24,6 +24,7 @@ from schemas.annotations import (
     AutoAnnotateBatchItem,
     AutoAnnotateBatchRequest,
     AutoAnnotateBatchResponse,
+    AutoAnnotateRefineRequest,
     AutoAnnotateRequest,
     AutoAnnotateResponse,
     ContextNewsResponse,
@@ -861,16 +862,22 @@ def _build_auto_annotate_user_payload(
 
 
 def _call_deepseek_reasoner(user_content: str) -> tuple[str, str, float]:
-    """调 DeepSeek v4-pro thinking 模式，返回 (content, reasoning_content, duration_seconds)。"""
+    """单轮：system + user。返回 (content, reasoning_content, duration_seconds)。"""
+    return _call_deepseek_reasoner_messages([
+        {"role": "system", "content": AUTO_ANNOTATE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ])
+
+
+def _call_deepseek_reasoner_messages(messages: list[dict]) -> tuple[str, str, float]:
+    """调 DeepSeek v4-pro thinking，传**完整 messages**（支持多轮，refine 互动重标用）。
+    返回 (content, reasoning_content, duration_seconds)。"""
     if not config.DEEPSEEK_API_KEY:
         raise RuntimeError("DEEPSEEK_API_KEY 未配置，无法调用自动标注")
 
     payload = {
         "model": config.DEEPSEEK_REASONER_MODEL,
-        "messages": [
-            {"role": "system", "content": AUTO_ANNOTATE_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
+        "messages": messages,
         "thinking": {
             "type": "enabled",
             "reasoning_effort": config.DEEPSEEK_REASONER_EFFORT,
@@ -1034,6 +1041,82 @@ def auto_annotate(session: Session, request: AutoAnnotateRequest) -> AutoAnnotat
         f"[AutoAnnotate] 完成，耗时 {duration:.1f}s，标注 {len(parsed.news_roles)} 条非噪音，"
         f"type={parsed.market_reaction_type} no_clear={parsed.no_clear_news}"
     )
+
+    return AutoAnnotateResponse(
+        selected_news_ids=parsed.selected_news_ids,
+        no_clear_news=parsed.no_clear_news,
+        news_roles=parsed.news_roles,
+        market_reaction_type=parsed.market_reaction_type,
+        confidence=parsed.confidence,
+        summary=parsed.summary,
+        reasoning=reasoning,
+        model=config.DEEPSEEK_REASONER_MODEL,
+        duration_seconds=round(duration, 2),
+        candidate_count=len(candidate_news),
+    )
+
+
+def _fetch_candidate_news(session: Session, window_start: datetime, window_end: datetime,
+                          pre_minutes: int) -> list[NewsItem]:
+    """窗口 ±（pre_minutes / 默认 post）范围内的候选新闻，时间升序。"""
+    context_start = window_start - timedelta(minutes=pre_minutes)
+    context_end = window_end + timedelta(minutes=CONTEXT_POST_MINUTES_DEFAULT)
+    return (
+        session.query(NewsItem)
+        .filter(
+            NewsItem.source.in_(_annotation_news_sources()),
+            NewsItem.timestamp >= context_start,
+            NewsItem.timestamp <= context_end,
+        )
+        .order_by(NewsItem.timestamp.asc())
+        .all()
+    )
+
+
+def auto_annotate_refine(session: Session, request: AutoAnnotateRefineRequest) -> AutoAnnotateResponse:
+    """互动重标（Part C）：把原始 payload + 上一轮输出 + 用户纠正当作**多轮对话**再调 reasoner。
+    **只调模型、不写库**，前端拿新结果套用到角色上，用户满意再保存。"""
+    window_start = parse_datetime(request.window_start_utc)
+    window_end = parse_datetime(request.window_end_utc)
+    if window_start is None or window_end is None:
+        raise ValueError("window_start_utc/window_end_utc 不能为空")
+    if not (request.user_message or "").strip():
+        raise ValueError("纠正内容（user_message）不能为空")
+
+    pre_minutes = request.context_pre_minutes or CONTEXT_PRE_MINUTES_DEFAULT
+    candidate_news = _fetch_candidate_news(session, window_start, window_end, pre_minutes)
+    if not candidate_news:
+        raise ValueError("窗口前后没有候选新闻，无法重标")
+
+    start_snapshot = _find_window_snapshot(session, request.symbol, window_start)
+    end_snapshot = _find_window_snapshot(session, request.symbol, window_end)
+    user_payload = _build_auto_annotate_user_payload(
+        request,
+        candidate_news,
+        start_snapshot.price if start_snapshot else None,
+        end_snapshot.price if end_snapshot else None,
+        ((end_snapshot.price - start_snapshot.price) / abs(start_snapshot.price) * 100)
+        if start_snapshot and end_snapshot and start_snapshot.price else None,
+        reference_changes=_reference_changes_for_annotation(session, window_start, window_end, request.symbol),
+        signals=_window_signals_payload(session, request.symbol, window_start, window_end),
+    )
+
+    prior = {
+        "news_roles": {str(k): v for k, v in (request.prior_news_roles or {}).items()},
+        "confidence": request.prior_confidence,
+        "summary": request.prior_summary or "",
+    }
+    messages = [
+        {"role": "system", "content": AUTO_ANNOTATE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_payload},
+        {"role": "assistant", "content": json.dumps(prior, ensure_ascii=False)},
+        {"role": "user", "content":
+            f"用户对上面这版标注的纠正意见：{request.user_message.strip()}\n"
+            f"请据此重新标注这个窗口，仍然只返回同样格式的 JSON。"},
+    ]
+    logger.info(f"[AutoAnnotateRefine] 互动重标，候选 {len(candidate_news)} 条，纠正: {request.user_message.strip()[:60]}")
+    content, reasoning, duration = _call_deepseek_reasoner_messages(messages)
+    parsed = _parse_auto_annotate_v2(content, {int(row.id) for row in candidate_news})
 
     return AutoAnnotateResponse(
         selected_news_ids=parsed.selected_news_ids,

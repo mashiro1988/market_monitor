@@ -134,9 +134,22 @@ class AutoAnnotateRequest(BaseModel):
     context_pre_minutes: int | None = None   # 多尺度窗口各档候选前置分钟；不传用默认
 
 
+class AutoAnnotateRefineRequest(BaseModel):
+    """互动重标（annotation-refinements Part C）：把上一轮输出 + 用户纠正当作多轮对话再调 reasoner。"""
+    symbol: str
+    window_start_utc: str
+    window_end_utc: str
+    threshold_pct: float
+    context_pre_minutes: int | None = None
+    prior_news_roles: dict[int, str] | None = None   # 上一轮的 driver/redundant
+    prior_summary: str | None = None
+    prior_confidence: float | None = None
+    user_message: str                                # 用户的纠正意见（自然语言）
+
+
 class AutoAnnotateResponse(BaseModel):
     """自动标注返回：v2 标签 + 推理过程 + 摘要。**不写库**，由前端 review 后调 POST /api/annotations 落库。
-    selected_news_ids / no_clear_news 为派生兼容字段（primary+secondary / 无 primary）。"""
+    selected_news_ids / no_clear_news 为派生兼容字段（全部 driver / 无 driver 或 no_news_driver）。"""
     selected_news_ids: list[int] = Field(default_factory=list)
     no_clear_news: bool = False
     news_roles: dict[int, str] = Field(default_factory=dict)

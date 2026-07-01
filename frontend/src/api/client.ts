@@ -144,6 +144,8 @@ export const api = {
     request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) }),
   autoAnnotateBatch: (body: AutoAnnotateBatchRequest) =>
     request<AutoAnnotateBatchResponse>("/annotations/auto-batch", { method: "POST", body: JSON.stringify(body) }),
+  autoAnnotateRefine: (body: import("./types").AutoAnnotateRefineRequest) =>
+    request<AutoAnnotateResponse>("/annotations/auto/refine", { method: "POST", body: JSON.stringify(body) }),
   // 内容标签：库 + 人工改
   tagOptions: () =>
     request<{ topics: string[]; magnitudes: string[]; directions: string[] }>("/annotations/tag-options"),

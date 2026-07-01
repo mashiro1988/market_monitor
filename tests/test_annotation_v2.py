@@ -308,6 +308,40 @@ def test_list_annotations_needs_review(session):
     assert ghost and ghost[0].needs_review is True
 
 
+def test_auto_annotate_refine_multiturn(session, monkeypatch):
+    """Part C 互动重标：把 上一轮输出 + 用户纠正 组成 4 轮对话再调 reasoner，新结果套用。"""
+    from schemas.annotations import AutoAnnotateRefineRequest
+    n1, n2, n3 = _seed(session)
+
+    captured = {}
+
+    def fake_call(messages):
+        captured["messages"] = messages
+        return json.dumps({"news_roles": {str(n1): "driver"}, "confidence": 0.9, "summary": "改后"}), "推理", 1.0
+
+    monkeypatch.setattr(annotation_service, "_call_deepseek_reasoner_messages", fake_call)
+    resp = annotation_service.auto_annotate_refine(session, AutoAnnotateRefineRequest(
+        symbol="BTC/USDT", window_start_utc=W_START.isoformat(), window_end_utc=W_END.isoformat(),
+        threshold_pct=1.0, prior_news_roles={n2: "driver"}, prior_summary="旧摘要", prior_confidence=0.5,
+        user_message="driver 标错了，应该是第一条美军打击",
+    ))
+    msgs = captured["messages"]
+    assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user"]
+    assert str(n2) in msgs[2]["content"]                          # 上一轮输出进了 assistant 轮
+    assert "美军打击" in msgs[3]["content"]                       # 用户纠正进了末轮 user
+    assert resp.news_roles == {n1: "driver"}                      # 新结果套用
+
+
+def test_auto_annotate_refine_requires_message(session):
+    from schemas.annotations import AutoAnnotateRefineRequest
+    _seed(session)
+    with pytest.raises(ValueError):
+        annotation_service.auto_annotate_refine(session, AutoAnnotateRefineRequest(
+            symbol="BTC/USDT", window_start_utc=W_START.isoformat(), window_end_utc=W_END.isoformat(),
+            threshold_pct=1.0, user_message="   ",
+        ))
+
+
 def test_prompts_drop_retired_roles():
     """prompt 现状：无 post_hoc/contradictory/market_reaction_type；含 redundant + confidence + 派生信号；版本已 bump。"""
     for p in (annotation_service.AUTO_ANNOTATE_SYSTEM_PROMPT, annotation_service.AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT):
