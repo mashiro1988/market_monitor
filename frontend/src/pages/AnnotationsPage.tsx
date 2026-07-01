@@ -61,22 +61,6 @@ const ROLE_OPTIONS = [
   { value: "redundant", label: "同簇冗余" },
 ] as const;
 
-const REACTION_OPTIONS = [
-  { value: "macro_policy", label: "宏观与政策" },
-  { value: "event_driven", label: "事件驱动" },
-  { value: "no_news_driver", label: "无新闻驱动" },
-] as const;
-
-const REACTION_LABELS: Record<string, string> = Object.fromEntries(
-  REACTION_OPTIONS.map((o) => [o.value, o.label])
-);
-
-// 置信度三档（高/中/低 → 固定数值，与 spec §1 对齐）
-const CONFIDENCE_TIERS = [
-  { value: 0.9, label: "高" },
-  { value: 0.65, label: "中" },
-  { value: 0.3, label: "低" },
-] as const;
 
 function rolesEqual(a: Record<number, string>, b: Record<number, string>): boolean {
   const ka = Object.keys(a);
@@ -731,46 +715,6 @@ export function AnnotationsPage() {
 
             {activeWindow ? (
               <div className="annotation-save-block">
-                <div className="annotation-form-row v2-labels-row">
-                  <label className="field">
-                    <span>市场反应类型</span>
-                    <select
-                      value={reactionType ?? ""}
-                      onChange={(event) => {
-                        const next = event.target.value || null;
-                        setReactionType(next);
-                        updateDraft({ market_reaction_type: next });
-                      }}
-                    >
-                      <option value="">未判定</option>
-                      {REACTION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="field">
-                    <span>归因置信度</span>
-                    <div className="confidence-tiers">
-                      {CONFIDENCE_TIERS.map((tier) => (
-                        <button
-                          key={tier.label}
-                          type="button"
-                          className={`tier-btn ${confidence === tier.value ? "active" : ""}`}
-                          onClick={() => {
-                            const next = confidence === tier.value ? null : tier.value;
-                            setConfidence(next);
-                            updateDraft({ confidence: next });
-                          }}
-                        >
-                          {tier.label}
-                        </button>
-                      ))}
-                      {confidence != null && !CONFIDENCE_TIERS.some((t) => t.value === confidence) ? (
-                        <span className="muted-text small">AI: {confidence.toFixed(2)}</span>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
                 <label className="field full">
                   <span>备注 / 因果归因</span>
                   <textarea
@@ -848,13 +792,9 @@ export function AnnotationsPage() {
                 header: "归因",
                 cell: (row) => (
                   <span>
-                    {row.market_reaction_type
-                      ? <span className="reaction-badge">{REACTION_LABELS[row.market_reaction_type] ?? row.market_reaction_type}</span>
-                      : row.no_clear_news
-                        ? <span className="muted-text">无明确诱因</span>
-                        : null}
-                    {row.selected_count > 0 ? <span className="muted-text small"> 驱动 {row.selected_count} 条</span> : null}
-                    {row.confidence != null ? <span className="muted-text small"> · {row.confidence.toFixed(2)}</span> : null}
+                    {row.selected_count > 0
+                      ? <span className="muted-text small">驱动 {row.selected_count} 条</span>
+                      : row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
                   </span>
                 )
               },
