@@ -143,6 +143,17 @@ def test_update_news_tags_validates_and_sticks(session):
     assert n.tagged_at is not None                       # 置 tagged → tag_untagged 不会再碰它
 
 
+def test_update_news_tags_can_clear_one_field(session):
+    """显式传 None = 清空该字段；未传字段保持不变。"""
+    n = _news(session, "美军打击伊朗")
+    news_tagging.update_news_tags(session, n.id, topic="地缘冲突", magnitude_tier="大", news_direction="利空")
+    news_tagging.update_news_tags(session, n.id, topic=None)
+    session.refresh(n)
+    assert n.topic is None
+    assert n.magnitude_tier == "大"
+    assert n.news_direction == "利空"
+
+
 def test_prompt_documents_rubric():
     p = news_tagging.TAGGING_SYSTEM_PROMPT
     for topic in config.NEWS_TOPICS:

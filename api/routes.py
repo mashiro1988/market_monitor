@@ -303,10 +303,7 @@ def annotation_tag_options() -> dict[str, list[str]]:
 def news_tags_update(news_id: int, request: NewsTagUpdateRequest, db: Session = Depends(get_db)) -> NewsItemSchema:
     """人工修正一条新闻的内容标签（topic/量级/方向），校验枚举后落库（置 tagged_at，不再被自动重打）。"""
     try:
-        item = news_tagging.update_news_tags(
-            db, news_id, topic=request.topic,
-            magnitude_tier=request.magnitude_tier, news_direction=request.news_direction,
-        )
+        item = news_tagging.update_news_tags(db, news_id, **request.model_dump(exclude_unset=True))
         return news_service.to_news_schema(item)
     except ValueError as exc:
         raise ApiError("NEWS_TAG_INVALID", str(exc), status_code=400) from exc

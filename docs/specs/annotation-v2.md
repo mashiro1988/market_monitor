@@ -18,9 +18,9 @@
 
 `post_hoc_explanation` 和 `contradictory` 已退场，并入 `noise`。旧数据迁移会把这两类从 `news_roles` 中移除，见 `database.py:162`。
 
-### 窗口级：`market_reaction_type`
+### 历史兼容字段：`market_reaction_type`
 
-`MARKET_REACTION_TYPES` 当前是 3 个值，见 `schemas/annotations.py:17`。
+`MARKET_REACTION_TYPES` 保留给历史数据和旧消费方，见 `schemas/annotations.py:17`。Phase3a 后前端不再让人填写，自动标注 prompt 也不再要求模型输出；窗口“是否无明确诱因”主要由 `news_roles` 中是否存在 `driver` 派生。
 
 | 值 | 中文 | 语义 |
 |---|---|---|
@@ -32,12 +32,12 @@
 
 ## 2. 兼容字段
 
-`causal_news_ids` 和 `no_clear_news` 仍保留给旧消费方，但自 Phase3a 起都由 `news_roles` / `market_reaction_type` 派生，前端保存时不再手填旧含义。
+`causal_news_ids` 和 `no_clear_news` 仍保留给旧消费方，但自 Phase3a 起都由 `news_roles` 派生，前端保存时不再手填旧含义；历史请求若显式带 `market_reaction_type == "no_news_driver"`，后端仍会按兼容口径置 `no_clear_news`。
 
 | 字段 | 派生规则 | 代码 |
 |---|---|---|
 | `causal_news_ids` / `selected_news_ids` | `news_roles` 里全部 `driver` 的 id。 | `services/annotation_service.py:637` |
-| `no_clear_news` | 没有任何 `driver`，或 `market_reaction_type == "no_news_driver"`。 | `services/annotation_service.py:637` |
+| `no_clear_news` | 没有任何 `driver`；历史兼容请求里 `market_reaction_type == "no_news_driver"` 也会置 true。 | `services/annotation_service.py:637` |
 
 ## 3. 存储与迁移
 
@@ -58,12 +58,11 @@
 
 ## 4. 自动标注输出契约
 
-单窗口和批量自动标注都输出同一套结构；非法 role/type、幻觉 id 会被解析器过滤。
+单窗口和批量自动标注都输出同一套结构；非法 role、幻觉 id 会被解析器过滤。解析器仍兼容历史 `market_reaction_type`，但当前 prompt 不要求输出。
 
 ```json
 {
   "news_roles": {"6515": "driver", "6517": "redundant"},
-  "market_reaction_type": "event_driven",
   "confidence": 0.85,
   "summary": "80字以内因果链",
   "reasoning": "该窗口专属解释，批量路径可选"
@@ -90,6 +89,6 @@
 ## 6. 前端
 
 - 候选新闻表使用角色下拉：噪音 / 驱动 / 同簇冗余。
-- 保存区使用 reaction type 三分类 + 置信度三档 + summary。
+- 保存区使用置信度三档 + summary；不再展示或保存 reaction type。
 - `sessionStorage` key 使用 Phase3a 口径，避免旧草稿残留 retired roles。
 - 窗口净值图只标出 `driver` 竖线；`contradictory` marker 已删除。

@@ -5,6 +5,7 @@
 这些全局都在函数体内按调用时读取，所以 monkeypatch.setattr 生效。
 """
 import pickle
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -100,3 +101,47 @@ def test_puller_pull_if_newer_local(local_backend, monkeypatch):
     puller = remote_puller.RemotePuller([spec])
     assert puller._pull_if_newer(spec) is True   # 首次拉到
     assert puller._pull_if_newer(spec) is False  # cutoff 不变 → 跳过
+
+
+def test_puller_retries_pending_sector_scan_same_cutoff(monkeypatch):
+    """pivot 已下载但 sector_scan 失败时，同一个 cutoff 下轮仍要重试下游 scan。"""
+    from services import remote_puller
+
+    spec = remote_puller.DatasetSpec(
+        name="market_pivot_spot",
+        ready_dir="",
+        ready_prefix="",
+        resolve_pkl_rel=lambda cutoff: "",
+        poll_interval_seconds=3600,
+    )
+    puller = remote_puller.RemotePuller([spec])
+    calls = {"pull": 0, "scan": 0}
+
+    def fake_pull_if_newer(_spec):
+        calls["pull"] += 1
+        with puller._status_lock:
+            ds = puller._status.datasets[_spec.name]
+            ds.last_cutoff_ts = 1780479000
+            ds.last_pull_at = datetime(2026, 6, 1)
+            ds.pending_sector_retry_cutoff_ts = 1780479000
+        return True
+
+    def fake_sector_scan():
+        calls["scan"] += 1
+        if calls["scan"] == 1:
+            return {"error": "boom"}
+        return {"sectors_written": 3}
+
+    monkeypatch.setattr(puller, "_pull_if_newer", fake_pull_if_newer)
+    monkeypatch.setattr(puller, "_run_sector_scan", fake_sector_scan)
+
+    first = puller.cycle()
+    assert first["sector_scan"] == {"error": "boom"}
+    assert calls == {"pull": 1, "scan": 1}
+    assert puller.status().datasets["market_pivot_spot"].pending_sector_retry_cutoff_ts == 1780479000
+
+    second = puller.cycle()
+    assert second["skipped_not_due"] == ["market_pivot_spot"]
+    assert second["sector_scan"] == {"sectors_written": 3}
+    assert calls == {"pull": 1, "scan": 2}
+    assert puller.status().datasets["market_pivot_spot"].pending_sector_retry_cutoff_ts is None

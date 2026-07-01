@@ -148,24 +148,34 @@ def backfill_traditional_open(session: Session) -> int:
     return len(rows)
 
 
-def update_news_tags(session: Session, news_id: int, topic: str | None = None,
-                     magnitude_tier: str | None = None, news_direction: str | None = None) -> NewsItem:
+_UNSET = object()
+
+
+def update_news_tags(session: Session, news_id: int, topic: str | None | object = _UNSET,
+                     magnitude_tier: str | None | object = _UNSET,
+                     news_direction: str | None | object = _UNSET) -> NewsItem:
     """人工修正一条新闻的内容标签（标注页用）。校验枚举（必须在 config 三张库内）、落库、
-    置 tagged_at（人工改过的不会再被自动重打）。给哪项改哪项，None 的不动。"""
+    置 tagged_at（人工改过的不会再被自动重打）。没传的字段不动；显式传 None 清空。"""
     n = session.query(NewsItem).filter(NewsItem.id == news_id).first()
     if n is None:
         raise ValueError(f"新闻 #{news_id} 不存在")
-    if topic is not None and topic not in config.NEWS_TOPICS:
+    if topic == "":
+        topic = None
+    if magnitude_tier == "":
+        magnitude_tier = None
+    if news_direction == "":
+        news_direction = None
+    if topic is not _UNSET and topic is not None and topic not in config.NEWS_TOPICS:
         raise ValueError(f"非法 topic: {topic!r}")
-    if magnitude_tier is not None and magnitude_tier not in config.NEWS_MAGNITUDE_TIERS:
+    if magnitude_tier is not _UNSET and magnitude_tier is not None and magnitude_tier not in config.NEWS_MAGNITUDE_TIERS:
         raise ValueError(f"非法 magnitude: {magnitude_tier!r}")
-    if news_direction is not None and news_direction not in config.NEWS_DIRECTIONS:
+    if news_direction is not _UNSET and news_direction is not None and news_direction not in config.NEWS_DIRECTIONS:
         raise ValueError(f"非法 direction: {news_direction!r}")
-    if topic is not None:
+    if topic is not _UNSET:
         n.topic = topic
-    if magnitude_tier is not None:
+    if magnitude_tier is not _UNSET:
         n.magnitude_tier = magnitude_tier
-    if news_direction is not None:
+    if news_direction is not _UNSET:
         n.news_direction = news_direction
     n.tagged_at = utc_now_naive()
     session.commit()

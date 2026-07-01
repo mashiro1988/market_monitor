@@ -293,9 +293,9 @@ export type AutoAnnotateRefineRequest = {
 
 export type AutoAnnotateResponse = {
   selected_news_ids: number[];      // 派生兼容字段（全部 driver）
-  no_clear_news: boolean;           // 派生兼容字段（无 driver 或 no_news_driver）
+  no_clear_news: boolean;           // 派生兼容字段（无 driver）
   news_roles: Record<number, string>;        // Phase3a：{news_id: causal_role}，只含非 noise
-  market_reaction_type: string | null;       // 三分类：macro_policy / event_driven / no_news_driver
+  market_reaction_type: string | null;       // legacy，前端不再展示或保存
   confidence: number | null;                 // 0-1
   summary: string;
   reasoning: string;
@@ -315,7 +315,7 @@ export type AutoAnnotateBatchItem = {
   selected_news_ids: number[];      // 派生兼容字段
   no_clear_news: boolean;           // 派生兼容字段
   news_roles: Record<number, string>;
-  market_reaction_type: string | null;
+  market_reaction_type: string | null;       // legacy，前端不再展示或保存
   confidence: number | null;
   summary: string;
   reasoning: string;  // 该窗口专属 reasoning（来自结构化 JSON），与 batch.reasoning（DeepSeek thinking）不同
@@ -347,7 +347,7 @@ export type AnnotationListItem = {
   references?: ReferenceChange[];
   no_clear_news: boolean;
   selected_count: number;
-  market_reaction_type?: string | null;
+  market_reaction_type?: string | null;      // legacy，前端新保存不再传
   confidence?: number | null;
   eval_set?: boolean;
   needs_review?: boolean;  // Phase3b：窗口边界被数据回补改动，请重看

@@ -13,7 +13,8 @@ NEWS_CAUSAL_ROLES = (
     "redundant",  # 同簇冗余：与 driver 同一事件簇的其它相关报道；训练时排除、不当负样本
     "noise",      # 噪音（默认，不落库）
 )
-# 窗口级市场反应类型（单轴=驱动源；与 news_roles 闭环：前两类 ⟺ 有 driver）。
+# 历史兼容的窗口级市场反应类型。Phase3a 后前端/prompt 不再主动产出；
+# 旧数据和旧请求仍按三分类解析。
 MARKET_REACTION_TYPES = (
     "macro_policy",          # 宏观数据与政策预期（数据公布/央行/官员/财政）
     "event_driven",          # 其他明确事件驱动（地缘/制裁/监管/行业/标的专属）
@@ -77,7 +78,7 @@ class AnnotationCreateRequest(BaseModel):
     auto_summary: str | None = None
     # —— v2 标签（None = 旧格式请求，落库时由 selected/no_clear 归一化派生）——
     news_roles: dict[int, str] | None = None          # {news_id: causal_role}，只含非 noise
-    market_reaction_type: str | None = None           # MARKET_REACTION_TYPES 之一
+    market_reaction_type: str | None = None           # legacy: MARKET_REACTION_TYPES 之一
     confidence: float | None = None                   # 0-1
     # AI 原始标注快照（人改前），用于沉淀人机分歧难例；纯人工标注为 None
     auto_news_roles: dict[int, str] | None = None
@@ -148,8 +149,8 @@ class AutoAnnotateRefineRequest(BaseModel):
 
 
 class AutoAnnotateResponse(BaseModel):
-    """自动标注返回：v2 标签 + 推理过程 + 摘要。**不写库**，由前端 review 后调 POST /api/annotations 落库。
-    selected_news_ids / no_clear_news 为派生兼容字段（全部 driver / 无 driver 或 no_news_driver）。"""
+    """自动标注返回：Phase3a 标签 + 推理过程 + 摘要。**不写库**，由前端 review 后调 POST /api/annotations 落库。
+    selected_news_ids / no_clear_news 为派生兼容字段（全部 driver / 无 driver）。"""
     selected_news_ids: list[int] = Field(default_factory=list)
     no_clear_news: bool = False
     news_roles: dict[int, str] = Field(default_factory=dict)
