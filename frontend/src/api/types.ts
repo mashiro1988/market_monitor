@@ -224,6 +224,7 @@ export type ReferenceChange = {
   symbol: string;
   label: string;
   pct: number | null;        // unit=pct 时为涨跌%，unit=bp 时为基点
+  correlation?: number | null;  // 与标注品种在窗口 ±1h 的 5min 收益率 Pearson 相关
   unit?: "pct" | "bp";       // 收益率类品种（美债10Y）用 bp
   is_self: boolean;
 };
