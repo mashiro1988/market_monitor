@@ -96,6 +96,12 @@ def test_upsert_no_clear_derivation(session):
     assert d.selected_news_ids == []
 
 
+def test_upsert_v2_requires_confidence(session):
+    n1, _, _ = _seed(session)
+    with pytest.raises(ValueError, match="归因置信度"):
+        annotation_service.upsert_annotation(session, _req([n1], news_roles={n1: "driver"}))
+
+
 def test_upsert_legacy_request_normalized(session):
     """老格式请求（selected/no_clear）：全部 selected → driver；no_clear → no_news_driver。"""
     n1, n2, _ = _seed(session)
@@ -224,6 +230,7 @@ def test_export_jsonl_with_auto_labels(session):
     assert len(lines) == 1
     row = json.loads(lines[0])
     assert row["schema_version"] == 2
+    assert "correlations" in row["window"]
     assert row["labels"]["market_reaction_type"] == "event_driven"
     roles = {c["id"]: c["causal_role"] for c in row["candidates"]}
     assert roles[n1] == "driver"

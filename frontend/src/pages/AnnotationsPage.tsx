@@ -25,12 +25,19 @@ function windowKey(w: PriceWindow): string {
 
 // 单个宏观对标的展示文本 + 涨跌色类。本身 / 无数据（周末/休市）→ 中性灰。
 // 收益率类品种（unit=bp）显示基点变动，其余显示涨跌%。
+function fmtCorrelation(value: number | null | undefined): string {
+  if (value == null) return "相关 —";
+  const sign = value > 0 ? "+" : "";
+  return `相关 ${sign}${value.toFixed(2)}`;
+}
+
 function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
   if (ref.is_self) return { text: `${ref.label} 本身`, cls: "ref-neutral" };
-  if (ref.pct == null) return { text: `${ref.label} 无`, cls: "ref-neutral" };
+  const corr = fmtCorrelation(ref.correlation);
+  if (ref.pct == null) return { text: `${ref.label} 无 · ${corr}`, cls: "ref-neutral" };
   const sign = ref.pct > 0 ? "+" : "";
   const value = ref.unit === "bp" ? `${sign}${ref.pct.toFixed(1)}bp` : `${sign}${ref.pct.toFixed(2)}%`;
-  return { text: `${ref.label} ${value}`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
+  return { text: `${ref.label} ${value} · ${corr}`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
 }
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（角色/反应类型/notes）
@@ -117,6 +124,7 @@ export function AnnotationsPage() {
   const [notes, setNotes] = useState("");
   const [labeler, setLabeler] = useState(initialStored.labeler ?? "");
   const [autoResult, setAutoResult] = useState<AutoAnnotateResponse | null>(null);
+  const [saveValidation, setSaveValidation] = useState("");
 
   // 批量自动标注的结果缓存。Key = windowKey(window)。一次「批量自动标注」可能产生多片
   // batch 调用（每片 ≤10 窗口），每个窗口的结果按 key 暂存，等用户点中某个窗口时回填表单。
@@ -368,6 +376,7 @@ export function AnnotationsPage() {
       auto_news_roles: autoResult?.news_roles ?? null
     }),
     onSuccess: () => {
+      setSaveValidation("");
       // 已落库 → 从 in-progress 缓存里清掉，避免下次回到该 symbol 时还显示已经保存过的草稿
       const savedKey = activeKey;
       setBatchByKey((prev) => {
@@ -408,6 +417,7 @@ export function AnnotationsPage() {
       setAutoResult(result);
       setNewsRoles(result.news_roles ?? {});
       setConfidence(result.confidence ?? null);
+      if (result.confidence != null) setSaveValidation("");
       setNotes(result.summary);
       // 单窗口自动标注的结果也写入 batchByKey，让批量按钮把这条视为已处理。
       if (activeWindow) {
@@ -764,6 +774,7 @@ export function AnnotationsPage() {
                         onClick={() => {
                           const next = confidence === tier.value ? null : tier.value;
                           setConfidence(next);
+                          setSaveValidation("");
                           updateDraft({ confidence: next });
                         }}
                       >
@@ -787,9 +798,20 @@ export function AnnotationsPage() {
                   />
                 </label>
                 <div className="annotation-save-row">
-                  <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                  <Button
+                    disabled={save.isPending}
+                    onClick={() => {
+                      if (confidence == null) {
+                        setSaveValidation("请先选择归因置信度（高 / 中 / 低），再保存标注。");
+                        return;
+                      }
+                      setSaveValidation("");
+                      save.mutate();
+                    }}
+                  >
                     <Save size={16} />保存标注
                   </Button>
+                  {saveValidation ? <div className="task-banner failed">{saveValidation}</div> : null}
                   {save.data ? <div className="task-banner succeeded">已保存标注 #{save.data.id}</div> : null}
                   {save.error ? <ErrorState error={save.error} /> : null}
                 </div>

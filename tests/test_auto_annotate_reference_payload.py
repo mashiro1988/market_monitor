@@ -138,12 +138,15 @@ def test_reference_change_schema_carries_unit(session):
     from services.annotation_service import _load_reference_rows, _reference_changes_for_window
     from datetime import timedelta as _td
     ref_rows = _load_reference_rows(session, W_START - _td(minutes=15))
-    refs = _reference_changes_for_window(ref_rows, W_START, W_END, 10, "BTC/USDT")
+    refs = _reference_changes_for_window(
+        ref_rows, W_START, W_END, 10, "BTC/USDT", correlations_by_symbol={"NQ=F": 0.82}
+    )
     by_label = {r.label: r for r in refs}
     assert by_label["美债10Y"].unit == "bp"
     assert by_label["美债10Y"].pct == pytest.approx(10.0)
     assert by_label["纳指"].unit == "pct"
     assert by_label["纳指"].pct == pytest.approx(-1.0)
+    assert by_label["纳指"].correlation == pytest.approx(0.82)
 
 
 def test_prompts_document_reference_changes():
@@ -152,6 +155,9 @@ def test_prompts_document_reference_changes():
         annotation_service.AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT,
     ):
         assert "reference_changes" in prompt
+        assert "核心推理顺序" in prompt
+        assert "日经" in prompt
+        assert "相关资产新闻 + 其它资产验证 + 时间靠近触发段" in prompt
         assert "地缘" in prompt        # 跨资产风险事件解读指引
         # 全 null（对标品种集体休市，周末加密窗口的常态）必须有降级指引，
         # 否则模型可能拿"无矛盾"当"签名一致"，借地缘例外条款乱选。
