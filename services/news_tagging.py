@@ -148,6 +148,40 @@ def backfill_traditional_open(session: Session) -> int:
     return len(rows)
 
 
+_UNSET = object()
+
+
+def update_news_tags(session: Session, news_id: int, topic: str | None | object = _UNSET,
+                     magnitude_tier: str | None | object = _UNSET,
+                     news_direction: str | None | object = _UNSET) -> NewsItem:
+    """人工修正一条新闻的内容标签（标注页用）。校验枚举（必须在 config 三张库内）、落库、
+    置 tagged_at（人工改过的不会再被自动重打）。没传的字段不动；显式传 None 清空。"""
+    n = session.query(NewsItem).filter(NewsItem.id == news_id).first()
+    if n is None:
+        raise ValueError(f"新闻 #{news_id} 不存在")
+    if topic == "":
+        topic = None
+    if magnitude_tier == "":
+        magnitude_tier = None
+    if news_direction == "":
+        news_direction = None
+    if topic is not _UNSET and topic is not None and topic not in config.NEWS_TOPICS:
+        raise ValueError(f"非法 topic: {topic!r}")
+    if magnitude_tier is not _UNSET and magnitude_tier is not None and magnitude_tier not in config.NEWS_MAGNITUDE_TIERS:
+        raise ValueError(f"非法 magnitude: {magnitude_tier!r}")
+    if news_direction is not _UNSET and news_direction is not None and news_direction not in config.NEWS_DIRECTIONS:
+        raise ValueError(f"非法 direction: {news_direction!r}")
+    if topic is not _UNSET:
+        n.topic = topic
+    if magnitude_tier is not _UNSET:
+        n.magnitude_tier = magnitude_tier
+    if news_direction is not _UNSET:
+        n.news_direction = news_direction
+    n.tagged_at = utc_now_naive()
+    session.commit()
+    return n
+
+
 def tag_untagged(session: Session, limit: int = 500, batch_size: int | None = None) -> int:
     """给"可打标"的新闻分片打内容标签。"可打标" = 未打标 **且前置条件 traditional_open 已具备**
     （入库即设、backfill 兜底）。内容标签(topic/方向/量级)纯看新闻、**不看价格**，所以**不需要等反应

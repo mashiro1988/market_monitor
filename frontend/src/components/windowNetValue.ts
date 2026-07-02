@@ -1,7 +1,7 @@
 import type { MarketHistoryResponse, NewsItem } from "../api/types";
 import type { ChartPoint } from "./Charts";
 
-export type ChartMarker = { time: string; role: "driver" | "contradictory"; title: string };
+export type ChartMarker = { time: string; role: "driver"; title: string };
 
 export type NetValueChart = {
   data: ChartPoint[];
@@ -47,7 +47,7 @@ function toMs(utcMinute: string): number {
   return new Date(iso.length <= 16 ? `${iso}:00Z` : iso).getTime();
 }
 
-// 从候选新闻 + 角色映射里取出 driver/contradictory，snap 到时间差最小的桶，按时间升序。
+// 从候选新闻 + 角色映射里取出 driver，snap 到时间差最小的桶，按时间升序。
 export function deriveMarkers(
   candidateNews: NewsItem[],
   newsRoles: Record<number, string>,
@@ -58,7 +58,7 @@ export function deriveMarkers(
 
   candidateNews.forEach((item) => {
     const role = newsRoles[item.id];
-    if (role !== "driver" && role !== "contradictory") return;
+    if (role !== "driver") return;
     if (!item.timestamp_utc) return;
     const target = item.timestamp_utc.slice(0, 16);
     const targetMs = toMs(target);

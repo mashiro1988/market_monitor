@@ -43,7 +43,6 @@ Vite 开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`。
 | `python run.py api-dev` | FastAPI reload 开发服务 |
 | `python run.py frontend-build` | 执行前端 Vite 构建 |
 | `python run.py scan` | 执行一次价格、新闻、预测市场扫描并评估告警 |
-| `python run.py schedule` | 启动独立定时扫描器 |
 | `python run.py setup` | 初始化/补齐数据库表 |
 
 ## 配置
@@ -129,6 +128,7 @@ python -m pytest
 
 ```bash
 cd frontend
+cmd /c npm.cmd test
 cmd /c npm.cmd run typecheck
 cmd /c npm.cmd run build
 ```

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import config
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy import func
@@ -22,6 +23,7 @@ from schemas.annotations import (
     AnnotationSymbol,
     AutoAnnotateBatchRequest,
     AutoAnnotateBatchResponse,
+    AutoAnnotateRefineRequest,
     AutoAnnotateRequest,
     AutoAnnotateResponse,
     ContextNewsResponse,
@@ -31,7 +33,7 @@ from schemas.annotations import (
 )
 from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
-from schemas.news import NewsResponse, NewsSourceMeta
+from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta, NewsTagUpdateRequest
 from schemas.onchain import OnchainDataset
 from schemas.predictions import (
     PredictionFamily,
@@ -43,7 +45,7 @@ from schemas.predictions import (
 )
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, market_service, news_service, onchain_service, prediction_service, sector_service, task_service
+from services import alerts_service, annotation_service, market_service, news_service, news_tagging, onchain_service, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -287,6 +289,26 @@ def annotation_context_news(
     )
 
 
+@router.get("/annotations/tag-options")
+def annotation_tag_options() -> dict[str, list[str]]:
+    """内容标签三张「库」（标注页人工改标签的下拉用）：topic / 量级 / 方向。"""
+    return {
+        "topics": list(config.NEWS_TOPICS),
+        "magnitudes": list(config.NEWS_MAGNITUDE_TIERS),
+        "directions": list(config.NEWS_DIRECTIONS),
+    }
+
+
+@router.patch("/news/{news_id}/tags", response_model=NewsItemSchema)
+def news_tags_update(news_id: int, request: NewsTagUpdateRequest, db: Session = Depends(get_db)) -> NewsItemSchema:
+    """人工修正一条新闻的内容标签（topic/量级/方向），校验枚举后落库（置 tagged_at，不再被自动重打）。"""
+    try:
+        item = news_tagging.update_news_tags(db, news_id, **request.model_dump(exclude_unset=True))
+        return news_service.to_news_schema(item)
+    except ValueError as exc:
+        raise ApiError("NEWS_TAG_INVALID", str(exc), status_code=400) from exc
+
+
 @router.post("/annotations", response_model=AnnotationResponse)
 def annotations(request: AnnotationCreateRequest, db: Session = Depends(get_db)) -> AnnotationResponse:
     try:
@@ -349,6 +371,17 @@ def delete_annotation(annotation_id: int, db: Session = Depends(get_db)) -> Dele
 def annotation_auto(request: AutoAnnotateRequest, db: Session = Depends(get_db)) -> AutoAnnotateResponse:
     try:
         return annotation_service.auto_annotate(db, request)
+    except ValueError as exc:
+        raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
+    except RuntimeError as exc:
+        raise ApiError("AUTO_ANNOTATE_FAILED", str(exc), status_code=502) from exc
+
+
+@router.post("/annotations/auto/refine", response_model=AutoAnnotateResponse)
+def annotation_auto_refine(request: AutoAnnotateRefineRequest, db: Session = Depends(get_db)) -> AutoAnnotateResponse:
+    """互动重标：带上一轮输出 + 用户纠正，多轮对话再调 reasoner。不写库。"""
+    try:
+        return annotation_service.auto_annotate_refine(db, request)
     except ValueError as exc:
         raise ApiError("ANNOTATION_INVALID", str(exc), status_code=400) from exc
     except RuntimeError as exc:

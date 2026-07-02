@@ -144,6 +144,13 @@ export const api = {
     request<AutoAnnotateResponse>("/annotations/auto", { method: "POST", body: JSON.stringify(body) }),
   autoAnnotateBatch: (body: AutoAnnotateBatchRequest) =>
     request<AutoAnnotateBatchResponse>("/annotations/auto-batch", { method: "POST", body: JSON.stringify(body) }),
+  autoAnnotateRefine: (body: import("./types").AutoAnnotateRefineRequest) =>
+    request<AutoAnnotateResponse>("/annotations/auto/refine", { method: "POST", body: JSON.stringify(body) }),
+  // 内容标签：库 + 人工改
+  tagOptions: () =>
+    request<{ topics: string[]; magnitudes: string[]; directions: string[] }>("/annotations/tag-options"),
+  updateNewsTags: (id: number, body: { topic?: string | null; magnitude_tier?: string | null; news_direction?: string | null }) =>
+    request<import("./types").NewsItem>(`/news/${id}/tags`, { method: "PATCH", body: JSON.stringify(body) }),
   // 板块轮动
   sectorLeaderboard: () => request<SectorLeaderboardResponse>("/sectors/leaderboard"),
   sectorTokens: (category: string) =>

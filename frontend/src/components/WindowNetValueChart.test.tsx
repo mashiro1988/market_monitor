@@ -77,7 +77,7 @@ test("勾选为 driver 的新闻出现在标记列表，noise 不出现", async 
   expect(screen.queryByText("噪音新闻标题")).not.toBeInTheDocument();
 });
 
-test("未勾选驱动/方向矛盾时显示空提示", async () => {
+test("未勾选驱动时显示空提示", async () => {
   renderChart({});
-  expect(await screen.findByText(/尚未选出驱动\/方向矛盾新闻/)).toBeInTheDocument();
+  expect(await screen.findByText(/尚未选出驱动新闻/)).toBeInTheDocument();
 });

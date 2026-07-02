@@ -6,7 +6,6 @@ Investment Agent - 运行入口
   python run.py api-dev    启动 FastAPI 开发服务（不自动构建前端）
   python run.py frontend-build  构建 React 静态产物
   python run.py setup      初始化数据库
-  python run.py schedule   启动 5 分钟频率定时扫描 + 告警
   python run.py scan       执行一次扫描（不启动调度器）
 """
 import os
@@ -393,150 +392,6 @@ def run_startup_backfill_once():
         return price_records, news_records
 
 
-def start_scheduler():
-    """启动 5 分钟频率定时扫描 + 每小时摘要 + remote_data_cycle + cmc_bootstrap"""
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.triggers.interval import IntervalTrigger
-    from database import create_tables
-
-    create_tables()
-
-    logger.info("启动 Investment Agent 定时扫描器...")
-
-    scheduler = BackgroundScheduler(timezone="UTC")
-
-    from alerts.engine import AlertEngine
-
-    alert_engine = AlertEngine()
-
-    def scan_cycle():
-        """一次完整的扫描周期"""
-        try:
-            logger.info(f"[Scheduler] 扫描周期开始 {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            price_records, news_records, pred_records = run_scan_once()
-
-            logger.info(
-                f"[Scheduler] 周期完成: 价格 {len(price_records)} | "
-                f"新闻 {len(news_records)} | 预测 {len(pred_records)}"
-            )
-        except Exception as e:
-            logger.error(f"[Scheduler] 扫描周期异常: {e}")
-
-    def hourly_summary():
-        """每小时市场摘要"""
-        try:
-            alert_engine.send_hourly_summary()
-        except Exception as e:
-            logger.error(f"[Scheduler] 每小时摘要失败: {e}")
-
-    def startup_backfill():
-        """启动后回补最近最多 72 小时价格与新闻历史。"""
-        try:
-            price_records, news_records = run_startup_backfill_once()
-            logger.info(
-                f"[Scheduler] 启动回补完成，价格源端返回 {len(price_records)} 条，"
-                f"新闻源端返回 {len(news_records)} 条"
-            )
-        except Exception as e:
-            logger.error(f"[Scheduler] 启动回补失败: {e}")
-
-    def remote_data_cycle():
-        """远程数据周期: pull (SFTP) → sector_scan → (phase 4) factor_compute。
-        60s 频率，跟 5min 主扫描用各自 max_instances=1 锁并行。"""
-        try:
-            from services.remote_puller import run_remote_data_cycle
-            stats = run_remote_data_cycle()
-            logger.info(f"[Scheduler] remote_data_cycle 完成: {stats}")
-        except Exception as e:
-            logger.error(f"[Scheduler] remote_data_cycle 异常: {e}")
-
-    def cmc_bootstrap():
-        """启动 10s 后检查 CMC 板块映射是否过期，过期则刷新（~2min）。"""
-        try:
-            from database import SessionLocal
-            from services import cmc_client
-            session = SessionLocal()
-            try:
-                if cmc_client.needs_refresh(session):
-                    logger.info("[Scheduler] CMC 板块映射过期/为空，开始刷新...")
-                    result = cmc_client.refresh_categories(session=session)
-                    logger.info(f"[Scheduler] CMC 板块刷新完成: {result}")
-                else:
-                    logger.info("[Scheduler] CMC 板块映射仍在 TTL 内，跳过")
-            finally:
-                session.close()
-        except Exception as e:
-            logger.error(f"[Scheduler] CMC bootstrap 失败: {e}")
-
-    # 添加5分钟扫描任务
-    price_interval = max(1, int(config.SCAN_INTERVALS.get("price", 5)))
-    first_scan_time = next_aligned_run_time(price_interval)
-    scheduler.add_job(
-        scan_cycle,
-        IntervalTrigger(minutes=price_interval, start_date=first_scan_time),
-        id="scan_cycle",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-    scheduler.add_job(
-        startup_backfill,
-        "date",
-        run_date=datetime.now(timezone.utc) + timedelta(seconds=1),
-        id="startup_backfill",
-        replace_existing=True,
-        max_instances=1,
-    )
-
-    # 添加每小时摘要任务
-    first_summary_time = next_aligned_run_time(60)
-    scheduler.add_job(
-        hourly_summary,
-        IntervalTrigger(hours=1, start_date=first_summary_time),
-        id="hourly_summary",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-    # 远程数据周期：60s 跑一次 pull → sector_scan → (phase 4) factor_compute
-    from services.remote_puller import POLL_INTERVAL_SECONDS as REMOTE_DATA_CYCLE_SEC
-    scheduler.add_job(
-        remote_data_cycle,
-        IntervalTrigger(seconds=REMOTE_DATA_CYCLE_SEC,
-                        start_date=datetime.now(timezone.utc) + timedelta(seconds=2)),
-        id="remote_data_cycle",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-    # CMC 板块映射启动检查（10s 后跑一次，过期会触发刷新 ~2min）
-    scheduler.add_job(
-        cmc_bootstrap,
-        "date",
-        run_date=datetime.now(timezone.utc) + timedelta(seconds=10),
-        id="cmc_bootstrap",
-        replace_existing=True,
-        max_instances=1,
-    )
-
-    scheduler.start()
-
-    logger.info(
-        f"[Scheduler] 定时扫描已启动（每 {price_interval} 分钟），"
-        f"首次扫描: {first_scan_time.astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')} 北京时间；"
-        f"首次摘要: {first_summary_time.astimezone(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')} 北京时间。Ctrl+C 退出"
-    )
-    try:
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        logger.info("停止定时扫描器...")
-        scheduler.shutdown()
-
-
 def refresh_sectors_cli():
     """强制刷新 CMC 板块映射缓存（python run.py refresh-sectors）。
 
@@ -562,9 +417,9 @@ def main():
     parser.add_argument(
         "action",
         nargs="?",
-        choices=["app", "api-dev", "frontend-build", "setup", "schedule", "scan", "refresh-sectors"],
+        choices=["app", "api-dev", "frontend-build", "setup", "scan", "refresh-sectors"],
         help="操作: app(仪表板), api-dev(API开发服务), frontend-build(构建前端), setup(初始化DB), "
-             "schedule(定时扫描), scan(单次扫描), refresh-sectors(强制刷新 CMC 板块映射)",
+             "scan(单次扫描), refresh-sectors(强制刷新 CMC 板块映射)",
     )
     args = parser.parse_args()
 
@@ -581,9 +436,9 @@ def show_menu():
     print("1. 启动仪表板 (app)")
     print("2. 启动 API 开发服务 (api-dev)")
     print("3. 构建前端 (frontend-build)")
-    print("4. 启动定时扫描 (schedule)")
-    print("5. 执行单次扫描 (scan)")
-    print("6. 初始化数据库 (setup)")
+    print("4. 执行单次扫描 (scan)")
+    print("5. 初始化数据库 (setup)")
+    print("6. 强制刷新 CMC 板块映射 (refresh-sectors)")
     print("7. 退出")
     print("=" * 50)
 
@@ -594,9 +449,9 @@ def show_menu():
                 "1": "app",
                 "2": "api-dev",
                 "3": "frontend-build",
-                "4": "schedule",
-                "5": "scan",
-                "6": "setup",
+                "4": "scan",
+                "5": "setup",
+                "6": "refresh-sectors",
             }
             if choice == "7":
                 break
@@ -616,7 +471,6 @@ def execute(action: str):
         "api-dev": run_api_dev,
         "frontend-build": build_frontend,
         "setup": setup_database,
-        "schedule": start_scheduler,
         "scan": run_scan_once,
         "refresh-sectors": refresh_sectors_cli,
     }

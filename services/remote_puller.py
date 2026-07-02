@@ -112,6 +112,7 @@ class DatasetStatus:
     last_pull_at: Optional[datetime] = None  # UTC naive
     last_error: Optional[str] = None
     consecutive_errors: int = 0
+    pending_sector_retry_cutoff_ts: Optional[int] = None
 
 
 @dataclass
@@ -182,9 +183,13 @@ class RemotePuller:
                     ds.last_error = repr(exc)
                     ds.consecutive_errors += 1
 
-        # 2) 下游：板块计算（pivot 有新数据才跑）
-        if pivot_was_updated:
+        # 2) 下游：板块计算（pivot 有新数据，或上次同 cutoff 下游失败待重试时才跑）
+        if pivot_was_updated or self._has_pending_sector_retry():
             stats["sector_scan"] = self._run_sector_scan()
+            if self._sector_scan_succeeded(stats["sector_scan"]):
+                self._clear_pending_sector_retries()
+            else:
+                self._mark_pending_sector_retry_error(stats["sector_scan"])
 
         # 3) 下游（Phase 4 占位）：单币因子计算
         # if any pulled in PER_SYMBOL_DATASETS_TRIGGERING_FACTOR:
@@ -204,6 +209,44 @@ class RemotePuller:
         except Exception as exc:
             logger.exception("sector_scan 失败: {}", exc)
             return {"error": repr(exc)}
+
+    @staticmethod
+    def _sector_scan_succeeded(result: dict) -> bool:
+        """下游成功口径：scan 没有异常，并且至少写出一行 sector_returns。
+
+        数据不足导致个别长周期 ret 字段为 null 不算失败；只有整轮没有写出板块行才需要同 cutoff 重试。
+        """
+        if not isinstance(result, dict) or result.get("error"):
+            return False
+        try:
+            return int(result.get("sectors_written") or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
+    def _has_pending_sector_retry(self) -> bool:
+        with self._status_lock:
+            return any(
+                ds.pending_sector_retry_cutoff_ts is not None
+                for name, ds in self._status.datasets.items()
+                if name in PIVOT_DATASETS_TRIGGERING_SCAN
+            )
+
+    def _clear_pending_sector_retries(self) -> None:
+        with self._status_lock:
+            for name, ds in self._status.datasets.items():
+                if name in PIVOT_DATASETS_TRIGGERING_SCAN:
+                    ds.pending_sector_retry_cutoff_ts = None
+                    if ds.last_error and ds.last_error.startswith("sector_scan failed"):
+                        ds.last_error = None
+                        ds.consecutive_errors = 0
+
+    def _mark_pending_sector_retry_error(self, result: dict) -> None:
+        err = result.get("error") or result.get("skipped_reason") or "sector_scan wrote 0 sectors"
+        with self._status_lock:
+            for name, ds in self._status.datasets.items():
+                if name in PIVOT_DATASETS_TRIGGERING_SCAN and ds.pending_sector_retry_cutoff_ts is not None:
+                    ds.last_error = f"sector_scan failed: {err}"
+                    ds.consecutive_errors += 1
 
     # ---- 拉取单个 dataset ----
     def _pull_if_newer(self, spec: DatasetSpec) -> bool:
@@ -242,6 +285,8 @@ class RemotePuller:
             ds.last_pull_at = datetime.now(timezone.utc).replace(tzinfo=None)
             ds.last_error = None
             ds.consecutive_errors = 0
+            if spec.name in PIVOT_DATASETS_TRIGGERING_SCAN:
+                ds.pending_sector_retry_cutoff_ts = cutoff_ts
         logger.info("dataset {} 已更新到 cutoff={} ({})",
                     spec.name, cutoff_ts,
                     datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat())

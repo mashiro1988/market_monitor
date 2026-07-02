@@ -35,8 +35,8 @@ function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（角色/反应类型/notes）
 // + 当前选中窗口 + 标注人。切到别的页面再回来不会丢；标注保存成功后该 key 会被清理。
-// v2：标签体系升级（docs/specs/annotation-v2.md），旧 v1 草稿 schema 不兼容，直接弃读。
-const STORAGE_KEY = "annotations.session.v2";
+// Phase3a：标签体系升级为 driver/redundant/noise；旧 v2 草稿里可能残留 retired roles，直接弃读。
+const STORAGE_KEY = "annotations.session.phase3a";
 
 type StoredState = {
   batchByKey: [string, AutoAnnotateBatchItem][];
@@ -61,22 +61,13 @@ const ROLE_OPTIONS = [
   { value: "redundant", label: "同簇冗余" },
 ] as const;
 
-const REACTION_OPTIONS = [
-  { value: "macro_policy", label: "宏观与政策" },
-  { value: "event_driven", label: "事件驱动" },
-  { value: "no_news_driver", label: "无新闻驱动" },
-] as const;
-
-const REACTION_LABELS: Record<string, string> = Object.fromEntries(
-  REACTION_OPTIONS.map((o) => [o.value, o.label])
-);
-
-// 置信度三档（高/中/低 → 固定数值，与 spec §1 对齐）
+// 置信度三档（高/中/低 → 固定数值）；保留——训模型时作样本置信权重用。
 const CONFIDENCE_TIERS = [
   { value: 0.9, label: "高" },
   { value: 0.65, label: "中" },
   { value: 0.3, label: "低" },
 ] as const;
+
 
 function rolesEqual(a: Record<number, string>, b: Record<number, string>): boolean {
   const ka = Object.keys(a);
@@ -120,9 +111,8 @@ export function AnnotationsPage() {
   const [symbol, setSymbol] = useState("");
   const [activeKey, setActiveKey] = useState<string>(initialStored.activeKey ?? "");
 
-  // 编辑表单状态（v2：每条新闻 causal_role + 窗口 reaction_type/confidence）
+  // 编辑表单状态（Phase3a：每条新闻 causal_role + 置信度/summary）
   const [newsRoles, setNewsRoles] = useState<Record<number, string>>({});   // 只存非 noise
-  const [reactionType, setReactionType] = useState<string | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [labeler, setLabeler] = useState(initialStored.labeler ?? "");
@@ -229,14 +219,14 @@ export function AnnotationsPage() {
     [unannotatedPrimaries, activeKey]
   );
 
-  const activePre = activeWindow?.context_pre_minutes ?? 30;   // 多尺度：15m 档前 30 / 60m 档前 60
+  const activePre = activeWindow?.context_pre_minutes ?? 60;   // Part B：候选新闻窗口 ±1h
   const contextNews = useQuery({
     queryKey: ["context-news", activeWindow?.window_start.timestamp_utc, activeWindow?.window_end.timestamp_utc, activePre],
     queryFn: () => api.contextNews({
       window_start_utc: activeWindow!.window_start.timestamp_utc!,
       window_end_utc: activeWindow!.window_end.timestamp_utc!,
       pre_minutes: activePre,
-      post_minutes: 30
+      post_minutes: 60
     }),
     enabled: Boolean(activeWindow)
   });
@@ -249,7 +239,6 @@ export function AnnotationsPage() {
     const cached = batchByKey.get(activeKey);
     if (cached && batchMeta) {
       setNewsRoles((prev) => rolesEqual(prev, cached.news_roles ?? {}) ? prev : (cached.news_roles ?? {}));
-      setReactionType((prev) => prev === (cached.market_reaction_type ?? null) ? prev : (cached.market_reaction_type ?? null));
       setConfidence((prev) => prev === (cached.confidence ?? null) ? prev : (cached.confidence ?? null));
       setNotes((prev) => prev === cached.summary ? prev : cached.summary);
       setAutoResult((prev) => {
@@ -265,9 +254,9 @@ export function AnnotationsPage() {
         }
         return {
           selected_news_ids: cached.selected_news_ids,
-          no_clear_news: cached.no_clear_news,
+          no_clear_news: Object.values(cached.news_roles ?? {}).every((role) => role !== "driver"),
           news_roles: cached.news_roles ?? {},
-          market_reaction_type: cached.market_reaction_type ?? null,
+          market_reaction_type: null,
           confidence: cached.confidence ?? null,
           summary: cached.summary,
           // 优先用本窗口结构化输出里的 reasoning；为空时退回到整批 thinking trace（debug 用）
@@ -281,26 +270,24 @@ export function AnnotationsPage() {
       // 缓存里有但没 batchMeta（重新加载页面后 batchMeta 也持久化了，正常路径会走上面分支；
       // 这里是兜底：纯人工编辑过的窗口没有 AI 元数据，但表单内容还是要还原）
       setNewsRoles((prev) => rolesEqual(prev, cached.news_roles ?? {}) ? prev : (cached.news_roles ?? {}));
-      setReactionType((prev) => prev === (cached.market_reaction_type ?? null) ? prev : (cached.market_reaction_type ?? null));
       setConfidence((prev) => prev === (cached.confidence ?? null) ? prev : (cached.confidence ?? null));
       setNotes((prev) => prev === cached.summary ? prev : cached.summary);
       setAutoResult((prev) => prev === null ? prev : null);
     } else {
       setNewsRoles((prev) => Object.keys(prev).length === 0 ? prev : {});
-      setReactionType((prev) => prev === null ? prev : null);
       setConfidence((prev) => prev === null ? prev : null);
       setNotes((prev) => prev === "" ? prev : "");
       setAutoResult((prev) => prev === null ? prev : null);
     }
   }, [activeKey, batchByKey, batchMeta]);
 
-  // 用户编辑（新闻角色 / 反应类型 / 置信度 / notes）在**事件处理器里**同步写回 batchByKey 草稿。
+  // 用户编辑（新闻角色 / 置信度 / notes）在**事件处理器里**同步写回 batchByKey 草稿。
   // 不能用 effect 镜像表单→缓存：activeKey 切换时 hydrate（缓存→表单）和写回（表单→缓存）
   // 会在同一次提交里各自用对方的旧快照互相覆盖，两个存储的值从此每轮渲染互换、
   // 永不收敛（实测 checked 被以 ~6500 次/秒翻转——就是「勾选框抖动」）。
   // 事件驱动写回只在用户真实操作时发生，结构上无环；hydrate 保持唯一的 缓存→表单 方向。
   const updateDraft = useCallback(
-    (patch: Partial<Pick<AutoAnnotateBatchItem, "news_roles" | "market_reaction_type" | "confidence" | "summary">>) => {
+    (patch: Partial<Pick<AutoAnnotateBatchItem, "news_roles" | "confidence" | "summary">>) => {
       if (!activeKey || !activeWindow) return;
       setBatchByKey((prev) => {
         const existing = prev.get(activeKey);
@@ -309,7 +296,7 @@ export function AnnotationsPage() {
           window_start_utc: activeWindow.window_start.timestamp_utc!,
           window_end_utc: activeWindow.window_end.timestamp_utc!,
           news_roles: existing?.news_roles ?? {},
-          market_reaction_type: existing?.market_reaction_type ?? null,
+          market_reaction_type: null,
           confidence: existing?.confidence ?? null,
           summary: existing?.summary ?? "",
           reasoning: existing?.reasoning ?? "",
@@ -319,14 +306,12 @@ export function AnnotationsPage() {
         };
         // 派生兼容字段（与后端 _derive_compat_fields 同口径）
         const roleIds = Object.keys(merged.news_roles).map(Number);
-        const selected = roleIds.filter((id) => merged.news_roles[id] === "primary_driver")
-          .concat(roleIds.filter((id) => merged.news_roles[id] === "secondary_driver"));
-        const noClear = !roleIds.some((id) => merged.news_roles[id] === "primary_driver")
-          || merged.market_reaction_type === "no_clear_driver";
+        const selected = roleIds.filter((id) => merged.news_roles[id] === "driver");
+        const noClear = selected.length === 0;
         const full: AutoAnnotateBatchItem = { ...merged, selected_news_ids: selected, no_clear_news: noClear };
         // 用户把窗口清回全空且无 AI 痕迹 → 删草稿而不是存空条目（保持「没动过=无草稿」语义，
         // 批量自动标注的 pending 列表也依赖这一点）。
-        const empty = !roleIds.length && !merged.market_reaction_type && !merged.summary && !merged.reasoning;
+        const empty = !roleIds.length && !merged.summary && !merged.reasoning;
         if (empty) {
           if (!prev.has(activeKey)) return prev;
           const next = new Map(prev);
@@ -372,7 +357,6 @@ export function AnnotationsPage() {
       context_pre_minutes: activePre,
       // v2 标签；selected_news_ids / no_clear_news 由后端从 news_roles 派生
       news_roles: newsRoles,
-      market_reaction_type: reactionType,
       confidence,
       notes,
       labeler: autoResult ? `${labeler || ""}${labeler ? " · " : ""}${autoResult.model} (auto, reviewed)` : labeler,
@@ -412,18 +396,17 @@ export function AnnotationsPage() {
     }
   });
 
-  const autoAnnotate = useMutation({
-    mutationFn: () => api.autoAnnotate({
-      symbol: activeWindow!.symbol,
-      window_start_utc: activeWindow!.window_start.timestamp_utc!,
-      window_end_utc: activeWindow!.window_end.timestamp_utc!,
-      threshold_pct: rule?.threshold_pct ?? 0,
-      context_pre_minutes: activePre
-    }),
-    onSuccess: (result) => {
+  // 内容标签：库（下拉选项）+ 人工改一条新闻的标签
+  const tagOptions = useQuery({ queryKey: ["tag-options"], queryFn: api.tagOptions, staleTime: 60 * 60_000 });
+  const updateTags = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: { topic?: string; magnitude_tier?: string; news_direction?: string } }) =>
+      api.updateNewsTags(id, body),
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["context-news"] }); }
+  });
+
+  const applyAutoResult = useCallback((result: AutoAnnotateResponse) => {
       setAutoResult(result);
       setNewsRoles(result.news_roles ?? {});
-      setReactionType(result.market_reaction_type ?? null);
       setConfidence(result.confidence ?? null);
       setNotes(result.summary);
       // 单窗口自动标注的结果也写入 batchByKey，让批量按钮把这条视为已处理。
@@ -435,9 +418,9 @@ export function AnnotationsPage() {
             window_start_utc: activeWindow.window_start.timestamp_utc!,
             window_end_utc: activeWindow.window_end.timestamp_utc!,
             selected_news_ids: result.selected_news_ids,
-            no_clear_news: result.no_clear_news,
+            no_clear_news: Object.values(result.news_roles ?? {}).every((role) => role !== "driver"),
             news_roles: result.news_roles ?? {},
-            market_reaction_type: result.market_reaction_type ?? null,
+            market_reaction_type: null,
             confidence: result.confidence ?? null,
             summary: result.summary,
             reasoning: result.reasoning,  // 单窗口直接拿 DeepSeek thinking 全文做该窗口 reasoning
@@ -452,7 +435,34 @@ export function AnnotationsPage() {
           duration_seconds: result.duration_seconds
         });
       }
-    }
+  }, [activeWindow, activeKey]);
+
+  const autoAnnotate = useMutation({
+    mutationFn: () => api.autoAnnotate({
+      symbol: activeWindow!.symbol,
+      window_start_utc: activeWindow!.window_start.timestamp_utc!,
+      window_end_utc: activeWindow!.window_end.timestamp_utc!,
+      threshold_pct: rule?.threshold_pct ?? 0,
+      context_pre_minutes: activePre
+    }),
+    onSuccess: applyAutoResult,
+  });
+
+  // 互动重标：把当前角色/摘要/置信度作为「上一轮」+ 用户纠正，多轮对话再调 reasoner。
+  const [refineMessage, setRefineMessage] = useState("");
+  const refine = useMutation({
+    mutationFn: () => api.autoAnnotateRefine({
+      symbol: activeWindow!.symbol,
+      window_start_utc: activeWindow!.window_start.timestamp_utc!,
+      window_end_utc: activeWindow!.window_end.timestamp_utc!,
+      threshold_pct: rule?.threshold_pct ?? 0,
+      context_pre_minutes: activePre,
+      prior_news_roles: newsRoles,
+      prior_summary: notes,
+      prior_confidence: confidence,
+      user_message: refineMessage,
+    }),
+    onSuccess: (result) => { applyAutoResult(result); setRefineMessage(""); },
   });
 
   // 批量自动标注：把**还没缓存过结果**的未标注 primary 分片调 /api/annotations/auto-batch，
@@ -544,24 +554,34 @@ export function AnnotationsPage() {
     { key: "score", header: "LLM", cell: (row: NewsItem) => row.llm_importance ?? "—" },
     {
       key: "tags",
-      header: "内容标签",
+      header: "内容标签（可改）",
       cell: (row: NewsItem) => {
-        if (!row.topic && !row.magnitude_tier && !row.news_direction)
-          return <span className="muted-text small">未打标</span>;
+        const opts = tagOptions.data;
         const dirColor =
           row.news_direction === "利多" ? "#16a34a" :
-          row.news_direction === "利空" ? "#dc2626" : "var(--text-muted, #888)";
+          row.news_direction === "利空" ? "#dc2626" : undefined;
+        const sel = (val: string | null, list: string[] | undefined, field: "topic" | "magnitude_tier" | "news_direction", color?: string) => (
+          <select
+            value={val ?? ""}
+            style={{ fontSize: 11, padding: "1px 2px", color, maxWidth: field === "topic" ? 96 : 56 }}
+            onChange={(e) => updateTags.mutate({ id: row.id, body: { [field]: e.target.value || null } })}
+            title={field === "topic" ? "主题" : field === "magnitude_tier" ? "量级" : "方向"}
+          >
+            <option value="">{field === "topic" ? "未打标" : "—"}</option>
+            {(list ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        );
         return (
-          <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}>
-            {row.topic ? <span>{row.topic}</span> : null}
-            {row.magnitude_tier ? <span style={{ fontWeight: 700 }}>{row.magnitude_tier}</span> : null}
-            {row.news_direction ? <span style={{ color: dirColor }}>{row.news_direction}</span> : null}
+          <span style={{ display: "inline-flex", gap: 3, alignItems: "center", flexWrap: "wrap" }}>
+            {sel(row.topic, opts?.topics, "topic")}
+            {sel(row.magnitude_tier, opts?.magnitudes, "magnitude_tier")}
+            {sel(row.news_direction, opts?.directions, "news_direction", dirColor)}
           </span>
         );
       }
     },
     { key: "title", header: "标题", cell: (row: NewsItem) => row.title }
-  ], [newsRoles, setNewsRole]);
+  ], [newsRoles, setNewsRole, tagOptions.data, updateTags]);
 
   return (
     <section>
@@ -617,6 +637,24 @@ export function AnnotationsPage() {
           />
         ) : null}
 
+        {/* 互动重标：不认可当前标注/推理时，打一句纠正让模型重标（多轮对话） */}
+        {activeWindow && (autoResult || Object.keys(newsRoles).length > 0) ? (
+          <div className="annotation-refine-row" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+            <input
+              type="text"
+              value={refineMessage}
+              onChange={(e) => setRefineMessage(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && refineMessage.trim() && !refine.isPending) refine.mutate(); }}
+              placeholder="不认可就纠正模型，例：driver 标错了，应该是「美军打击」那条及其同簇冗余"
+              style={{ flex: 1, fontSize: 13, padding: "4px 8px" }}
+            />
+            <Button disabled={!refineMessage.trim() || refine.isPending} onClick={() => refine.mutate()}>
+              {refine.isPending ? "重标中..." : "让模型重标"}
+            </Button>
+          </div>
+        ) : null}
+        {refine.error ? <ErrorState error={refine.error} /> : null}
+
         {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
       </section>
 
@@ -637,7 +675,7 @@ export function AnnotationsPage() {
               <WindowNetValueChart
                 activeWindow={activeWindow}
                 preMinutes={activePre}
-                postMinutes={30}
+                postMinutes={60}
                 candidateNews={contextNews.data?.items ?? []}
                 newsRoles={newsRoles}
               />
@@ -696,7 +734,7 @@ export function AnnotationsPage() {
                 <header className="annotation-pair-panel-head">
                   <span>候选新闻</span>
                   <span>
-                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前${activePre}/后30 分钟`}
+                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前${activePre}/后60 分钟`}
                   </span>
                 </header>
                 <div className="annotation-pair-panel-body">
@@ -715,44 +753,26 @@ export function AnnotationsPage() {
 
             {activeWindow ? (
               <div className="annotation-save-block">
-                <div className="annotation-form-row v2-labels-row">
-                  <label className="field">
-                    <span>市场反应类型</span>
-                    <select
-                      value={reactionType ?? ""}
-                      onChange={(event) => {
-                        const next = event.target.value || null;
-                        setReactionType(next);
-                        updateDraft({ market_reaction_type: next });
-                      }}
-                    >
-                      <option value="">未判定</option>
-                      {REACTION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="field">
-                    <span>归因置信度</span>
-                    <div className="confidence-tiers">
-                      {CONFIDENCE_TIERS.map((tier) => (
-                        <button
-                          key={tier.label}
-                          type="button"
-                          className={`tier-btn ${confidence === tier.value ? "active" : ""}`}
-                          onClick={() => {
-                            const next = confidence === tier.value ? null : tier.value;
-                            setConfidence(next);
-                            updateDraft({ confidence: next });
-                          }}
-                        >
-                          {tier.label}
-                        </button>
-                      ))}
-                      {confidence != null && !CONFIDENCE_TIERS.some((t) => t.value === confidence) ? (
-                        <span className="muted-text small">AI: {confidence.toFixed(2)}</span>
-                      ) : null}
-                    </div>
+                <div className="field">
+                  <span>归因置信度</span>
+                  <div className="confidence-tiers">
+                    {CONFIDENCE_TIERS.map((tier) => (
+                      <button
+                        key={tier.label}
+                        type="button"
+                        className={`tier-btn ${confidence === tier.value ? "active" : ""}`}
+                        onClick={() => {
+                          const next = confidence === tier.value ? null : tier.value;
+                          setConfidence(next);
+                          updateDraft({ confidence: next });
+                        }}
+                      >
+                        {tier.label}
+                      </button>
+                    ))}
+                    {confidence != null && !CONFIDENCE_TIERS.some((t) => t.value === confidence) ? (
+                      <span className="muted-text small">AI: {confidence.toFixed(2)}</span>
+                    ) : null}
                   </div>
                 </div>
                 <label className="field full">
@@ -832,12 +852,9 @@ export function AnnotationsPage() {
                 header: "归因",
                 cell: (row) => (
                   <span>
-                    {row.market_reaction_type
-                      ? <span className="reaction-badge">{REACTION_LABELS[row.market_reaction_type] ?? row.market_reaction_type}</span>
-                      : row.no_clear_news
-                        ? <span className="muted-text">无明确诱因</span>
-                        : null}
-                    {row.selected_count > 0 ? <span className="muted-text small"> 驱动 {row.selected_count} 条</span> : null}
+                    {row.selected_count > 0
+                      ? <span className="muted-text small">驱动 {row.selected_count} 条</span>
+                      : row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
                     {row.confidence != null ? <span className="muted-text small"> · {row.confidence.toFixed(2)}</span> : null}
                   </span>
                 )

@@ -58,15 +58,26 @@ def test_short_silence_now_splits(session):
     assert len(_call(session)) == 2                            # end_dt 间隔 15min > 5 → 断档拆开
 
 
-def test_window_annotatable_gate(session, monkeypatch):
-    """Phase3b A策略①：窗口 window_end ≤ now − 余量 才 annotatable；尾部/暂定窗口不可标。"""
-    monkeypatch.setattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 90)
+def test_window_annotatable_only_latest_frozen(session, monkeypatch):
+    """A策略①(2026-06-28 简化)：只冻结**最新**那一个窗口；更早的窗口(哪怕也在 live 余量内)一律可标。"""
+    monkeypatch.setattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 30)
     now = utc_now_naive()
-    _seed(session, now, [(300, 100.0), (295, 101.0)])           # 远窗口：结束于 ~295min 前 → 可标
-    _seed(session, now, [(20, 100.0), (15, 101.0)])             # 近窗口：结束于 ~15min 前 → 不可标
+    _seed(session, now, [(25, 100.0), (20, 101.0)])             # 较早窗口(end ~-20，也在余量内) → 仍可标
+    _seed(session, now, [(10, 101.0), (5, 102.0)])              # 最新窗口(end ~-5) → 冻结
     wins = _call(session)
-    assert any(w.annotatable for w in wins)                     # 远窗口可标
-    assert any(not w.annotatable for w in wins)                 # 近窗口不可标
+    frozen = [w for w in wins if not w.annotatable]
+    assert len(frozen) == 1                                     # 只冻结一个
+    latest = max(wins, key=lambda w: w.window_end.timestamp_utc)
+    assert not latest.annotatable                              # 冻结的正是最新那个
+
+
+def test_window_annotatable_old_latest_is_annotatable(session, monkeypatch):
+    """最新窗口若已超 live 余量没动(收盘/静默) → 判走完、可标（不会被无限冻结）。"""
+    monkeypatch.setattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 30)
+    now = utc_now_naive()
+    _seed(session, now, [(300, 100.0), (295, 101.0)])          # 唯一窗口 end ~-295(超余量) → 可标
+    wins = _call(session)
+    assert wins and all(w.annotatable for w in wins)
 
 
 def test_two_segments_beyond_gap_split(session):

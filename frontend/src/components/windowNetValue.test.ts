@@ -57,16 +57,15 @@ const buckets = [
   { time: "06-15 05:35", utcMinute: "2026-06-14T21:35" }
 ];
 
-test("deriveMarkers 只保留 driver/contradictory，snap 到最近桶，按时间升序", () => {
+test("deriveMarkers 只保留 driver，snap 到最近桶，按时间升序", () => {
   const candidate = [
     news(1, "驱动新闻", "2026-06-14T21:34:00Z"),
-    news(2, "矛盾新闻", "2026-06-14T21:31:00Z"),
+    news(2, "冗余新闻", "2026-06-14T21:31:00Z"),
     news(3, "噪音新闻", "2026-06-14T21:33:00Z")
   ];
-  const roles = { 1: "driver", 2: "contradictory", 3: "noise" };
+  const roles = { 1: "driver", 2: "redundant", 3: "noise" };
   const out = deriveMarkers(candidate, roles, buckets);
   expect(out).toEqual([
-    { time: "06-15 05:30", role: "contradictory", title: "矛盾新闻" },
     { time: "06-15 05:35", role: "driver", title: "驱动新闻" }
   ]);
 });
