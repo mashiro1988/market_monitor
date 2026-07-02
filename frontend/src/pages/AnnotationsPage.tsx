@@ -26,18 +26,23 @@ function windowKey(w: PriceWindow): string {
 // 单个宏观对标的展示文本 + 涨跌色类。本身 / 无数据（周末/休市）→ 中性灰。
 // 收益率类品种（unit=bp）显示基点变动，其余显示涨跌%。
 function fmtCorrelation(value: number | null | undefined): string {
-  if (value == null) return "相关 —";
+  if (value == null) return "同步相关 —";
   const sign = value > 0 ? "+" : "";
-  return `相关 ${sign}${value.toFixed(2)}`;
+  return `同步相关 ${sign}${value.toFixed(2)}`;
+}
+
+function fmtRefMove(value: number | null | undefined, unit?: "pct" | "bp"): string {
+  if (value == null) return "—";
+  const sign = value > 0 ? "+" : "";
+  return unit === "bp" ? `${sign}${value.toFixed(1)}bp` : `${sign}${value.toFixed(2)}%`;
 }
 
 function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
   if (ref.is_self) return { text: `${ref.label} 本身`, cls: "ref-neutral" };
   const corr = fmtCorrelation(ref.correlation);
-  if (ref.pct == null) return { text: `${ref.label} 无 · ${corr}`, cls: "ref-neutral" };
-  const sign = ref.pct > 0 ? "+" : "";
-  const value = ref.unit === "bp" ? `${sign}${ref.pct.toFixed(1)}bp` : `${sign}${ref.pct.toFixed(2)}%`;
-  return { text: `${ref.label} ${value} · ${corr}`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
+  const moves = `前 ${fmtRefMove(ref.pre_pct, ref.unit)} / 窗 ${fmtRefMove(ref.pct, ref.unit)} / 后 ${fmtRefMove(ref.post_pct, ref.unit)}`;
+  if (ref.pct == null) return { text: `${ref.label} ${moves} · ${corr}`, cls: "ref-neutral" };
+  return { text: `${ref.label} ${moves} · ${corr}`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
 }
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（角色/反应类型/notes）

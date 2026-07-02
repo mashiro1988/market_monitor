@@ -36,6 +36,7 @@ from services.news_service import to_news_schema
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 TARGET_PRICE_SYMBOLS = ["BTC/USDT", "NQ=F"]
+REFERENCE_SEGMENT_MINUTES = 60
 
 def _nearest_snapshot_any(rows: list[PriceSnapshot], target: datetime, tolerance_minutes: int) -> PriceSnapshot | None:
     """rows 里与 target 时间差最小且 ≤ 容差者（不限前后，区别于 _nearest_snapshot）。"""
@@ -73,6 +74,10 @@ def _reference_change_for_window(
     return (e.price - s.price) / abs(s.price) * 100
 
 
+def _reference_rows_cutoff(window_start: datetime, tolerance_minutes: int) -> datetime:
+    return window_start - timedelta(minutes=REFERENCE_SEGMENT_MINUTES + tolerance_minutes + 5)
+
+
 def _load_reference_rows(session: Session, cutoff: datetime) -> dict[str, list[PriceSnapshot]]:
     """一次性把所有「宏观同期对标」资产（config.ANNOTATION_REFERENCE_ASSETS）的快照捞出，按 symbol 分组。"""
     symbols = [entry[0] for entry in config.ANNOTATION_REFERENCE_ASSETS]
@@ -104,11 +109,20 @@ def _reference_changes_for_window(
         if sym == annotated_symbol:
             out.append(ReferenceChange(symbol=sym, label=label, pct=None, correlation=None, unit=unit, is_self=True))
             continue
-        pct = _reference_change_for_window(ref_rows.get(sym, []), window_start, window_end, tolerance_minutes, unit)
+        rows = ref_rows.get(sym, [])
+        pre_pct = _reference_change_for_window(
+            rows, window_start - timedelta(minutes=REFERENCE_SEGMENT_MINUTES), window_start, tolerance_minutes, unit
+        )
+        pct = _reference_change_for_window(rows, window_start, window_end, tolerance_minutes, unit)
+        post_pct = _reference_change_for_window(
+            rows, window_end, window_end + timedelta(minutes=REFERENCE_SEGMENT_MINUTES), tolerance_minutes, unit
+        )
         out.append(ReferenceChange(
             symbol=sym,
             label=label,
+            pre_pct=pre_pct,
             pct=pct,
+            post_pct=post_pct,
             correlation=(correlations_by_symbol or {}).get(sym),
             unit=unit,
         ))
@@ -151,6 +165,27 @@ def _reference_changes_payload(refs: list[ReferenceChange]) -> dict[str, str | N
     return out
 
 
+def _format_reference_value(value: float | None, unit: str) -> str | None:
+    if value is None:
+        return None
+    if unit == "bp":
+        return f"{value:+.1f}bp"
+    return f"{value:+.2f}%"
+
+
+def _reference_change_segments_payload(refs: list[ReferenceChange]) -> dict[str, dict[str, str | None]]:
+    out: dict[str, dict[str, str | None]] = {}
+    for ref in refs:
+        if ref.is_self:
+            continue
+        out[ref.label] = {
+            "pre_1h": _format_reference_value(ref.pre_pct, ref.unit),
+            "window": _format_reference_value(ref.pct, ref.unit),
+            "post_1h": _format_reference_value(ref.post_pct, ref.unit),
+        }
+    return out
+
+
 def _reference_changes_for_annotation(
     session: Session,
     window_start: datetime,
@@ -161,9 +196,23 @@ def _reference_changes_for_annotation(
     """单个标注窗口的同期对标涨跌（payload 形式）。ref_rows 不传则按窗口起点现查。"""
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
     if ref_rows is None:
-        ref_rows = _load_reference_rows(session, window_start - timedelta(minutes=tolerance_minutes + 5))
+        ref_rows = _load_reference_rows(session, _reference_rows_cutoff(window_start, tolerance_minutes))
     refs = _reference_changes_for_window(ref_rows, window_start, window_end, tolerance_minutes, symbol)
     return _reference_changes_payload(refs)
+
+
+def _reference_change_segments_for_annotation(
+    session: Session,
+    window_start: datetime,
+    window_end: datetime,
+    symbol: str,
+    ref_rows: dict[str, list[PriceSnapshot]] | None = None,
+) -> dict[str, dict[str, str | None]]:
+    tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
+    if ref_rows is None:
+        ref_rows = _load_reference_rows(session, _reference_rows_cutoff(window_start, tolerance_minutes))
+    refs = _reference_changes_for_window(ref_rows, window_start, window_end, tolerance_minutes, symbol)
+    return _reference_change_segments_payload(refs)
 
 
 def _window_signals_payload(session: Session, symbol: str,
@@ -184,6 +233,9 @@ def _window_signals_payload(session: Session, symbol: str,
     pre = window_signals.pre_window_move(session, symbol, window_start, minutes=60)
     return {
         "correlations": correlations,
+        "reference_change_segments": _reference_change_segments_for_annotation(
+            session, window_start, window_end, symbol
+        ),
         "trigger_move_start_bj": (trig["start"] + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M") if trig else None,
         "trigger_move_pct": round(trig["pct"], 2) if trig else None,
         "pre_window_move_pct": round(pre, 2) if pre is not None else None,
@@ -380,11 +432,23 @@ AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT = """你是一名买方量化研究员。你�
 """
 
 # 一次批量调用最多塞 N 个窗口，避免上下文过长把 reasoning 时间和成本拉爆。
+CROSS_ASSET_SEGMENT_GUIDE = """
+
+**v9 补充：同步相关性降级为参考，优先看固定三段涨跌**
+- `correlations` 只表示窗口 ±1h 内 5min 收益率的**同步相关**。低相关不能否定联动，因为 BTC 可能晚几根 5min K 线才跟上；不要做 lag 推断，也不要自行调窗口寻找最佳解释。
+- `reference_change_segments` 是固定口径：`pre_1h`=窗口前 1h，`window`=窗口内，`post_1h`=窗口后 1h。它用于肉眼判断新闻出来后，BTC/标的是否明显跟着某类资产方向走。
+- 推理优先级：先用 `reference_change_segments` 看前/窗/后方向链，再把 `correlations` 当同步强弱参考，最后用新闻含义和其它大类资产交叉验证。相关性低但三段方向链清楚时，不要仅因低相关降级；方向链与新闻含义相反时才降级。
+- 示例：通胀风险下降 / 加息预期走弱，应倾向看到美元指数或美债利率走弱，并可能推升黄金或风险资产；若实际三段方向链相反，候选新闻降级 noise。
+"""
+
+AUTO_ANNOTATE_SYSTEM_PROMPT += CROSS_ASSET_SEGMENT_GUIDE
+AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT += CROSS_ASSET_SEGMENT_GUIDE
+
 AUTO_ANNOTATE_BATCH_LIMIT = 10
 
 # 提示词版本戳：每次实质性修改两份 system prompt 时更新；随标注落库（prompt_version 列），
 # 用于按提示词版本切分自动标注数据。
-ANNOTATION_PROMPT_VERSION = "v8-20260702"
+ANNOTATION_PROMPT_VERSION = "v9-20260702"
 
 
 def load_alert_price_rules() -> list[PriceRuleSchema]:
@@ -526,7 +590,10 @@ def load_price_windows(
     )
     display_cutoff = utc_now_naive() - timedelta(hours=hours)
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
-    ref_rows = _load_reference_rows(session, cutoff)
+    ref_rows = _load_reference_rows(
+        session,
+        cutoff - timedelta(minutes=REFERENCE_SEGMENT_MINUTES + tolerance_minutes + 5),
+    )
     merge_gap = timedelta(minutes=max(1, int(getattr(config, "ANNOTATION_EVENT_MERGE_GAP_MINUTES", 60))))
     price_at = {row.timestamp: row.price for row in rows}
 
@@ -826,7 +893,7 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
     if rows:
         earliest = min(r.window_start for r in rows)
-        ref_rows = _load_reference_rows(session, earliest - timedelta(minutes=tolerance_minutes + 5))
+        ref_rows = _load_reference_rows(session, _reference_rows_cutoff(earliest, tolerance_minutes))
     else:
         ref_rows = {}
     # Phase3b A策略③：当前重算窗口里"边界还对得上"的标注 id（按 symbol 缓存）。
@@ -1209,7 +1276,7 @@ def _build_auto_annotate_batch_user_payload(
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
     parsed_starts = [s for s in (parse_datetime(w.window_start_utc) for w in windows) if s is not None]
     ref_rows = (
-        _load_reference_rows(session, min(parsed_starts) - timedelta(minutes=tolerance_minutes + 5))
+        _load_reference_rows(session, _reference_rows_cutoff(min(parsed_starts), tolerance_minutes))
         if parsed_starts else {}
     )
 
@@ -1441,6 +1508,7 @@ def export_training_jsonl(session: Session, days: int = 365, split: str = "train
                     session, row.window_start, row.window_end, row.symbol
                 ) if row.window_start and row.window_end else {},
                 "correlations": signals.get("correlations", {}),
+                "reference_change_segments": signals.get("reference_change_segments", {}),
             },
             "candidates": candidates,
             "labels": {

@@ -59,8 +59,10 @@ def _seed(session):
     _price(session, "BTC/USDT", "BTC", "crypto", W_START, 100000.0)
     _price(session, "BTC/USDT", "BTC", "crypto", W_END, 97000.0)
     # 对标：纳指 -1.00%，原油 +3.00%，黄金无数据
+    _price(session, "NQ=F", "纳指", "futures", W_START - timedelta(minutes=60), 19900.0)
     _price(session, "NQ=F", "纳指", "futures", W_START, 20000.0)
     _price(session, "NQ=F", "纳指", "futures", W_END, 19800.0)
+    _price(session, "NQ=F", "纳指", "futures", W_END + timedelta(minutes=60), 19950.0)
     _price(session, "CL=F", "原油", "futures", W_START, 70.0)
     _price(session, "CL=F", "原油", "futures", W_END, 72.1)
     # 美债10Y：4.30% → 4.40%，bp 口径应显示 +10.0bp（而不是 +2.33%）
@@ -100,13 +102,18 @@ def test_auto_annotate_payload_includes_reference_changes(session, monkeypatch):
     monkeypatch.setattr(annotation_service, "_call_deepseek_reasoner", fake_call)
     annotation_service.auto_annotate(session, _request())
 
-    refs = _payload_json(captured["user"])["window"]["reference_changes"]
+    payload = _payload_json(captured["user"])["window"]
+    refs = payload["reference_changes"]
+    segments = payload["reference_change_segments"]
     assert refs["纳指"] == "-1.00%"
     assert refs["原油"] == "+3.00%"
     assert refs["黄金"] is None
     assert refs["美债10Y"] == "+10.0bp"   # 收益率用 bp，不用百分比涨跌
     assert refs["美元指数"] is None
     assert "BTC" not in refs              # 标注品种本身（BTC/USDT）不对标自己
+    assert segments["纳指"]["pre_1h"] == "+0.50%"
+    assert segments["纳指"]["window"] == "-1.00%"
+    assert segments["纳指"]["post_1h"] == "+0.76%"
 
 
 def test_batch_payload_includes_reference_changes(session):
@@ -114,11 +121,16 @@ def test_batch_payload_includes_reference_changes(session):
     user_content, _metas, _cands = annotation_service._build_auto_annotate_batch_user_payload(
         session, [_request()],
     )
-    refs = _payload_json(user_content)["windows"][0]["reference_changes"]
+    payload = _payload_json(user_content)["windows"][0]
+    refs = payload["reference_changes"]
+    segments = payload["reference_change_segments"]
     assert refs["纳指"] == "-1.00%"
     assert refs["原油"] == "+3.00%"
     assert refs["黄金"] is None
     assert refs["美债10Y"] == "+10.0bp"
+    assert segments["纳指"]["pre_1h"] == "+0.50%"
+    assert segments["纳指"]["window"] == "-1.00%"
+    assert segments["纳指"]["post_1h"] == "+0.76%"
 
 
 def test_reference_changes_exclude_annotated_symbol_itself(session):
@@ -137,7 +149,7 @@ def test_reference_change_schema_carries_unit(session):
     _seed(session)
     from services.annotation_service import _load_reference_rows, _reference_changes_for_window
     from datetime import timedelta as _td
-    ref_rows = _load_reference_rows(session, W_START - _td(minutes=15))
+    ref_rows = _load_reference_rows(session, W_START - _td(minutes=75))
     refs = _reference_changes_for_window(
         ref_rows, W_START, W_END, 10, "BTC/USDT", correlations_by_symbol={"NQ=F": 0.82}
     )
@@ -145,7 +157,9 @@ def test_reference_change_schema_carries_unit(session):
     assert by_label["美债10Y"].unit == "bp"
     assert by_label["美债10Y"].pct == pytest.approx(10.0)
     assert by_label["纳指"].unit == "pct"
+    assert by_label["纳指"].pre_pct == pytest.approx(0.5025, abs=0.01)
     assert by_label["纳指"].pct == pytest.approx(-1.0)
+    assert by_label["纳指"].post_pct == pytest.approx(0.7576, abs=0.01)
     assert by_label["纳指"].correlation == pytest.approx(0.82)
 
 
@@ -155,7 +169,11 @@ def test_prompts_document_reference_changes():
         annotation_service.AUTO_ANNOTATE_BATCH_SYSTEM_PROMPT,
     ):
         assert "reference_changes" in prompt
+        assert "reference_change_segments" in prompt
         assert "核心推理顺序" in prompt
+        assert "同步相关" in prompt
+        assert "不要做 lag" in prompt
+        assert "相关性低" in prompt
         assert "日经" in prompt
         assert "相关资产新闻 + 其它资产验证 + 时间靠近触发段" in prompt
         assert "地缘" in prompt        # 跨资产风险事件解读指引

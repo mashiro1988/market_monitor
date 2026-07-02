@@ -18,7 +18,7 @@
 <body>
 
 <h1>架构地图 - market_monitor</h1>
-<div class="meta">最近一次基于代码扫描确认：2026-07-02（标注 Phase3a v8、宏观对标含相关性、pytest 配置、板块 pending retry）· 此 HTML 是 <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> 的可视化伴侣，事实必须与 Markdown 完全一致</div>
+<div class="meta">最近一次基于代码扫描确认：2026-07-02（标注 Phase3a v9、宏观对标含前/窗/后涨跌和同步相关、pytest 配置、板块 pending retry）· 此 HTML 是 <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> 的可视化伴侣，事实必须与 Markdown 完全一致</div>
 <div class="nav">
   <a href="ARCHITECTURE.md">📄 查看 Markdown 版本</a>
   <a href="DATAFLOW.html">🔁 数据流地图</a>
@@ -33,7 +33,7 @@
 flowchart TD
     Frontend["React / Vite SPA<br/>frontend/<br/>(含板块轮动页)"]
     API["FastAPI 路由<br/>api/app.py · api/routes.py"]
-    Services["服务层<br/>services/<br/>(annotation Phase3a v8<br/>references: 涨跌+相关性 · sector_service)"]
+    Services["服务层<br/>services/<br/>(annotation Phase3a v9<br/>references: 前/窗/后+同步相关 · sector_service)"]
     Models["ORM<br/>models/ (含 sector)"]
     Scanners["扫描器<br/>scanners/ (含 sector_scanner)"]
     Alerts["告警<br/>alerts/"]
