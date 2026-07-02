@@ -128,7 +128,7 @@ ANNOTATION_REFERENCE_ASSETS = [
     ("^N225", "日经225"),
     ("CL=F", "原油"),
     ("GC=F", "黄金"),
-    ("US_10Y", "美债10Y", "bp"),
+    ("US_2Y", "美债2Y", "bp"),
     ("DX-Y.NYB", "美元指数"),
     ("BTC/USDT", "BTC"),
 ]

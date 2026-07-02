@@ -1,7 +1,7 @@
 # 标注体系：Phase3a 新闻归因标签
 
 > 来源：2026-06-10 起的金融新闻数据集方法论讨论；2026-06-23 Phase3a 收敛。
-> 当前事实来源：`schemas/annotations.py:11`、`schemas/annotations.py:37`、`services/annotation_service.py:700`、`services/annotation_service.py:797`、`database.py:112`、`tests/test_annotation_v2.py:2`。
+> 当前事实来源：`schemas/annotations.py:11`、`schemas/annotations.py:37`、`services/annotation_service.py:708`、`services/annotation_service.py:795`、`database.py:112`、`tests/test_annotation_v2.py:2`。
 > 目标：标注页产出可直接导出为训练数据的结构化标签：窗口归因、噪音识别、人机分歧和评估集切分。
 
 ## 1. 当前标签契约
@@ -16,7 +16,7 @@
 | `redundant` | 同簇冗余 | 与 driver 同一事件簇的其它相关报道；相关但非主驱动，训练时排除、不当负样本。 | 是 |
 | `noise` | 噪音 | 默认值：无关、背景、综述、解释、离题、方向相反或已定价。 | 否 |
 
-`post_hoc_explanation` 和 `contradictory` 已退场，并入 `noise`。旧数据迁移会把这两类从 `news_roles` 中移除，见 `database.py:162`。
+`post_hoc_explanation` 和 `contradictory` 已退场，并入 `noise`。旧数据迁移会把这两类从 `news_roles` 中移除，见 `database.py:161`。
 
 ### 历史兼容字段：`market_reaction_type`
 
@@ -36,8 +36,8 @@
 
 | 字段 | 派生规则 | 代码 |
 |---|---|---|
-| `causal_news_ids` / `selected_news_ids` | `news_roles` 里全部 `driver` 的 id。 | `services/annotation_service.py:700` |
-| `no_clear_news` | 没有任何 `driver`；历史兼容请求里 `market_reaction_type == "no_news_driver"` 也会置 true。 | `services/annotation_service.py:700` |
+| `causal_news_ids` / `selected_news_ids` | `news_roles` 里全部 `driver` 的 id。 | `services/annotation_service.py:795` |
+| `no_clear_news` | 没有任何 `driver`；历史兼容请求里 `market_reaction_type == "no_news_driver"` 也会置 true。 | `services/annotation_service.py:795` |
 
 ## 3. 存储与迁移
 
@@ -80,7 +80,7 @@
 
 `GET /api/annotations/export?days=N&split=train|eval|all` 返回 JSONL。每行包含：
 
-- 窗口元数据、`reference_changes`、`reference_change_segments`（前1h / 窗口 / 后1h）和 `correlations`（窗口 ±1h 的 5min 收益率 Pearson）。
+- 窗口元数据、`reference_changes`、`reference_change_segments`（前1h / 窗口 / 后1h，包含标注品种本身作为比较基准）和 `correlations`（窗口 ±1h 的 5min 收益率 Pearson）。
 - 全量候选新闻，未标的候选导出为 `causal_role = "noise"`。
 - 人工 / LLM 直接标的 `driver` / `redundant` 原样进入 candidates。
 - `redundant` 样本训练时排除，不当作负样本。
@@ -90,5 +90,6 @@
 
 - 候选新闻表使用角色下拉：噪音 / 驱动 / 同簇冗余。
 - 保存区使用置信度三档 + summary；未选择置信度时提示用户补选，不再展示或保存 reaction type。
+- 宏观对标显示标注品种本身和对标资产的前1h / 窗口 / 后1h 涨跌；同步相关只对其它对标资产显示。
 - `sessionStorage` key 使用 Phase3a 口径，避免旧草稿残留 retired roles。
 - 窗口净值图只标出 `driver` 竖线；`contradictory` marker 已删除。

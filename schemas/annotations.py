@@ -35,7 +35,7 @@ class AnnotationSymbol(BaseModel):
 
 
 class ReferenceChange(BaseModel):
-    """标注窗口的「宏观同期对标」单项（纳指/原油/黄金/美债10Y/美元指数/BTC…）。"""
+    """标注窗口的「宏观同期对标」单项（纳指/原油/黄金/美债2Y/美元指数/BTC…）。"""
     symbol: str
     label: str
     pre_pct: float | None = None
