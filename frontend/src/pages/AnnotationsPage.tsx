@@ -38,9 +38,12 @@ function fmtRefMove(value: number | null | undefined, unit?: "pct" | "bp"): stri
 }
 
 function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
-  if (ref.is_self) return { text: `${ref.label} 本身`, cls: "ref-neutral" };
-  const corr = fmtCorrelation(ref.correlation);
   const moves = `前 ${fmtRefMove(ref.pre_pct, ref.unit)} / 窗 ${fmtRefMove(ref.pct, ref.unit)} / 后 ${fmtRefMove(ref.post_pct, ref.unit)}`;
+  if (ref.is_self) {
+    const cls = ref.pct == null ? "ref-neutral" : ref.pct >= 0 ? "up-text" : "down-text";
+    return { text: `${ref.label} 本身 ${moves}`, cls };
+  }
+  const corr = fmtCorrelation(ref.correlation);
   if (ref.pct == null) return { text: `${ref.label} ${moves} · ${corr}`, cls: "ref-neutral" };
   return { text: `${ref.label} ${moves} · ${corr}`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
 }

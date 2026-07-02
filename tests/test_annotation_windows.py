@@ -149,11 +149,11 @@ def test_window_carries_references(session):
     wins = _call(session)
     assert len(wins) == 1
     refs = {r.label: r for r in wins[0].references}
-    assert set(refs) == {"纳指", "日经225", "原油", "黄金", "美债10Y", "美元指数", "BTC"}   # 来自 config 清单
+    assert set(refs) == {"纳指", "日经225", "原油", "黄金", "美债2Y", "美元指数", "BTC"}   # 来自 config 清单
     assert refs["纳指"].pct == pytest.approx(0.5, abs=0.01)
     assert refs["原油"].pct == pytest.approx(1.0, abs=0.01)
     assert refs["黄金"].pct is None                          # 无快照 → 无
-    assert refs["美债10Y"].unit == "bp"                      # 收益率类品种 bp 口径
+    assert refs["美债2Y"].unit == "bp"                       # 收益率类品种 bp 口径
     assert all(not r.is_self for r in wins[0].references)
 
 
@@ -161,7 +161,7 @@ def test_references_none_when_market_closed(session):
     now = utc_now_naive()
     _seed(session, now, [(20, 100.0), (15, 101.0)])          # 无任何对标快照
     wins = _call(session)
-    assert [r.label for r in wins[0].references] == ["纳指", "日经225", "原油", "黄金", "美债10Y", "美元指数", "BTC"]
+    assert [r.label for r in wins[0].references] == ["纳指", "日经225", "原油", "黄金", "美债2Y", "美元指数", "BTC"]
     assert all(r.pct is None and not r.is_self for r in wins[0].references)
 
 
@@ -173,7 +173,8 @@ def test_reference_self_for_annotated_symbol(session):
     wins = load_price_windows(session, "NQ=F", hours=24, threshold_pct=0.5, window_minutes=5)
     assert len(wins) == 1
     refs = {r.label: r for r in wins[0].references}
-    assert refs["纳指"].is_self is True and refs["纳指"].pct is None    # 本身不对标
+    assert refs["纳指"].is_self is True and refs["纳指"].pct == pytest.approx(1.0, abs=0.01)
+    assert refs["纳指"].correlation is None                            # 本身不算同步相关
     assert refs["原油"].is_self is False and refs["原油"].pct is None   # 无数据
 
 
