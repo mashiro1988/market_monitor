@@ -1,6 +1,6 @@
 # 数据流地图 - market_monitor
 
-> 运行时数据形状：磁盘上有什么、模块间运行时传什么、API 契约是什么。最近一次基于代码扫描确认：2026-07-02（标注 Phase3a 三角色、reaction type 仅历史兼容、prompt v8 相关性优先推理、宏观对标带相关性、pytest 根目录收集配置、板块 pending retry、代理 import-time 探测）。
+> 运行时数据形状：磁盘上有什么、模块间运行时传什么、API 契约是什么。最近一次基于代码扫描确认：2026-07-02（标注 Phase3a 三角色、reaction type 仅历史兼容、prompt v9 三段方向链优先、宏观对标带前/窗/后涨跌和同步相关、pytest 根目录收集配置、板块 pending retry、代理 import-time 探测）。
 >
 > **维护契约：** 当运行时数据形状、持久化规则、生产者 / 消费者关系或外部集成发生改变时，必须在同一次 commit 内更新本文件。
 
@@ -77,7 +77,7 @@
 | `market_reaction_type` | str \| null | 历史兼容字段（三分类 macro_policy / event_driven / no_news_driver）；前端新保存不再传，prompt 不再要求输出。 |
 | `confidence` | float \| null | **v2**：0-1；新 Phase3a 保存请求（`news_roles` 非空/空字典都算）必填；null 仅表示 v1/legacy 迁移样本（导出时 `schema_version:1` 低保真标记）。 |
 | `auto_news_roles` | str (JSON) \| null | AI 原始标注快照（人改前），与 `news_roles` 的差异 = 人机分歧难例。 |
-| `prompt_version` | str \| null | 产生 auto_* 的提示词版本（当前 `annotation_service.ANNOTATION_PROMPT_VERSION = "v8-20260702"`，见 `services/annotation_service.py:387`）。 |
+| `prompt_version` | str \| null | 产生 auto_* 的提示词版本（当前 `annotation_service.ANNOTATION_PROMPT_VERSION = "v9-20260702"`，见 `services/annotation_service.py:451`）。 |
 | `eval_set` | bool | 评估集冻结标记；训练导出（split=train）默认排除。 |
 | `notes`, `labeler` | str | |
 | `created_at`, `updated_at` | datetime | |
@@ -85,11 +85,11 @@
 `(symbol, window_start, window_end)` 唯一。upsert 复用已存在的行。迁移在 `database.migrate_legacy_annotations`（启动时幂等执行三步：v1 二元行 selected 全部→driver、no_clear→no_news_driver；v2.0 旧枚举行按映射表升级到 v2.1；Phase3a 把存量 `post_hoc_explanation` / `contradictory` 从 `news_roles` 移除为 noise）。
 窗口生成为**多尺度**（`config.ANNOTATION_WINDOW_SCALES`：15m+60m 档、各带净变动门槛、跨档重叠同向合并，`annotation_service.load_price_windows`）；价格快照缺口由 `services/gap_repair.py` 每小时 :37 自愈（扫描→批量回补→复扫→按回补结果分类→企业微信账目）。
 
-**写入方：** `annotation_service.upsert_annotation`（落库前 `_normalize_v2_labels` 归一化，非法枚举 400；兼容字段由 `_derive_compat_fields` `services/annotation_service.py:637` 派生）。
+**写入方：** `annotation_service.upsert_annotation`（落库前 `_normalize_v2_labels` 归一化，非法枚举 400；兼容字段由 `_derive_compat_fields` `services/annotation_service.py:787` 派生）。
 **读取方：** `annotation_service.load_price_windows`、`export_training_jsonl`（JSONL 训练集导出，`GET /api/annotations/export`，候选全量展开；未标=noise，redundant 不当负样本）。
 
-> 注：`load_price_windows` / `list_annotations` 的响应（`PriceWindowSchema` / `AnnotationListItem`）自 2026-06-08 起带一个**计算字段** `references`——「宏观同期对标」列表（`config.ANNOTATION_REFERENCE_ASSETS`，2026-07-02 起 7 项：纳指 NQ=F / 日经225 ^N225 / 原油 CL=F / 黄金 GC=F / 美债10Y US_10Y / 美元指数 DX-Y.NYB / BTC BTC/USDT），每项按窗口端点最近快照算同期变动（容差 10min）：常规品种 `(end−start)/start` 涨跌%，收益率类（config 三元组标 `"bp"`）按基点 `(end−start)×100`，并带 `ReferenceChange.correlation`（`services/annotation_service.py:118`，窗口 ±1h 的 5min 收益率 Pearson；样本不足则 null）。无数据 `pct=null`、标注品种本身 `is_self=true`。**不落库**，按请求实时算；前端 `fmtRef` 同时渲染涨跌与相关性（`frontend/src/pages/AnnotationsPage.tsx:34`）；增减对标资产改 config 一行。
-> 自 2026-06-10 起，自动标注（单窗口 + 批量）喂给 reasoner 的 payload 带 `reference_changes`（`{标签: "+x.xx%" / "+x.xbp"}`，标注品种自身不列、无数据 null，`annotation_service._reference_changes_for_annotation`）；自 2026-07-02 起同一 payload 和训练导出 `window` 还带 `correlations`（`annotation_service._window_signals_payload`，`services/annotation_service.py:169`），prompt v8 明确先按相关性判断 BTC/标的在跟谁走，再找相关资产新闻，并用其它对标资产交叉验证。
+> 注：`load_price_windows` / `list_annotations` 的响应（`PriceWindowSchema` / `AnnotationListItem`）自 2026-06-08 起带一个**计算字段** `references`——「宏观同期对标」列表（`config.ANNOTATION_REFERENCE_ASSETS`，2026-07-02 起 7 项：纳指 NQ=F / 日经225 ^N225 / 原油 CL=F / 黄金 GC=F / 美债10Y US_10Y / 美元指数 DX-Y.NYB / BTC BTC/USDT），每项按窗口端点最近快照算同期变动（容差 10min）：常规品种 `(end−start)/start` 涨跌%，收益率类（config 三元组标 `"bp"`）按基点 `(end−start)×100`；`ReferenceChange.pre_pct` / `pct` / `post_pct` 在 `services/annotation_service.py:98` 分别算窗口前1h / 窗口内 / 窗口后1h，另带 `ReferenceChange.correlation`（`services/annotation_service.py:132`，窗口 ±1h 的 5min 收益率 Pearson；样本不足则 null）。无数据 `pct=null`、标注品种本身 `is_self=true`。**不落库**，按请求实时算；前端 `fmtRef` 同时渲染前/窗/后涨跌与同步相关（`frontend/src/pages/AnnotationsPage.tsx:40`）；增减对标资产改 config 一行。
+> 自 2026-06-10 起，自动标注（单窗口 + 批量）喂给 reasoner 的 payload 带 `reference_changes`（`{标签: "+x.xx%" / "+x.xbp"}`，标注品种自身不列、无数据 null，`annotation_service._reference_changes_for_annotation`）；自 2026-07-02 起同一 payload 和训练导出 `window` 还带 `reference_change_segments`（前1h / 窗口 / 后1h）与 `correlations`（`annotation_service._window_signals_payload`，`services/annotation_service.py:218`），prompt v9 明确相关性只是同步参考，优先用固定三段方向链判断 BTC/标的是否跟随某类资产，再用新闻含义和其它对标资产交叉验证。
 
 ### `prediction_markets`（`models/prediction.py`）
 

@@ -1,6 +1,6 @@
 # 架构地图 - market_monitor
 
-> 本地单用户宏观市场监控台。Python 扫描器 + 告警写 SQLite；FastAPI 在 `http://localhost:8000` 上服务 React/Vite SPA。最近一次基于代码扫描确认：2026-07-02（**标注 Phase3a**：`causal_role = driver / redundant / noise`，`post_hoc_explanation` / `contradictory` 退场并入 noise；`market_reaction_type` 仅历史兼容；自动标注 prompt `v8-20260702`；宏观对标 `references` 带同期涨跌 + 相关性；前端只画 driver marker；pytest 根目录收集固定到 `tests/`；板块扫描 pending retry 已实现；独立 `schedule` CLI 已移除；代理仍为 `config.py:32` import-time 探测）。
+> 本地单用户宏观市场监控台。Python 扫描器 + 告警写 SQLite；FastAPI 在 `http://localhost:8000` 上服务 React/Vite SPA。最近一次基于代码扫描确认：2026-07-02（**标注 Phase3a**：`causal_role = driver / redundant / noise`，`post_hoc_explanation` / `contradictory` 退场并入 noise；`market_reaction_type` 仅历史兼容；自动标注 prompt `v9-20260702`；宏观对标 `references` 带前/窗/后涨跌 + 同步相关；前端只画 driver marker；pytest 根目录收集固定到 `tests/`；板块扫描 pending retry 已实现；独立 `schedule` CLI 已移除；代理仍为 `config.py:32` import-time 探测）。
 >
 > **维护契约：** 结构性变更（新增模块、移动函数、改变数据形状、改变依赖边、改入口点）必须在**同一次 commit** 内更新本文件。基于全新代码扫描更新，不要凭记忆。
 

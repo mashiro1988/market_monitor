@@ -1,7 +1,7 @@
 # 标注体系：Phase3a 新闻归因标签
 
 > 来源：2026-06-10 起的金融新闻数据集方法论讨论；2026-06-23 Phase3a 收敛。
-> 当前事实来源：`schemas/annotations.py:11`、`schemas/annotations.py:37`、`services/annotation_service.py:720`、`services/annotation_service.py:730`、`database.py:112`、`tests/test_annotation_v2.py:2`。
+> 当前事实来源：`schemas/annotations.py:11`、`schemas/annotations.py:37`、`services/annotation_service.py:700`、`services/annotation_service.py:797`、`database.py:112`、`tests/test_annotation_v2.py:2`。
 > 目标：标注页产出可直接导出为训练数据的结构化标签：窗口归因、噪音识别、人机分歧和评估集切分。
 
 ## 1. 当前标签契约
@@ -36,8 +36,8 @@
 
 | 字段 | 派生规则 | 代码 |
 |---|---|---|
-| `causal_news_ids` / `selected_news_ids` | `news_roles` 里全部 `driver` 的 id。 | `services/annotation_service.py:720` |
-| `no_clear_news` | 没有任何 `driver`；历史兼容请求里 `market_reaction_type == "no_news_driver"` 也会置 true。 | `services/annotation_service.py:720` |
+| `causal_news_ids` / `selected_news_ids` | `news_roles` 里全部 `driver` 的 id。 | `services/annotation_service.py:700` |
+| `no_clear_news` | 没有任何 `driver`；历史兼容请求里 `market_reaction_type == "no_news_driver"` 也会置 true。 | `services/annotation_service.py:700` |
 
 ## 3. 存储与迁移
 
@@ -74,13 +74,13 @@
 - 未列出的候选新闻默认是 `noise`。
 - `driver` / `redundant` 可由人工或 LLM 逐条直接标。
 - `redundant` 不再由导出阶段按 topic / 量级自动派生；这是 2026-06-23 明确反转的方案。
-- `post_hoc` / `contradictory` 不得出现在 prompt 输出中；测试见 `tests/test_annotation_v2.py:312`。
+- `post_hoc` / `contradictory` 不得出现在 prompt 输出中；测试见 `tests/test_annotation_v2.py:353`。
 
 ## 5. 导出
 
 `GET /api/annotations/export?days=N&split=train|eval|all` 返回 JSONL。每行包含：
 
-- 窗口元数据、`reference_changes` 和 `correlations`（窗口 ±1h 的 5min 收益率 Pearson）。
+- 窗口元数据、`reference_changes`、`reference_change_segments`（前1h / 窗口 / 后1h）和 `correlations`（窗口 ±1h 的 5min 收益率 Pearson）。
 - 全量候选新闻，未标的候选导出为 `causal_role = "noise"`。
 - 人工 / LLM 直接标的 `driver` / `redundant` 原样进入 candidates。
 - `redundant` 样本训练时排除，不当作负样本。

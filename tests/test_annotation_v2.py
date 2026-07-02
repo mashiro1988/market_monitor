@@ -231,6 +231,7 @@ def test_export_jsonl_with_auto_labels(session):
     row = json.loads(lines[0])
     assert row["schema_version"] == 2
     assert "correlations" in row["window"]
+    assert "reference_change_segments" in row["window"]
     assert row["labels"]["market_reaction_type"] == "event_driven"
     roles = {c["id"]: c["causal_role"] for c in row["candidates"]}
     assert roles[n1] == "driver"
@@ -356,5 +357,5 @@ def test_prompts_drop_retired_roles():
         assert "market_reaction_type" not in p          # Part A：市场反应类型退场
         assert "redundant" in p                          # redundant 可标角色
         assert "confidence" in p                         # confidence 保留（训模型用）
-        assert "correlations" in p and "trigger_move_start_bj" in p and "pre_window_move_pct" in p  # Part B 派生信号
+        assert "correlations" in p and "reference_change_segments" in p and "trigger_move_start_bj" in p and "pre_window_move_pct" in p  # Part B 派生信号
     assert annotation_service.ANNOTATION_PROMPT_VERSION != "v4-20260612"
