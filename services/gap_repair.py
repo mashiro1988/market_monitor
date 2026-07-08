@@ -8,10 +8,11 @@
 分类按**回补结果**而非交易日历（天然适配 CME 日休 / 周末 / 亚洲时段）：
 - 回补后缺口消失 → 补回；
 - 源端本来就没有该时段 K 线 → 休市段，静默忽略；
-- 拉取异常 / 源端有但没拿到 → 真实仍缺（可能限频），下轮重试并推送。
+- 拉取异常 → 本轮未确认，下轮重试但不推“仍缺”；
+- 源端有数据但没补进库 → 真实仍缺，下轮重试并推送。
 
-推送语义（用户要求）：只要本轮有缺口活动（发现 / 补回 / 仍缺）就推完整账目；
-完全无缺口的轮次静默。CNBC 债券与 CoinGecko 无历史接口，不在自愈范围。
+推送语义（用户要求）：本轮实际补回或确认仍缺才推完整账目；
+完全无缺口、纯休市缺口、纯拉取失败的轮次静默。CNBC 债券无历史接口，不在自愈范围。
 """
 from __future__ import annotations
 
@@ -102,14 +103,19 @@ def run_gap_repair(session=None, hours: int | None = None, now: datetime | None 
                     f"回补 {span_start} ~ {span_end} UTC")
 
         fetched_records: list = []
+        fetch_failed = True
         try:
             if scanner is None:
                 from scanners.price_scanner import PriceScanner
                 scanner = PriceScanner()
             fetched_records = scanner.backfill_range(span_start, span_end)
+            fetch_failed = False
         except Exception as exc:  # 限频/网络等：本轮失败，下轮重试
             summary["fetch_error"] = str(exc)[:200]
             logger.error(f"[GapRepair] 回补拉取失败: {exc}")
+
+        if fetch_failed and summary["fetch_error"] is None:
+            summary["fetch_error"] = "fetch failed"
 
         session.expire_all()
         after = find_gaps(session, list(symbols), hours, now=now)
@@ -118,6 +124,11 @@ def run_gap_repair(session=None, hours: int | None = None, now: datetime | None 
         )
 
         # 复扫仍在的缺口：按源端是否有数据分类（有→真实仍缺；无→休市段，静默）
+        if summary["fetch_error"] is not None:
+            logger.warning("[GapRepair] fetch failed; remaining gaps are unconfirmed and will be retried")
+            _push_report(summary, channel)
+            return summary
+
         fetched_ts: dict[str, set] = {}
         for rec in fetched_records:
             if rec.timestamp is not None:

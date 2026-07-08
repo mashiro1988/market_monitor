@@ -122,6 +122,31 @@ def test_merge_gap_is_configurable(session, monkeypatch):
     assert len(_call(session)) == 2
 
 
+def test_merged_window_must_still_meet_net_threshold(session, monkeypatch):
+    """同向触发之间若慢回撤稀释了首尾净幅度，不合成一个不够阈值的大窗口。"""
+    monkeypatch.setattr(config, "ANNOTATION_EVENT_MERGE_GAP_MINUTES", 60)
+    now = utc_now_naive()
+    _seed(
+        session,
+        now,
+        [
+            (40, 100.0),
+            (35, 101.0),  # +1.0% 触发
+            (30, 100.7),
+            (25, 100.4),
+            (20, 100.1),
+            (15, 99.8),
+            (10, 100.4),  # 从 99.8 小涨触发；但 100.0 -> 100.4 只有 +0.4%
+        ],
+    )
+
+    wins = _call(session)
+
+    assert len(wins) == 2
+    assert all(abs(w.change_pct) >= 0.5 for w in wins)
+    assert all(w.actual_window_minutes == 5 for w in wins)
+
+
 def _add_nq(session, now, minutes_ago, price):
     session.add(PriceSnapshot(
         timestamp=now - timedelta(minutes=minutes_ago),

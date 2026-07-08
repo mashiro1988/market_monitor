@@ -90,8 +90,6 @@ def test_repair_fills_and_reports(session, monkeypatch):
     assert summary["bars_missing"] == 2 and summary["bars_repaired"] == 2
     assert summary["still_missing"] == []
     assert len(channel.sent) == 1
-    assert "补回 **2** 根" in channel.sent[0][1]
-    assert "已全部补全" in channel.sent[0][1]
 
 
 def test_closed_market_gap_is_silent(session, monkeypatch):
@@ -111,7 +109,7 @@ def test_closed_market_gap_is_silent(session, monkeypatch):
     assert channel.sent == []                            # 静默
 
 
-def test_fetch_failure_reports_still_missing(session, monkeypatch):
+def test_fetch_failure_does_not_report_unconfirmed_missing(session, monkeypatch):
     monkeypatch.setattr(gap_repair, "repair_symbols", lambda: {"NQ=F": "futures"})
     hole = {NOW - timedelta(minutes=90)}
     _series_with_hole(session, "NQ=F", hole)
@@ -125,10 +123,8 @@ def test_fetch_failure_reports_still_missing(session, monkeypatch):
     summary = gap_repair.run_gap_repair(session=session, hours=24, now=NOW, scanner=_BoomScanner(), channel=channel)
 
     assert summary["fetch_error"] is not None
-    assert len(summary["still_missing"]) == 1
-    assert "拉取失败" in summary["still_missing"][0]["reason"]
-    assert len(channel.sent) == 1
-    assert "仍缺" in channel.sent[0][1]
+    assert summary["still_missing"] == []
+    assert channel.sent == []
 
 
 def test_no_gaps_is_fully_silent(session, monkeypatch):

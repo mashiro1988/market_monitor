@@ -45,6 +45,17 @@ def test_scorer_clamps_scores_to_1_10():
     assert result == [1, 10, 5]
 
 
+def test_scorer_keeps_partial_scores_when_one_item_is_invalid():
+    """One malformed item in an otherwise valid batch should not discard the batch."""
+    scorer = NewsScorer(api_key="fake-key")
+    payload = '{"items":[{"idx":0,"importance":8},{"idx":1,"importance":"bad"},{"idx":2,"importance":6}]}'
+
+    with patch.object(scorer, "_call_api", return_value=payload):
+        result = scorer.score_batch([_make_record("a"), _make_record("b"), _make_record("c")])
+
+    assert result == [8, None, 6]
+
+
 def test_scorer_returns_none_on_api_error():
     """API error → all None, no exception raised."""
     scorer = NewsScorer(api_key="fake-key")

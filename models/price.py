@@ -19,7 +19,7 @@ class PriceSnapshot(Base):
     prev_price = Column(Float, nullable=True)
     change_pct = Column(Float, nullable=True)
     volume = Column(Float, nullable=True)
-    source = Column(String(30), nullable=False)         # yfinance, okx_swap_5m, okx_spot_5m, coingecko_realtime, eastmoney_bond_quote, fred
+    source = Column(String(30), nullable=False)         # yfinance, okx_swap_5m, okx_spot_5m, eastmoney_bond_quote, fred
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

@@ -19,7 +19,7 @@ class PriceRecord:
     volume: Optional[float] = None
     source: str = ""
     # 价格对应时间（UTC naive）。5m K 线源使用最近已收盘 bar 的结束时刻；
-    # CoinGecko 实时价使用采集时点；FRED 等源端若无法提供则为 None，入库时回退到 scan_time。
+    # 源端若无法提供精确时间则为 None，入库时回退到 scan_time。
     timestamp: Optional[datetime] = None
 
 
@@ -49,8 +49,51 @@ class PredictionRecord:
     outcome: str            # "Yes", "No"
     probability: float      # 0.0 - 1.0
     volume: Optional[float] = None
-    # 来源跟踪项："slug:<identifier>" / "tag:<identifier>"，由 source 在 fetch 时打标
+    # 来源跟踪项："slug:<identifier>"，由 source 在 fetch 时打标
     origin: Optional[str] = None
+
+
+@dataclass
+class SourceFetchStatus:
+    """One source fetch attempt result for scanner diagnostics."""
+    source: str
+    ok: bool
+    record_count: int = 0
+    empty: bool = False
+    stage: str = "scan"
+    error: Optional[str] = None
+
+
+class SourceHealthMixin:
+    """Collect per-source fetch diagnostics for the last scanner operation."""
+
+    source_statuses: list[SourceFetchStatus]
+
+    def _reset_source_statuses(self) -> None:
+        self.source_statuses = []
+
+    def _record_source_status(self, source_name: str, records: list, *, stage: str) -> None:
+        if not hasattr(self, "source_statuses"):
+            self._reset_source_statuses()
+        self.source_statuses.append(SourceFetchStatus(
+            source=source_name,
+            ok=True,
+            record_count=len(records),
+            empty=len(records) == 0,
+            stage=stage,
+        ))
+
+    def _record_source_error(self, source_name: str, exc: Exception, *, stage: str) -> None:
+        if not hasattr(self, "source_statuses"):
+            self._reset_source_statuses()
+        self.source_statuses.append(SourceFetchStatus(
+            source=source_name,
+            ok=False,
+            record_count=0,
+            empty=False,
+            stage=stage,
+            error=f"{type(exc).__name__}: {exc}",
+        ))
 
 
 class BaseSource(ABC):

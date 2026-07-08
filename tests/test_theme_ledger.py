@@ -114,6 +114,16 @@ def test_nq_ledger_filters_closed_period_news(session):
     assert nq[0]["net_pct"] == pytest.approx(-1.5, abs=0.05)
 
 
+def test_nq_forward_reaction_skips_window_crossing_daily_halt(session):
+    """16:55 ET 的新闻虽然发布时开市，但 30min 反应窗跨进 CME 日休，应跳过。"""
+    news_time = datetime(2026, 6, 15, 20, 55)  # Mon 16:55 ET
+    _price(session, "NQ=F", news_time, 20000.0)
+    _price(session, "NQ=F", news_time + timedelta(minutes=30), 19800.0)
+    session.commit()
+
+    assert theme_ledger.forward_reaction(session, "NQ=F", news_time, minutes=30) is None
+
+
 def test_crypto_ledger_ignores_traditional_open_flag(session):
     """BTC 24h：即便某条 traditional_open=False（周末发的）也照样进台账。"""
     base = datetime(2026, 6, 1, 12, 0)

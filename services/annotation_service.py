@@ -164,6 +164,23 @@ def _window_signals_payload(session: Session, symbol: str,
         "pre_window_move_pct": round(pre, 2) if pre is not None else None,
     }
 
+
+def _parse_reference_changes(raw: str | None) -> dict[str, str | None] | None:
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    parsed: dict[str, str | None] = {}
+    for key, val in value.items():
+        if not isinstance(key, str):
+            continue
+        parsed[key] = val if isinstance(val, str) or val is None else str(val)
+    return parsed
+
 # 每个标注窗口前后取的候选新闻范围：默认向前 30 分钟（2026-06-11 从 15 放宽：
 # 慢反应场景消息常早于触发点），向后 30 分钟。60m 档窗口由 ANNOTATION_WINDOW_SCALES
 # 的 pre_minutes 指定前 60；请求里带 context_pre_minutes 即覆盖默认。
@@ -417,7 +434,7 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
           变方向 或 区间断档（> merge_gap）→ 上一个窗口走完，另起一个。
     **必须用 start_dt（不是 end_dt）**：每个触发覆盖 [current−wm, current]，窗口 start 也回看 wm；用 end_dt 比
     会无视这段覆盖、把一根没触发的连续行情误拆成两个**重叠**窗口（线上实测 BTC 20:50→21:15 与 21:10→21:25）。
-    无 net_min——threshold 本身就是该窗口必须达到的净幅度。"""
+    合并后的首尾净幅度仍必须满足 threshold；若合并把净幅度稀释到阈值以下，则退回为原始触发段。"""
     wm = int(scale["window_minutes"])
     threshold = float(scale["threshold_pct"])
 
@@ -450,17 +467,32 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
         else:
             events.append([t])
 
-    out: list[dict] = []
-    for ev in events:
+    def _event_payload(ev: list[dict]) -> dict | None:
         first, last = ev[0], ev[-1]
         if not first["price_start"]:
-            continue
-        out.append({
+            return None
+        net_pct = ((last["price_end"] - first["price_start"]) / abs(first["price_start"])) * 100
+        if abs(net_pct) < threshold:
+            return None
+        if (net_pct >= 0) != (first["sign"] >= 0):
+            return None
+        return {
             "start": first["start_dt"], "end": last["end_dt"],
             "sign": first["sign"], "segments": len(ev),
             "asset_class": first["asset_class"], "name": first["name"],
             "wm": wm, "pre": int(scale.get("pre_minutes", CONTEXT_PRE_MINUTES_DEFAULT)),
-        })
+        }
+
+    out: list[dict] = []
+    for ev in events:
+        payload = _event_payload(ev)
+        if payload is not None:
+            out.append(payload)
+        elif len(ev) > 1:
+            for single in ev:
+                single_payload = _event_payload([single])
+                if single_payload is not None:
+                    out.append(single_payload)
     return out
 
 
@@ -569,7 +601,7 @@ def load_context_news_for_window(
     start = parse_datetime(window_start_utc)
     end = parse_datetime(window_end_utc)
     if start is None or end is None:
-        return ContextNewsResponse(items=[])
+        raise ValueError("window_start_utc/window_end_utc is missing or invalid")
     return load_context_news(
         session,
         start - timedelta(minutes=pre_minutes),
@@ -623,6 +655,10 @@ def upsert_annotation(session: Session, request: AnnotationCreateRequest) -> Ann
     existing.price_start = start_snapshot.price
     existing.price_end = end_snapshot.price
     existing.change_pct = ((end_snapshot.price - start_snapshot.price) / abs(start_snapshot.price)) * 100 if start_snapshot.price else None
+    existing.reference_changes = json.dumps(
+        _reference_changes_for_annotation(session, window_start, window_end, request.symbol),
+        ensure_ascii=False,
+    )
     # v2 标签归一化落库；causal_news_ids / no_clear_news 自 v2 起为派生兼容字段
     roles, reaction, confidence, selected_ids, no_clear = _normalize_v2_labels(request)
     existing.news_roles = json.dumps({str(k): v for k, v in roles.items()}, ensure_ascii=False)
@@ -704,6 +740,15 @@ def _normalize_v2_labels(
 
     if reaction is not None and reaction not in MARKET_REACTION_TYPES:
         raise ValueError(f"非法 market_reaction_type: {reaction!r}")
+
+    has_driver = any(role == "driver" for role in roles.values())
+    has_redundant = any(role == "redundant" for role in roles.values())
+    if has_redundant and not has_driver:
+        raise ValueError("redundant requires at least one driver news item")
+    if reaction in {"macro_policy", "event_driven"} and not has_driver:
+        raise ValueError(f"{reaction} requires at least one driver news item")
+    if reaction == "no_news_driver" and has_driver:
+        raise ValueError("no_news_driver cannot be saved with driver news items")
 
     confidence = request.confidence
     if confidence is not None:
@@ -1344,6 +1389,13 @@ def export_training_jsonl(session: Session, days: int = 365, split: str = "train
         raise ValueError(f"非法 split: {split!r}（train/eval/all）")
     rows = query.order_by(NewsPriceAnnotation.window_end.asc()).all()
     lines: list[str] = []
+    tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
+    starts = [row.window_start for row in rows if row.window_start]
+    ref_rows = (
+        _load_reference_rows(session, min(starts) - timedelta(minutes=tolerance_minutes + 5))
+        if starts
+        else {}
+    )
     for row in rows:
         roles = _parse_news_roles(row.news_roles)
         cand_ids = _parse_news_ids(row.candidate_news_ids)
@@ -1366,6 +1418,11 @@ def export_training_jsonl(session: Session, days: int = 365, split: str = "train
                 "causal_role": roles.get(nid, "noise"),    # 人/LLM 直接标的角色（driver/redundant/noise）
             })
         selected_ids = _parse_news_ids(row.causal_news_ids)
+        reference_changes = _parse_reference_changes(row.reference_changes)
+        if reference_changes is None and row.window_start and row.window_end:
+            reference_changes = _reference_changes_for_annotation(
+                session, row.window_start, row.window_end, row.symbol, ref_rows=ref_rows
+            )
         record = {
             "schema_version": 2 if row.confidence is not None else 1,
             "window": {
@@ -1377,9 +1434,7 @@ def export_training_jsonl(session: Session, days: int = 365, split: str = "train
                 "price_end": row.price_end,
                 "change_pct": row.change_pct,
                 "threshold_pct": row.threshold_pct,
-                "reference_changes": _reference_changes_for_annotation(
-                    session, row.window_start, row.window_end, row.symbol
-                ) if row.window_start and row.window_end else {},
+                "reference_changes": reference_changes or {},
             },
             "candidates": candidates,
             "labels": {

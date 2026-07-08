@@ -40,6 +40,12 @@ def parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
     text = value.strip()
+    if not text:
+        return None
     if text.endswith("Z"):
         text = f"{text[:-1]}+00:00"
-    return ensure_utc_naive(datetime.fromisoformat(text))
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return ensure_utc_naive(parsed)

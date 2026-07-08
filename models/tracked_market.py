@@ -1,4 +1,4 @@
-"""跟踪的预测市场列表（slug 或 tag），由 UI 维护."""
+"""跟踪的预测市场列表（精确 market/event slug），由 UI 维护."""
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, UniqueConstraint
 from database import Base

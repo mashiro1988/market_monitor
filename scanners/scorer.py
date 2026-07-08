@@ -137,8 +137,13 @@ class NewsScorer:
                 if score is None:
                     by_idx[idx] = {"importance": None, "reason": item.get("reason")}
                     continue
+                try:
+                    importance = max(1, min(10, int(score)))
+                except (TypeError, ValueError):
+                    by_idx[idx] = {"importance": None, "reason": item.get("reason")}
+                    continue
                 by_idx[idx] = {
-                    "importance": max(1, min(10, int(score))),
+                    "importance": importance,
                     "reason": (item.get("reason") or "")[:120] or None,
                 }
 

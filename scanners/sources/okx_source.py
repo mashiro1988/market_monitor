@@ -7,6 +7,7 @@ OKX 数据源 - 通过 ccxt raw API 获取加密货币价格
 """
 from datetime import datetime, timezone
 from typing import NamedTuple
+import time
 
 import ccxt
 from loguru import logger
@@ -29,7 +30,7 @@ class OkxPriceSource(BaseSource):
 
     def __init__(self):
         self.symbols = config.PRICE_SOURCES.get("crypto", {})
-        self.proxy = config.PROXY
+        self.proxy = config.proxy_url()
 
     def _make_exchange(self):
         exchange = ccxt.okx({
@@ -72,8 +73,25 @@ class OkxPriceSource(BaseSource):
         }
         if after_ms is not None:
             params["after"] = str(after_ms)
-        response = exchange.publicGetMarketCandles(params)
-        return response.get("data", []) if isinstance(response, dict) else []
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = exchange.publicGetMarketCandles(params)
+                return response.get("data", []) if isinstance(response, dict) else []
+            except (
+                ccxt.RequestTimeout,
+                ccxt.NetworkError,
+                ccxt.ExchangeNotAvailable,
+                ccxt.DDoSProtection,
+            ) as exc:
+                last_error = exc
+                if attempt == 0:
+                    time.sleep(1)
+                    continue
+                raise
+        if last_error:
+            raise last_error
+        return []
 
     def _closed_candle_points(self, candles: list) -> list[tuple[int, datetime, float, float | None]]:
         """
@@ -131,7 +149,7 @@ class OkxPriceSource(BaseSource):
                     logger.info(f"[OKX] {display_symbol} 无合约 {inst_id}，尝试现货")
                     continue
                 logger.error(f"[OKX] 采集合约 {display_symbol}({inst_id}) 失败: {type(e).__name__}: {e}")
-                return None
+                continue
 
         for inst_id in self._candidate_inst_ids(display_symbol, configured_symbol, "spot"):
             try:
@@ -215,7 +233,7 @@ class OkxPriceSource(BaseSource):
                     logger.info(f"[OKX] {display_symbol} 无合约 {inst_id}，尝试现货历史")
                     continue
                 logger.error(f"[OKX] 采集合约历史 {display_symbol}({inst_id}) 失败: {type(e).__name__}: {e}")
-                return []
+                continue
 
         for inst_id in self._candidate_inst_ids(display_symbol, configured_symbol, "spot"):
             try:

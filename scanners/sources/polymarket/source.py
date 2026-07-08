@@ -7,7 +7,6 @@ from database import get_session
 from models.tracked_market import TrackedMarket
 from scanners.base import BaseSource, PredictionRecord
 from scanners.sources.polymarket.client import PolymarketGammaClient
-from scanners.sources.polymarket.filters import PolymarketMarketFilter
 from scanners.sources.polymarket.parser import parse_market
 
 
@@ -19,46 +18,50 @@ class PolymarketSource(BaseSource):
     def __init__(
         self,
         client: PolymarketGammaClient | None = None,
-        market_filter: PolymarketMarketFilter | None = None,
     ):
         self.gamma_url = config.POLYMARKET.get("gamma_url", "https://gamma-api.polymarket.com")
         # None 表示 "未指定，运行时查 DB"；测试可以直接赋值 list 来覆盖
-        self.tracked_tags: list[str] | None = None
         self.tracked_slugs: list[str] | None = None
-        self.discovery_limit = int(config.POLYMARKET.get("discovery_limit", 5))
-        self.proxy = config.PROXY
-        self.client = client or PolymarketGammaClient(self.gamma_url, self.proxy)
-        self.market_filter = market_filter or PolymarketMarketFilter(
-            min_volume=float(config.POLYMARKET.get("min_volume", 100_000)),
-        )
+        self.client = client or PolymarketGammaClient(self.gamma_url, config.proxies())
 
-    def _load_tracked_from_db(self) -> tuple[list[str], list[str]]:
+    def _load_tracked_from_db(self) -> list[str]:
         session = get_session()
         try:
             rows = session.query(TrackedMarket).filter(
                 TrackedMarket.enabled.is_(True),
                 TrackedMarket.dismissed.is_(False),
+                TrackedMarket.kind == "slug",
             ).all()
             slugs = [r.identifier for r in rows if r.kind == "slug"]
-            tags = [r.identifier for r in rows if r.kind == "tag"]
-            return slugs, tags
+            return slugs
         finally:
             session.close()
 
-    def _resolve_tracked(self) -> tuple[list[str], list[str]]:
-        if self.tracked_slugs is None and self.tracked_tags is None:
+    def _resolve_tracked(self) -> list[str]:
+        if self.tracked_slugs is None:
             return self._load_tracked_from_db()
-        return self.tracked_slugs or [], self.tracked_tags or []
+        return self.tracked_slugs or []
 
-    def _is_noise_market(self, market: dict) -> bool:
-        return self.market_filter.is_noise_market(market)
+    @staticmethod
+    def _boolish(value) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes"}:
+                return True
+            if normalized in {"false", "0", "no"}:
+                return False
+        return None
 
-    def _search_markets(self, tag: str, limit: int = 10) -> list[dict]:
-        try:
-            return self.client.search_markets(tag, limit=limit)
-        except Exception as e:
-            logger.debug(f"Polymarket 搜索 tag={tag} 失败: {e}")
-        return []
+    @classmethod
+    def _is_closed_or_inactive_market(cls, market: dict) -> bool:
+        for field in ("closed", "archived"):
+            if cls._boolish(market.get(field)) is True:
+                return True
+        if cls._boolish(market.get("active")) is False:
+            return True
+        return False
 
     def _get_markets_by_slug(self, slug: str) -> list[dict]:
         try:
@@ -74,6 +77,8 @@ class PolymarketSource(BaseSource):
         market: dict,
         origin: str | None = None,
     ):
+        if self._is_closed_or_inactive_market(market):
+            return
         for r in self._parse_market(market):
             key = f"{r.market_id}:{r.outcome}"
             if key in seen_ids:
@@ -84,7 +89,7 @@ class PolymarketSource(BaseSource):
 
     def fetch(self) -> list[PredictionRecord]:
         """获取所有跟踪的预测市场最新赔率."""
-        slugs, tags = self._resolve_tracked()
+        slugs = self._resolve_tracked()
 
         records: list[PredictionRecord] = []
         seen_ids: set[str] = set()
@@ -92,12 +97,6 @@ class PolymarketSource(BaseSource):
         for slug in slugs:
             for market in self._get_markets_by_slug(slug):
                 self._append_market_records(records, seen_ids, market, origin=f"slug:{slug}")
-
-        for tag in tags:
-            for market in self._search_markets(tag, limit=self.discovery_limit):
-                if self._is_noise_market(market):
-                    continue
-                self._append_market_records(records, seen_ids, market, origin=f"tag:{tag}")
 
         logger.info(f"[Polymarket] 获取 {len(records)} 条预测市场记录")
         return records

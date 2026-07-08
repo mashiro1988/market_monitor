@@ -5,31 +5,35 @@ from datetime import datetime, timezone
 from loguru import logger
 from database import get_session
 from models.prediction import PredictionMarket
-from scanners.base import PredictionRecord
+from scanners.base import PredictionRecord, SourceHealthMixin
 from scanners.sources.polymarket.source import PolymarketSource
 import config
 
 
-class PredictionScanner:
+class PredictionScanner(SourceHealthMixin):
     """预测市场扫描器 - 5分钟频率跟踪宏观相关预测市场"""
 
     def __init__(self):
         self.sources = []
         if config.POLYMARKET.get("enabled", True):
             self.sources.append(PolymarketSource())
+        self._reset_source_statuses()
 
     def scan(self) -> list[PredictionRecord]:
         """执行一次完整的预测市场扫描"""
         all_records: list[PredictionRecord] = []
         scan_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        self._reset_source_statuses()
 
         for source in self.sources:
             try:
                 logger.info(f"[PredictionScanner] 采集 {source.name}...")
                 records = source.fetch()
+                self._record_source_status(source.name, records, stage="scan")
                 all_records.extend(records)
                 logger.info(f"[PredictionScanner] {source.name} 返回 {len(records)} 条记录")
             except Exception as e:
+                self._record_source_error(source.name, e, stage="scan")
                 logger.error(f"[PredictionScanner] {source.name} 采集失败: {e}")
 
         # 写入数据库

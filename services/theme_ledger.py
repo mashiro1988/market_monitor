@@ -23,11 +23,26 @@ from services.time_utils import utc_now_naive
 DEFAULT_REACTION_MINUTES = 30
 
 
+def _reaction_window_open(symbol: str, start: datetime, minutes: int) -> bool:
+    """传统市场反应窗不能跨日休/周末；加密 24h 永远可用。"""
+    if market_calendar.is_crypto(symbol):
+        return True
+    end = start + timedelta(minutes=minutes)
+    cursor = start
+    while cursor <= end:
+        if not market_calendar.is_open(symbol, cursor):
+            return False
+        cursor += timedelta(minutes=5)
+    return market_calendar.is_open(symbol, end)
+
+
 def forward_reaction(session: Session, symbol: str, news_time: datetime,
                      minutes: int = DEFAULT_REACTION_MINUTES) -> dict | None:
     """news 时刻起 minutes 分钟内的价格反应（观测，非因果）：
     net_pct = (末-始)/始；range_pct = (高-低)/低（收盘价口径，抓跨 bar 博弈）。
     端点/区间无快照 → None。"""
+    if not _reaction_window_open(symbol, news_time, minutes):
+        return None
     rows = (
         session.query(PriceSnapshot.timestamp, PriceSnapshot.price)
         .filter(
