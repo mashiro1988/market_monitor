@@ -8,32 +8,39 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 import config
 
+_IS_SQLITE = config.DATABASE_URL.startswith("sqlite")
+_ENGINE_KWARGS = {"connect_args": {"timeout": 15}} if _IS_SQLITE else {}
+
 # 创建数据库引擎
-engine = create_engine(config.DATABASE_URL, echo=False)
+engine = create_engine(config.DATABASE_URL, echo=False, **_ENGINE_KWARGS)
 
 # 启用 WAL 模式以提高并发性能
 @event.listens_for(engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
+    if not _IS_SQLITE:
+        return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=15000")
     cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-def create_tables():
+def create_tables(*, run_migrations: bool = True, seed_defaults: bool = True):
     """创建所有数据表（新旧共存）"""
     # 导入所有模型以确保它们注册到 Base.metadata
     import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
-    _ensure_sqlite_schema()
-    seed_tracked_markets()
+    _ensure_sqlite_schema(run_migrations=run_migrations)
+    if seed_defaults:
+        seed_tracked_markets()
 
 
-def _ensure_sqlite_schema():
+def _ensure_sqlite_schema(*, run_migrations: bool = True):
     """SQLite 轻量迁移：补齐 create_all 不会添加的旧表新列。"""
-    if not config.DATABASE_URL.startswith("sqlite"):
+    if not _IS_SQLITE:
         return
 
     inspector = inspect(engine)
@@ -57,8 +64,9 @@ def _ensure_sqlite_schema():
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_items ADD COLUMN {column_name} {column_type}"))
-            conn.execute(text("DROP INDEX IF EXISTS ix_news_content_hash"))
-            if "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:
+            if run_migrations:
+                conn.execute(text("DROP INDEX IF EXISTS ix_news_content_hash"))
+            if run_migrations and "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:
                 conn.execute(text("DROP INDEX IF EXISTS ix_news_source_id"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_source_id ON news_items (source, source_id)"))
 
@@ -67,6 +75,7 @@ def _ensure_sqlite_schema():
             existing = {col["name"] for col in inspector.get_columns("news_price_annotations")}
             for column_name, column_type in {
                 "candidate_news_ids": "TEXT",
+                "reference_changes": "TEXT",
                 "auto_reasoning": "TEXT",
                 "auto_summary": "TEXT",
                 "news_roles": "TEXT",
@@ -79,7 +88,8 @@ def _ensure_sqlite_schema():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_price_annotations ADD COLUMN {column_name} {column_type}"))
             # v1 → v2 一次性迁移 + v2.0 枚举升级到 v2.1（均幂等）
-            migrate_legacy_annotations(conn)
+            if run_migrations:
+                migrate_legacy_annotations(conn)
 
         # tracked_markets：补软删除墓碑列（删除留行，避免 seed 重启把它补种回来）。
         if "tracked_markets" in table_names:
@@ -92,6 +102,18 @@ def _ensure_sqlite_schema():
             existing = {col["name"] for col in inspector.get_columns("prediction_markets")}
             if "origin" not in existing:
                 conn.execute(text("ALTER TABLE prediction_markets ADD COLUMN origin VARCHAR(120)"))
+
+        # sector_returns：补中位数列。均值代表强度，中位数代表板块广度。
+        if "sector_returns" in table_names:
+            existing = {col["name"] for col in inspector.get_columns("sector_returns")}
+            for column_name in {
+                "ret_1h_median",
+                "ret_24h_median",
+                "ret_168h_median",
+                "ret_720h_median",
+            }:
+                if column_name not in existing:
+                    conn.execute(text(f"ALTER TABLE sector_returns ADD COLUMN {column_name} FLOAT"))
 
 
 # v2.0 → v2.1 枚举映射（2026-06-11 与用户定稿：角色不分主次、反应类型收敛为驱动源单轴）
@@ -178,16 +200,17 @@ def migrate_legacy_annotations(conn) -> int:
 
 
 def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: list[str] | None = None):
-    """从给定 slug/tag 列表 upsert tracked_markets。已存在的 (kind, identifier) 行跳过，
+    """从给定 slug 列表 upsert tracked_markets。已存在的 (kind, identifier) 行跳过，
     不覆盖用户已修改的 enabled / display_name。
+
+    tags 参数仅保留旧调用兼容；tag 自动发现已暂停，不再补种。
     """
     from models.tracked_market import TrackedMarket
     import config
 
     if slugs is None:
         slugs = list(config.POLYMARKET.get("tracked_slugs", []))
-    if tags is None:
-        tags = list(config.POLYMARKET.get("tracked_tags", []))
+    _ = tags
 
     own_session = session is None
     if own_session:
@@ -202,10 +225,6 @@ def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: 
             slug = (slug or "").strip()
             if slug and ("slug", slug) not in existing:
                 session.add(TrackedMarket(kind="slug", identifier=slug, enabled=True))
-        for tag in tags:
-            tag = (tag or "").strip()
-            if tag and ("tag", tag) not in existing:
-                session.add(TrackedMarket(kind="tag", identifier=tag, enabled=True))
         session.commit()
     except Exception:
         session.rollback()

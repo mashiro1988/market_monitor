@@ -12,6 +12,7 @@ class AlertRuleType(str, Enum):
     PRICE_LEVEL = "price_level"
     NEWS_IMPORTANCE = "news_importance"
     PREDICTION_SHIFT = "prediction_shift"
+    SECTOR_SPIKE = "sector_spike"
     HOURLY_SUMMARY = "hourly_summary"
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
@@ -39,4 +40,5 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=500, content=error_payload("INTERNAL_ERROR", str(exc)))
+    logger.exception("Unhandled API error on {} {}: {}", request.method, request.url.path, exc)
+    return JSONResponse(status_code=500, content=error_payload("INTERNAL_ERROR", "服务器内部错误"))

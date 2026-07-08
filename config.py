@@ -9,7 +9,32 @@ load_dotenv()
 # ============================================================
 # 代理配置（自动检测可用性）
 # ============================================================
-_PROXY_URL = os.getenv("PROXY_URL", "http://127.0.0.1:4780")
+_RAW_PROXY_URL = os.getenv("PROXY_URL", "http://127.0.0.1:4780")
+
+
+def _normalize_proxy_url(url: str) -> str:
+    """PROXY_URL 不带端口时补成与连通性检测一致的 1080 端口。"""
+    if not url:
+        return ""
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.hostname or parsed.port is not None:
+        return url
+
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    userinfo = ""
+    if parsed.username:
+        userinfo = parsed.username
+        if parsed.password:
+            userinfo += f":{parsed.password}"
+        userinfo += "@"
+    return urlunparse(parsed._replace(netloc=f"{userinfo}{host}:1080"))
+
+
+_PROXY_URL = _normalize_proxy_url(_RAW_PROXY_URL)
 
 
 def _check_proxy(url: str, timeout: float = 2.0) -> bool:
@@ -43,11 +68,16 @@ def proxies() -> dict:
     替代过去散落在各源 / 通道里的 `{"http": PROXY, "https": PROXY} if PROXY else {}` 模板。"""
     return {"http": PROXY, "https": PROXY} if PROXY else {}
 
+
+def proxy_url() -> str:
+    """返回单 URL 代理；供 ccxt 等不接受 requests proxies dict 的库使用。"""
+    return PROXY
+
 # ============================================================
 # API 密钥（全部从 .env 读取）
 # ============================================================
-DUNE_API_KEY = os.getenv("DUNE_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+APP_AUTH_TOKEN = os.getenv("APP_AUTH_TOKEN", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_BATCH_SIZE = int(os.getenv("DEEPSEEK_BATCH_SIZE", "12"))
 DEEPSEEK_CONNECT_TIMEOUT = float(os.getenv("DEEPSEEK_CONNECT_TIMEOUT", "10"))
@@ -68,6 +98,19 @@ WECHAT_WORK_WEBHOOK = os.getenv("WECHAT_WORK_WEBHOOK", "")
 # 数据库配置
 # ============================================================
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///market_monitor.db")
+
+# ============================================================
+# 日志配置
+# ============================================================
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+LOG_FILE_ENABLED = os.getenv("LOG_FILE_ENABLED", "1").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "market_monitor.log")
+LOG_ROTATION = os.getenv("LOG_ROTATION", "20 MB")
+LOG_RETENTION = os.getenv("LOG_RETENTION", "14 days")
+LOG_COMPRESSION = os.getenv("LOG_COMPRESSION", "zip")
 
 # ============================================================
 # 扫描频率（分钟）
@@ -269,14 +312,6 @@ POLYMARKET = {
     "enabled": True,
     "api_url": "https://clob.polymarket.com",
     "gamma_url": "https://gamma-api.polymarket.com",
-    # tag 仅用于候选发现：Gamma 按 volume 降序取前 discovery_limit 个，再由过滤器筛选
-    "tracked_tags": [
-        "fed", "fomc", "interest-rate",
-        "inflation", "cpi",
-        "geopolitics", "iran", "middle-east", "oil", "shipping", "hormuz",
-    ],
-    "discovery_limit": 5,
-    "min_volume": 100_000,
     # 手动指定的 market/event slug（优先跟踪；event slug 会展开为其 markets；无效 slug 静默忽略）
     # market 验证: https://gamma-api.polymarket.com/markets?slug=<slug>
     # event 验证: https://gamma-api.polymarket.com/events/slug/<slug>
@@ -342,6 +377,21 @@ ALERT_RULES = [
         "enabled": True,
     },
     {
+        "name": "sector_spike",
+        "rule_type": "sector_spike",
+        "params": {
+            "period": "24h",
+            "metric": "median",
+            "threshold_pct": 8.0,
+            "direction": "both",
+            "min_token_count": 10,
+            "top_n": 8,
+        },
+        "channels": ["wechat_work"],
+        "cooldown_minutes": 55,
+        "enabled": True,
+    },
+    {
         "name": "hourly_summary",
         "rule_type": "hourly_summary",
         "params": {},
@@ -359,6 +409,16 @@ ALERT_RULES = [
 ALERT_PRICE_MAX_STALENESS_MINUTES = int(os.getenv("ALERT_PRICE_MAX_STALENESS_MINUTES", "30"))
 
 # ============================================================
+# 远程板块管道健康告警
+# ============================================================
+REMOTE_MONITORING_ENABLED = os.getenv("REMOTE_MONITORING_ENABLED", "1").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+REMOTE_MONITOR_ALERT_COOLDOWN_MINUTES = int(os.getenv("REMOTE_MONITOR_ALERT_COOLDOWN_MINUTES", "60"))
+REMOTE_MONITOR_SFTP_FAILURE_THRESHOLD = int(os.getenv("REMOTE_MONITOR_SFTP_FAILURE_THRESHOLD", "3"))
+REMOTE_MONITOR_WAL_MAX_MB = int(os.getenv("REMOTE_MONITOR_WAL_MAX_MB", "512"))
+
+# ============================================================
 # 标注事件合并
 # ============================================================
 # 断档阈值（news-impact-engine Phase 2）：相邻触发扫描点(end_dt)间隔 > 此分钟数 → 上一个窗口走完、另起一个。
@@ -370,8 +430,9 @@ ANNOTATION_EVENT_MERGE_GAP_MINUTES = int(os.getenv("ANNOTATION_EVENT_MERGE_GAP_M
 ANNOTATION_SETTLE_MARGIN_MINUTES = int(os.getenv("ANNOTATION_SETTLE_MARGIN_MINUTES", "30"))
 
 # ============================================================
-# Dune Analytics 配置（保留）
+# Dune Analytics 休眠配置：当前 app/API 不加载，仅保留给旧查询脚本手动试验。
 # ============================================================
+DUNE_API_KEY = os.getenv("DUNE_API_KEY", "")
 DUNE_QUERY_ID_ETH_TOP100_NETFLOW = os.getenv("DUNE_QUERY_ID_ETH_TOP100_NETFLOW", "")
 DUNE_QUERY_ID_ETH_DAILY_STATS = os.getenv("DUNE_QUERY_ID_ETH_DAILY_STATS", "")
 DUNE_QUERY_ID_ETH_MONTHLY_TX_COUNT = os.getenv("DUNE_QUERY_ID_ETH_MONTHLY_TX_COUNT", "")
@@ -398,7 +459,7 @@ DATA_SOURCES = {
 REMOTE_DATA_ROOT = os.getenv("REMOTE_DATA_ROOT", "/root/data_center/data/").rstrip("/") + "/"
 LOCAL_CACHE_DIR = os.getenv("LOCAL_CACHE_DIR", "data/remote_cache")
 REMOTE_OFFSET = os.getenv("REMOTE_OFFSET", "30m")
-REMOTE_PULLER_POLL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "60"))
+REMOTE_PULLER_POLL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "3600"))
 
 # ============================================================
 # CoinMarketCap 板块分类配置

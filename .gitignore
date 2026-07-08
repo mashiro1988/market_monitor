@@ -21,6 +21,7 @@ venv/
 *.sqlite
 *.sqlite3
 .scan.lock
+logs/
 
 # ===== Frontend =====
 frontend/node_modules/

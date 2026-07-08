@@ -99,14 +99,15 @@ def _run_scan_task(task_id: str) -> None:
         record.message = "扫描运行中"
 
     try:
-        import run
+        from services.scan_runtime import run_scan_once
 
-        price_records, news_records, prediction_records = run.run_scan_once()
-        skipped_by_lock = bool(getattr(run.run_scan_once, "last_skipped", False))
+        price_records, news_records, prediction_records = run_scan_once()
+        skipped_by_lock = bool(getattr(run_scan_once, "last_skipped", False))
         result = {
             "price_records": len(price_records),
             "news_records": len(news_records),
             "prediction_records": len(prediction_records),
+            "source_statuses": getattr(run_scan_once, "last_source_statuses", {}),
         }
         with _TASK_LOCK:
             record = _TASKS[task_id]
