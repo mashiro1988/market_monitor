@@ -1,15 +1,14 @@
 # Market Monitor
 
-本地单人使用的宏观市场监控交易台。Python 负责扫描器、告警、数据库和 Dune 封装；FastAPI 提供唯一 REST 数据入口；React/Vite/TypeScript 提供 `http://localhost:8000` 的现代前端界面。
+本地单人使用的宏观市场监控交易台。Python 负责扫描器、告警、数据库和外部数据接入；FastAPI 提供唯一 REST 数据入口；React/Vite/TypeScript 提供 `http://localhost:8000` 的现代前端界面。
 
 ## 功能
 
 - 市场概览：资产卡片、5m/1h/24h 涨跌幅、跨资产走势、明细表和 CSV。
-- 新闻快讯：Jin10/Bloomberg 双栏信息流，支持来源、LLM 分数、重要标志、关键词和时间窗口筛选。
-- 预测市场：Polymarket 宏观主题 family 图和单市场明细。
+- 新闻快讯：Jin10/CNBC/InvestingLive/FinancialJuice 信息流，支持来源、LLM 分数、重要标志、关键词和时间窗口筛选。
+- 预测市场：Polymarket 精确 slug 跟踪、宏观主题 family 图和单市场明细。
 - 告警设置：查看规则、发送企业微信测试消息、查看告警日志。
 - 新闻标注：用价格告警窗口选择候选新闻并保存人工标注。
-- 链上数据：保留 ETH Dune API，前端暂为占位页。
 
 ## 快速开始
 
@@ -45,6 +44,13 @@ Vite 开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`。
 | `python run.py scan` | 执行一次价格、新闻、预测市场扫描并评估告警 |
 | `python run.py setup` | 初始化/补齐数据库表 |
 
+前端构建会先从 FastAPI OpenAPI schema 生成 [frontend/src/api/types.ts](D:/market_monitor/frontend/src/api/types.ts)；也可单独运行：
+
+```bash
+cd frontend
+cmd /c npm.cmd run generate:api-types
+```
+
 ## 配置
 
 复制或创建 `.env`，按需填写：
@@ -52,10 +58,6 @@ Vite 开发服务器会把 `/api` 代理到 `http://127.0.0.1:8000`。
 ```bash
 DEEPSEEK_API_KEY=
 WECHAT_WORK_WEBHOOK=
-DUNE_API_KEY=
-DUNE_QUERY_ID_ETH_TOP100_NETFLOW=
-DUNE_QUERY_ID_ETH_DAILY_STATS=
-DUNE_QUERY_ID_ETH_CEX_DAILY_INOUT=
 PROXY_URL=http://127.0.0.1:4780
 ```
 
@@ -64,7 +66,7 @@ PROXY_URL=http://127.0.0.1:4780
 - `SCAN_INTERVALS` 控制价格、新闻、预测市场扫描频率。
 - `ALERT_RULES` 控制价格异动、重要新闻、预测市场异动和 hourly summary。
 - `MARKET_OVERVIEW_DEFAULT_SYMBOLS` 同时用于市场默认走势图和 hourly summary。
-- Dune 查询 ID 用于 `/api/onchain/eth/*`，服务层有 60 分钟内存缓存。
+- `LOG_*` 控制持久日志，默认写入 `logs/market_monitor.log`，并按大小轮转和按天保留。
 
 ## 架构
 
@@ -82,7 +84,7 @@ scanners + alerts
 关键目录：
 
 - [api](D:/market_monitor/api)：FastAPI app、routes、统一错误响应、DB 依赖。
-- [services](D:/market_monitor/services)：市场、新闻、预测、告警、标注、Dune、任务服务。
+- [services](D:/market_monitor/services)：市场、新闻、预测、告警、标注、任务和远程数据服务。
 - [schemas](D:/market_monitor/schemas)：Pydantic API contract。
 - [frontend](D:/market_monitor/frontend)：React/Vite/TypeScript 前端。
 - [scanners](D:/market_monitor/scanners)：价格、新闻、预测市场扫描器和外部源。
@@ -102,7 +104,6 @@ scanners + alerts
 - `GET /api/predictions`, `/predictions/families`
 - `GET /api/alerts/rules`, `/alerts/logs`, `POST /api/alerts/test-wechat`
 - `GET /api/annotations/price-rules`, `/symbols`, `/windows`, `/context-news`, `POST /api/annotations`
-- `GET /api/onchain/eth/top100-netflow`, `/daily-stats`, `/cex-flows`
 
 错误响应统一为：
 
