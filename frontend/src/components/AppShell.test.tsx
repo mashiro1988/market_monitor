@@ -8,5 +8,5 @@ test("renders navigation items", () => {
   render(<RouterProvider router={router} />);
   expect(screen.getByText("市场概览")).toBeInTheDocument();
   expect(screen.getByText("新闻快讯")).toBeInTheDocument();
-  expect(screen.getByText("链上数据")).toBeInTheDocument();
+  expect(screen.queryByText("链上数据")).not.toBeInTheDocument();
 });

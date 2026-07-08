@@ -247,7 +247,7 @@ export function MarketPage() {
     const valid = new Set(items.map((s) => s.symbol));
     const filtered = chartSymbols.filter((s) => valid.has(s));
     if (filtered.length === chartSymbols.length) return;
-    setChartSymbols(filtered.length ? filtered : DEFAULT_CHART_SYMBOLS.filter((s) => valid.has(s)));
+    setChartSymbolsState(filtered.length ? filtered : DEFAULT_CHART_SYMBOLS.filter((s) => valid.has(s)));
   }, [symbolsList.data, chartSymbols]);
 
   const history = useQuery({

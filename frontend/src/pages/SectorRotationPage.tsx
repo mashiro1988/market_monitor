@@ -6,13 +6,26 @@ import type { SectorLeaderboardRow, SectorTokenRow } from "../api/types";
 import { Button, PageHeader, SelectControl } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 
-type SortKey = "ret_1h" | "ret_24h" | "ret_168h" | "ret_720h" | "token_count";
+type SortKey =
+  | "ret_1h_median"
+  | "ret_24h_median"
+  | "ret_168h_median"
+  | "ret_720h_median"
+  | "ret_1h"
+  | "ret_24h"
+  | "ret_168h"
+  | "ret_720h"
+  | "token_count";
 
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
-  { label: "1 小时涨跌", value: "ret_1h" },
-  { label: "24 小时涨跌", value: "ret_24h" },
-  { label: "7 天涨跌", value: "ret_168h" },
-  { label: "30 天涨跌", value: "ret_720h" },
+  { label: "24 小时中位", value: "ret_24h_median" },
+  { label: "1 小时中位", value: "ret_1h_median" },
+  { label: "7 天中位", value: "ret_168h_median" },
+  { label: "30 天中位", value: "ret_720h_median" },
+  { label: "24 小时均值", value: "ret_24h" },
+  { label: "1 小时均值", value: "ret_1h" },
+  { label: "7 天均值", value: "ret_168h" },
+  { label: "30 天均值", value: "ret_720h" },
   { label: "成分币数量", value: "token_count" },
 ];
 
@@ -38,7 +51,7 @@ function compareDescNullsLast(a: number | null, b: number | null): number {
 
 export function SectorRotationPage() {
   const queryClient = useQueryClient();
-  const [sortBy, setSortBy] = useState<SortKey>("ret_24h");
+  const [sortBy, setSortBy] = useState<SortKey>("ret_24h_median");
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
   const leaderboard = useQuery({
@@ -167,10 +180,10 @@ function RowGroup({
         <td><strong>{row.category}</strong></td>
         <td><span className="muted">{row.group ?? "—"}</span></td>
         <td style={{ textAlign: "right" }}>{row.token_count}</td>
-        <td style={{ textAlign: "right" }} className={pctClass(row.ret_1h)}>{fmtPct(row.ret_1h)}</td>
-        <td style={{ textAlign: "right" }} className={pctClass(row.ret_24h)}>{fmtPct(row.ret_24h)}</td>
-        <td style={{ textAlign: "right" }} className={pctClass(row.ret_168h)}>{fmtPct(row.ret_168h)}</td>
-        <td style={{ textAlign: "right" }} className={pctClass(row.ret_720h)}>{fmtPct(row.ret_720h)}</td>
+        <ReturnCell median={row.ret_1h_median} mean={row.ret_1h} />
+        <ReturnCell median={row.ret_24h_median} mean={row.ret_24h} />
+        <ReturnCell median={row.ret_168h_median} mean={row.ret_168h} />
+        <ReturnCell median={row.ret_720h_median} mean={row.ret_720h} />
       </tr>
       {expanded && (
         <tr>
@@ -215,5 +228,14 @@ function RowGroup({
         </tr>
       )}
     </>
+  );
+}
+
+function ReturnCell({ median, mean }: { median: number | null | undefined; mean: number | null | undefined }) {
+  return (
+    <td style={{ textAlign: "right" }} className={pctClass(median ?? mean)}>
+      <div>{fmtPct(median)}</div>
+      <div className="muted" style={{ fontSize: 12 }}>均 {fmtPct(mean)}</div>
+    </td>
   );
 }

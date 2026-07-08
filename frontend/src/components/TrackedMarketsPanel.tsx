@@ -2,13 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { TrackedMarket } from "../api/types";
-import { Button, SelectControl, TextInput } from "./Controls";
+import { Button, TextInput } from "./Controls";
 import { ErrorState, LoadingState } from "./StateViews";
-
-const kindOptions = [
-  { label: "Slug (单个 market 或 event)", value: "slug" },
-  { label: "Tag (家族 / 自动发现)", value: "tag" }
-];
 
 function extractSlug(input: string): string {
   const trimmed = input.trim();
@@ -28,7 +23,6 @@ export function TrackedMarketsPanel() {
     queryFn: () => api.predictionTracked()
   });
 
-  const [kind, setKind] = useState("slug");
   const [identifier, setIdentifier] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -37,7 +31,7 @@ export function TrackedMarketsPanel() {
   const create = useMutation({
     mutationFn: (resolvedId: string) =>
       api.createPredictionTracked({
-        kind: kind as "slug" | "tag",
+        kind: "slug",
         identifier: resolvedId,
         display_name: displayName.trim() || null
       }),
@@ -59,12 +53,12 @@ export function TrackedMarketsPanel() {
   });
 
   const submit = () => {
-    const resolved = kind === "slug" ? extractSlug(identifier) : identifier.trim();
+    const resolved = extractSlug(identifier);
     if (!resolved) {
-      setErrorMsg("请输入 slug 或 tag");
+      setErrorMsg("请输入 slug 或 Polymarket URL");
       return;
     }
-    if (kind === "slug" && looksLikeQuestion(resolved)) {
+    if (looksLikeQuestion(resolved)) {
       setErrorMsg("看起来是市场标题，不是 slug。请到该市场的 Polymarket 页面，复制 URL 末尾那一段（如 fed-decision-in-june-825）。");
       return;
     }
@@ -90,16 +84,15 @@ export function TrackedMarketsPanel() {
       </summary>
 
       <div className="tracked-add-row">
-        <SelectControl label="类型" value={kind} onChange={setKind} options={kindOptions} />
         <TextInput
-          label={kind === "slug" ? "slug 或 Polymarket URL" : "tag"}
+          label="slug 或 Polymarket URL"
           value={identifier}
           onChange={(v) => {
             setIdentifier(v);
             setErrorMsg("");
             setSuccessMsg("");
           }}
-          placeholder={kind === "slug" ? "fed-decision-in-june-825" : "fed"}
+          placeholder="fed-decision-in-june-825"
         />
         <TextInput
           label="显示名（可选）"
@@ -111,11 +104,9 @@ export function TrackedMarketsPanel() {
           {create.isPending ? "添加中..." : "添加"}
         </Button>
       </div>
-      {kind === "slug" ? (
-        <div className="muted-text small">
-          slug 来自 Polymarket 市场页 URL 末尾，例如 <code>polymarket.com/event/<strong>fed-decision-in-june-825</strong></code>。可以直接粘贴整个 URL，会自动提取。
-        </div>
-      ) : null}
+      <div className="muted-text small">
+        slug 来自 Polymarket 市场页 URL 末尾，例如 <code>polymarket.com/event/<strong>fed-decision-in-june-825</strong></code>。可以直接粘贴整个 URL，会自动提取。
+      </div>
       {errorMsg ? <div className="state-view error">{errorMsg}</div> : null}
       {successMsg ? <div className="state-view success-text">{successMsg}</div> : null}
 
@@ -163,7 +154,7 @@ export function TrackedMarketsPanel() {
                 </tr>
               ))}
               {!(list.data ?? []).length ? (
-                <tr><td colSpan={5} className="muted-text">尚未跟踪任何 slug/tag</td></tr>
+                <tr><td colSpan={5} className="muted-text">尚未跟踪任何 slug</td></tr>
               ) : null}
             </tbody>
           </table>
