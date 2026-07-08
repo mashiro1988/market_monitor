@@ -129,6 +129,24 @@ def _connect_kwargs() -> dict:
     return kw
 
 
+def _allow_unknown_host_keys() -> bool:
+    return os.getenv("REMOTE_ALLOW_UNKNOWN_HOST", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configure_host_key_policy(client) -> None:
+    known_hosts = os.getenv("REMOTE_KNOWN_HOSTS", "").strip()
+    if known_hosts:
+        client.load_host_keys(os.path.expanduser(known_hosts))
+    else:
+        client.load_system_host_keys()
+
+    if _allow_unknown_host_keys():
+        logger.warning("REMOTE_ALLOW_UNKNOWN_HOST=1: SFTP 将自动信任未知主机指纹，仅建议临时调试使用")
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    else:
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+
+
 REMOTE_DATA_ROOT: str = os.getenv("REMOTE_DATA_ROOT", "/root/data_center/data/").rstrip("/") + "/"
 LOCAL_CACHE_DIR: Path = Path(os.getenv("LOCAL_CACHE_DIR", "data/remote_cache")).resolve()
 SFTP_READ_TIMEOUT: float = float(os.getenv("REMOTE_READ_TIMEOUT", "30"))
@@ -234,7 +252,7 @@ class _SftpSession:
                 logger.info("SFTP 会话已断开，重连中")
                 self._close_quietly()
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        _configure_host_key_policy(client)
         client.connect(**_connect_kwargs())
         sftp = client.open_sftp()
         sftp.sock.settimeout(SFTP_READ_TIMEOUT)

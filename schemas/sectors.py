@@ -15,6 +15,10 @@ class SectorLeaderboardRow(BaseModel):
     ret_24h: float | None = None
     ret_168h: float | None = None
     ret_720h: float | None = None
+    ret_1h_median: float | None = None
+    ret_24h_median: float | None = None
+    ret_168h_median: float | None = None
+    ret_720h_median: float | None = None
 
 
 class SectorLeaderboardResponse(BaseModel):

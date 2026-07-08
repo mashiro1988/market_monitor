@@ -22,8 +22,10 @@ from sqlalchemy.orm import Session
 import config
 from models.sector import CmcSymbolCategory, SectorReturn
 from scanners.sector_scanner import (
+    MIN_TOKENS_PER_SECTOR,
     RETURN_LOOKBACKS,
     _compute_returns_for_close,
+    _latest_snapshot_for_close,
     normalize_pivot_symbol,
 )
 from schemas.sectors import (
@@ -98,12 +100,15 @@ def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
         return SectorLeaderboardResponse(snapshot_at=None, rows=[])
 
     rows = session.execute(
-        select(SectorReturn).where(SectorReturn.snapshot_at == latest_snap)
+        select(SectorReturn).where(
+            SectorReturn.snapshot_at == latest_snap,
+            SectorReturn.token_count >= MIN_TOKENS_PER_SECTOR,
+        )
     ).scalars().all()
 
-    # 排序：24h 降序，NaN 排末尾
+    # 排序：24h 中位数优先，NaN 排末尾
     def _sort_key(r: SectorReturn) -> tuple[int, float]:
-        val = r.ret_24h
+        val = r.ret_24h_median if r.ret_24h_median is not None else r.ret_24h
         if val is None:
             return (1, 0.0)
         return (0, -val)
@@ -121,6 +126,10 @@ def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
                 ret_24h=r.ret_24h,
                 ret_168h=r.ret_168h,
                 ret_720h=r.ret_720h,
+                ret_1h_median=r.ret_1h_median,
+                ret_24h_median=r.ret_24h_median,
+                ret_168h_median=r.ret_168h_median,
+                ret_720h_median=r.ret_720h_median,
             )
             for r in rows_sorted
         ],
@@ -161,14 +170,23 @@ def get_sector_tokens(session: Session, category: str) -> SectorTokensResponse:
         )
 
     # 算两边的 per-symbol 涨跌
+    latest_times = [
+        ts for ts in (
+            _latest_snapshot_for_close(spot_pivot["close"]) if spot_pivot is not None else None,
+            _latest_snapshot_for_close(swap_pivot["close"]) if swap_pivot is not None else None,
+        )
+        if ts is not None
+    ]
+    aligned_snapshot = min(latest_times) if len(latest_times) > 1 else (latest_times[0] if latest_times else None)
+
     snapshot_at: Optional[datetime] = None
     spot_returns: dict[str, dict[str, float]] = {}
     swap_returns: dict[str, dict[str, float]] = {}
     if spot_pivot is not None:
-        s, spot_returns = _compute_returns_for_close(spot_pivot["close"])
+        s, spot_returns = _compute_returns_for_close(spot_pivot["close"], as_of=aligned_snapshot)
         snapshot_at = s
     if swap_pivot is not None:
-        s, swap_returns = _compute_returns_for_close(swap_pivot["close"])
+        s, swap_returns = _compute_returns_for_close(swap_pivot["close"], as_of=aligned_snapshot)
         if snapshot_at is None or (s is not None and s > snapshot_at):
             snapshot_at = s
 

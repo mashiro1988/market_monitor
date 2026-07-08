@@ -20,6 +20,78 @@ def test_is_local_backend_reflects_flag(monkeypatch):
     assert remote_fs._is_local_backend() is True
 
 
+def test_sftp_rejects_unknown_host_keys_by_default(monkeypatch):
+    class _RejectPolicy:
+        pass
+
+    class _AutoAddPolicy:
+        pass
+
+    class _Paramiko:
+        RejectPolicy = _RejectPolicy
+        AutoAddPolicy = _AutoAddPolicy
+
+    class _Client:
+        def __init__(self):
+            self.loaded_system = False
+            self.policy = None
+
+        def load_system_host_keys(self):
+            self.loaded_system = True
+
+        def load_host_keys(self, path):
+            raise AssertionError(path)
+
+        def set_missing_host_key_policy(self, policy):
+            self.policy = policy
+
+    monkeypatch.setattr(remote_fs, "paramiko", _Paramiko)
+    monkeypatch.delenv("REMOTE_ALLOW_UNKNOWN_HOST", raising=False)
+    monkeypatch.delenv("REMOTE_KNOWN_HOSTS", raising=False)
+    client = _Client()
+
+    remote_fs._configure_host_key_policy(client)
+
+    assert client.loaded_system is True
+    assert isinstance(client.policy, _RejectPolicy)
+
+
+def test_sftp_unknown_host_auto_add_requires_explicit_opt_in(monkeypatch):
+    class _RejectPolicy:
+        pass
+
+    class _AutoAddPolicy:
+        pass
+
+    class _Paramiko:
+        RejectPolicy = _RejectPolicy
+        AutoAddPolicy = _AutoAddPolicy
+
+    class _Client:
+        def __init__(self):
+            self.loaded = None
+            self.policy = None
+
+        def load_system_host_keys(self):
+            self.loaded = "system"
+
+        def load_host_keys(self, path):
+            self.loaded = path
+
+        def set_missing_host_key_policy(self, policy):
+            self.policy = policy
+
+    monkeypatch.setattr(remote_fs, "paramiko", _Paramiko)
+    monkeypatch.setenv("REMOTE_ALLOW_UNKNOWN_HOST", "1")
+    monkeypatch.setenv("REMOTE_KNOWN_HOSTS", "C:\\known_hosts")
+    client = _Client()
+
+    remote_fs._configure_host_key_policy(client)
+
+    assert client.loaded == "C:\\known_hosts"
+    assert isinstance(client.policy, _AutoAddPolicy)
+
+
 @pytest.fixture
 def local_backend(tmp_path, monkeypatch):
     """把 remote_fs 切到 local 后端，数据根/缓存指向 tmp。"""
