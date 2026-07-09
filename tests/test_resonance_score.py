@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""共振分 S（price-behavior-engine-plan Task 4）。
-Fixture = spec（volume-behavior-engine-discussion.md v0.4 §6）的 25 点数值案例，锁死公式：
-变体 A（纳指跟随）S≈0.774 / ESS≈4.34；变体 B（纳指没动）S≈0.012。"""
+"""共振分（Phase 2 rolling 统一口径，price-behavior-engine-phase2-plan Task 1）。
+Fixture = spec §6 的 25 点数值案例按 rolling_peak（25 点窗、尾窗 60min）重算锁死：
+变体 A（纳指跟随）峰值 S≈0.834 / ESS≈3.34（峰在 21:35）；变体 B（纳指没动）≈0.022。
+所见即所判：判级数 = 展示曲线的 |S| 峰值。"""
 from datetime import datetime, timedelta
 
-from services.resonance_score import chg_map, rolling_s, s_score
+from services.resonance_score import chg_map, rolling_peak, rolling_s
 
 T_BTC = 0.30
 T_NQ = 0.23
@@ -29,34 +30,40 @@ SEG = (datetime(2026, 7, 8, 21, 30), datetime(2026, 7, 8, 21, 30))
 
 
 def test_spec_case_a_nq_follows():
-    s, ess, cov = s_score(_map(BTC), _map(NQ_A), SEG[0], SEG[1], T_BTC, T_NQ)
-    assert abs(s - 0.774) < 1e-3
-    assert abs(ess - 4.34) < 0.01
+    s, ess, cov = rolling_peak(_map(BTC), _map(NQ_A), T_BTC, T_NQ, SEG[0], SEG[1], points=25)
+    assert abs(s - 0.834) < 1e-3     # 峰值出现在 21:35（窗口恰罩住最重的两根 bar）
+    assert abs(ess - 3.34) < 0.01    # 峰值时刻的证据厚度（比全窗更集中，语义正确）
     assert cov == 1.0
 
 
 def test_spec_case_b_nq_flat():
-    s, ess, cov = s_score(_map(BTC), _map(NQ_B), SEG[0], SEG[1], T_BTC, T_NQ)
-    assert abs(s - 0.012) < 1e-3
+    s, ess, cov = rolling_peak(_map(BTC), _map(NQ_B), T_BTC, T_NQ, SEG[0], SEG[1], points=25)
+    assert abs(s - 0.022) < 1e-3
     assert cov == 1.0
 
 
 def test_inverse_ref_scores_negative():
     btc = {BASE: 0.60, BASE + timedelta(minutes=5): 0.05, BASE + timedelta(minutes=10): -0.02}
     dxy = {BASE: -0.20, BASE + timedelta(minutes=5): -0.01, BASE + timedelta(minutes=10): 0.00}
-    s, _, _ = s_score(btc, dxy, BASE + timedelta(minutes=5), BASE + timedelta(minutes=5),
-                      0.30, 0.10, pre_minutes=5, post_minutes=5)
-    assert s < -0.8   # 反向满档：主权重 bar clip 到 -1
+    r = rolling_peak(btc, dxy, 0.30, 0.10, BASE, BASE + timedelta(minutes=10),
+                     tail_min=0, points=3)
+    assert r is not None and r[0] < -0.8   # 反向满档：主权重 bar clip 到 -1，峰取 |S| 最大
+
+def test_peak_is_max_abs_over_grid():
+    # 构造：段早期参照反向、后期强跟随 → 峰值应取后期高点而非首点
+    btc = _map(BTC)
+    nq = dict(_map(NQ_A))
+    assert abs(rolling_peak(btc, nq, T_BTC, T_NQ, SEG[0], SEG[1], points=25)[0]) >=            abs(rolling_peak(btc, nq, T_BTC, T_NQ, SEG[0], SEG[0], tail_min=0, points=25)[0]) - 1e-9
 
 
 def test_low_coverage_returns_none():
     btc = _map(BTC)
     nq = {BASE + timedelta(minutes=5 * i): v for i, v in enumerate(NQ_A) if i < 10}  # 只覆盖前 40%
-    assert s_score(btc, nq, SEG[0], SEG[1], T_BTC, T_NQ) is None
+    assert rolling_peak(btc, nq, T_BTC, T_NQ, SEG[0], SEG[1], points=25) is None
 
 
 def test_empty_window_returns_none():
-    assert s_score({}, _map(NQ_A), SEG[0], SEG[1], T_BTC, T_NQ) is None
+    assert rolling_peak({}, _map(NQ_A), T_BTC, T_NQ, SEG[0], SEG[1], points=25) is None
 
 
 def test_chg_map_15min_exact_span():

@@ -62,19 +62,27 @@ def _weighted_follow(btc_chg: dict[datetime, float], ref_chg: dict[datetime, flo
     return num / den, den * den / sw2, coverage
 
 
-def s_score(btc_chg: dict[datetime, float], ref_chg: dict[datetime, float],
-            window_start: datetime, window_end: datetime,
-            t_btc: float, t_ref: float,
-            coverage_min: float = 0.5,
-            pre_minutes: int = BIG_WINDOW_MINUTES,
-            post_minutes: int = BIG_WINDOW_MINUTES) -> tuple[float, float, float] | None:
-    """段锚定 S：大窗口 = 段前 pre ~ 段后 post（事后归因证据，等后窗数据到齐才有意义）。"""
-    return _weighted_follow(
-        btc_chg, ref_chg, t_btc, t_ref,
-        window_start - timedelta(minutes=pre_minutes),
-        window_end + timedelta(minutes=post_minutes),
-        coverage_min,
-    )
+def rolling_peak(btc_chg: dict[datetime, float], ref_chg: dict[datetime, float],
+                 t_btc: float, t_ref: float,
+                 seg_start: datetime, seg_end: datetime,
+                 tail_min: int = BIG_WINDOW_MINUTES,
+                 points: int = 30,
+                 coverage_min: float = 0.5) -> tuple[float, float, float] | None:
+    """段的联动读数（Phase 2 统一口径，2026-07-09 用户拍板"所见即所判"）：
+    在"段起 → 段止 + tail"的每个 5min 时点上求拖尾 rolling S（与展示曲线同一算法、同一窗口），
+    取 |S| 峰值点，返回该点的 (S, ESS, coverage)。曲线爬多高，机器判多强——判级数与
+    屏幕上那条 rolling 曲线是同一个数。拖尾窗只看过去 → 数据齐备条件仍是"到 段止+tail"，
+    settle 门槛不变。取代旧的事件窗 s_score（段前1h+段+段后1h 单独开窗，已删）。"""
+    span = STEP * (points - 1)
+    best: tuple[float, float, float] | None = None
+    t = seg_start
+    end = seg_end + timedelta(minutes=tail_min)
+    while t <= end:
+        r = _weighted_follow(btc_chg, ref_chg, t_btc, t_ref, t - span, t, coverage_min)
+        if r is not None and (best is None or abs(r[0]) > abs(best[0])):
+            best = r
+        t += STEP
+    return best
 
 
 def rolling_s(btc_chg: dict[datetime, float], ref_chg: dict[datetime, float],

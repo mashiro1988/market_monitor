@@ -224,31 +224,33 @@ def _reference_change_segments_for_annotation(
 
 def _window_signals_payload(session: Session, symbol: str,
                             window_start: datetime, window_end: datetime) -> dict:
-    """喂给 auto-annotate reasoner 的窗口派生信号（v11，price-behavior-engine-plan Task 8b）：
-    - s_scores / max_ref / sync_ref_count / machine_class：共振分 S 证据链（取代 ±1h Pearson——
-      实测同步相关判别力≈随机，spec v0.4 §1.5 判据史）。s 含符号（美元反向为常态），判级用 |S|。
+    """喂给 auto-annotate reasoner 的窗口派生信号（v11 字段 / Phase2 rolling 口径统一）：
+    - s_scores / max_ref / sync_ref_count / machine_class：共振分证据链。s = 段窗内 rolling 曲线
+      |S| 峰值（与标注页曲线同一个数，"所见即所判"）；含符号（美元反向为常态），判级用 |S|。
     - reference_change_segments：固定三段方向链（含标注品种本身），交叉验证用。
     - trigger_move_start_bj / _pct：窗口内首个显著波动 5min bar（真加速触发时点）。
     - pre_window_move_pct：窗口前 1h 净变动（情绪反转识别）。"""
     from services import window_signals
     from services.behavior_classifier import _classify_cell, _news_ids, _points
-    from services.resonance_score import chg_map, s_score
+    from services.resonance_score import chg_map, rolling_peak
 
     labels_by_symbol = {sym: label for sym, label, _unit in _iter_reference_assets()}
     tiers = config.BEHAVIOR_TIERS.get(symbol)
     s_scores: dict[str, dict] = {}
     if tiers:
-        pad = timedelta(minutes=75)
-        btc_chg = chg_map(_points(session, symbol, window_start - pad, window_end + pad))
+        roll_points = int(config.BEHAVIOR_ROLLING_POINTS)
+        pre_pad = timedelta(minutes=5 * (roll_points - 1) + 15)   # 拖尾窗回看
+        post_pad = timedelta(minutes=75)
+        btc_chg = chg_map(_points(session, symbol, window_start - pre_pad, window_end + post_pad))
         for ref in config.BEHAVIOR_REF_SYMBOLS:
             ref_tiers = config.BEHAVIOR_TIERS.get(ref)
             if not ref_tiers or ref == symbol:
                 continue
-            r = s_score(
+            r = rolling_peak(
                 btc_chg,
-                chg_map(_points(session, ref, window_start - pad, window_end + pad)),
-                window_start, window_end, float(tiers[0]), float(ref_tiers[0]),
-                coverage_min=config.BEHAVIOR_COVERAGE_MIN,
+                chg_map(_points(session, ref, window_start - pre_pad, window_end + post_pad)),
+                float(tiers[0]), float(ref_tiers[0]), window_start, window_end,
+                points=roll_points, coverage_min=config.BEHAVIOR_COVERAGE_MIN,
             )
             if r is not None:
                 s_scores[labels_by_symbol.get(ref, ref)] = {

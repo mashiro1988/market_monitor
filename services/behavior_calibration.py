@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 import config
 from services.behavior_classifier import _points
 from services.behavior_segments import Segment, detect_segments
-from services.resonance_score import chg_map, s_score
+from services.resonance_score import chg_map, rolling_peak
 
 DAY = timedelta(hours=24)
 MULTS = (0.5, 0.75, 1.0, 1.5, 2.0)
@@ -56,8 +56,9 @@ def _shift(chg: dict[datetime, float], hours: int) -> dict[datetime, float]:
 def _scores(segs: list[Segment], btc_chg, ref_chg, t_btc: float, t_ref: float) -> list[float | None]:
     out = []
     for s in segs:
-        r = s_score(btc_chg, ref_chg, s.start_dt, s.end_dt, t_btc, t_ref,
-                    coverage_min=config.BEHAVIOR_COVERAGE_MIN)
+        r = rolling_peak(btc_chg, ref_chg, t_btc, t_ref, s.start_dt, s.end_dt,
+                         points=int(config.BEHAVIOR_ROLLING_POINTS),
+                         coverage_min=config.BEHAVIOR_COVERAGE_MIN)
         out.append(None if r is None else r[0])
     return out
 
@@ -184,8 +185,9 @@ def session_bias_table(session: Session, symbol: str = "BTC/USDT", days: int = 3
         for shift_h in (24, -24):
             shifted = _shift(ref_chg, shift_h)
             for seg in segs:
-                r = s_score(btc_chg, shifted, seg.start_dt, seg.end_dt, t_btc, float(tiers[0]),
-                            coverage_min=config.BEHAVIOR_COVERAGE_MIN)
+                r = rolling_peak(btc_chg, shifted, t_btc, float(tiers[0]), seg.start_dt, seg.end_dt,
+                                 points=int(config.BEHAVIOR_ROLLING_POINTS),
+                                 coverage_min=config.BEHAVIOR_COVERAGE_MIN)
                 by_bucket[bucket(seg)].append(None if r is None else r[0])
         rth, n_rth = _hit_rate(by_bucket["us_rth"], cut)
         ovn, n_ovn = _hit_rate(by_bucket["overnight"], cut)

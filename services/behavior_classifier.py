@@ -21,7 +21,7 @@ from models.behavior import BehaviorDailySummary, BehaviorSegment
 from models.news import NewsItem
 from models.price import PriceSnapshot
 from services.behavior_segments import Segment, detect_segments
-from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, s_score
+from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, rolling_peak
 
 CLASS_VERSION = "v1"
 DETECT_LOOKBACK_HOURS = 48
@@ -122,7 +122,10 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
     if todo:
         btc_chg = chg_map(btc_points)
         t_btc = float(tiers[0])
-        span_start = min(r.start_dt for r in todo) - pad
+        # rolling_peak 的拖尾窗在段起点要回看 (points-1)*5min，参照数据前侧 pad 相应放宽
+        roll_points = int(config.BEHAVIOR_ROLLING_POINTS)
+        pre_pad = timedelta(minutes=5 * (roll_points - 1) + 15)
+        span_start = min(r.start_dt for r in todo) - pre_pad
         span_end = max(r.end_dt for r in todo) + pad
         ref_chgs: dict[str, tuple[dict, float]] = {}
         for ref in config.BEHAVIOR_REF_SYMBOLS:
@@ -133,8 +136,9 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
         for row in todo:
             scores: dict[str, dict] = {}
             for ref, (rchg, t_ref) in ref_chgs.items():
-                r = s_score(btc_chg, rchg, row.start_dt, row.end_dt, t_btc, t_ref,
-                            coverage_min=config.BEHAVIOR_COVERAGE_MIN)
+                r = rolling_peak(btc_chg, rchg, t_btc, t_ref, row.start_dt, row.end_dt,
+                                 tail_min=BIG_WINDOW_MINUTES, points=roll_points,
+                                 coverage_min=config.BEHAVIOR_COVERAGE_MIN)
                 if r is not None:
                     scores[ref] = {"s": round(r[0], 4), "ess": round(r[1], 2), "coverage": round(r[2], 3)}
             ids = _news_ids(session, row.start_dt, row.end_dt)
