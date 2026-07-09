@@ -14,8 +14,13 @@ export type DailyRow = {
   net: number;         // 涨−跌（趋势主读数）
   t05: number;         // 触及 0.5 档段数
   t08: number;
-  sent: number;        // 情绪候选段数
+  sent: number;        // 情绪·技术面段数（三类口径）
   comp: number;        // 构成段总数（0.5 档以上，分母<5 不读占比）
+  nd: number;          // 新闻驱动
+  pr: number;          // 纯共振
+  st: number;          // 情绪·技术面（=sent）
+  noRef: number;       // 无对照注记（已含在三类内，另计）
+  sentRatio: number | null;  // 情绪占比%（分母<5 → null 不读）
   downSumNeg: number;  // 跌段净幅合计（负值，柱图向下）
 };
 
@@ -30,6 +35,7 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
     const tier = (k: string) => (d.counts[k]?.up ?? 0) + (d.counts[k]?.down ?? 0);
     const three = mergedComposition(d.composition);
     const comp = three.news_driven + three.pure_resonance + three.sentiment_tech;
+    const noRef = d.composition["no_ref"] ?? 0;
     return {
       date: d.utc_date.slice(5),
       weekend: d.day_type === "weekend",
@@ -41,6 +47,11 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       t08: tier("0.8"),
       sent: three.sentiment_tech,
       comp,
+      nd: three.news_driven,
+      pr: three.pure_resonance,
+      st: three.sentiment_tech,
+      noRef,
+      sentRatio: comp >= 5 ? Math.round((three.sentiment_tech / comp) * 100) : null,
       downSumNeg: -Math.abs(d.down_net_sum ?? 0),
     };
   });

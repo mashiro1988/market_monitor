@@ -1372,3 +1372,5 @@ code {
 .mini-btn:disabled { opacity: .4; cursor: default; }
 .mini-select { font-size: 11.5px; padding: 2px 4px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
 .link-btn { font-size: 11px; background: none; border: none; color: var(--muted); text-decoration: underline; cursor: pointer; }
+.today-comp-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 4px 4px 8px; }
+.today-comp-row .num-big { font-size: 20px; margin-left: 4px; }
