@@ -28,10 +28,8 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       down += v.down ?? 0;
     }
     const tier = (k: string) => (d.counts[k]?.up ?? 0) + (d.counts[k]?.down ?? 0);
-    const comp = ["news_driven", "pure_resonance", "sentiment_tech"]
-      .map((k) => d.composition[k] ?? 0)
-      .reduce((a, b) => a + b, 0)
-      || Object.entries(d.composition).filter(([k]) => k !== "no_ref").reduce((a, [, v]) => a + v, 0);
+    const three = mergedComposition(d.composition);
+    const comp = three.news_driven + three.pure_resonance + three.sentiment_tech;
     return {
       date: d.utc_date.slice(5),
       weekend: d.day_type === "weekend",
@@ -41,7 +39,7 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       net: up - down,
       t05: tier("0.5"),
       t08: tier("0.8"),
-      sent: d.composition["sentiment_tech"] ?? d.composition["sentiment"] ?? 0,
+      sent: three.sentiment_tech,
       comp,
       downSumNeg: -Math.abs(d.down_net_sum ?? 0),
     };
@@ -82,6 +80,17 @@ export function toWindowClass(cls: string | null | undefined): string | null {
   if (!cls) return null;
   if (cls === "news_driven" || cls === "pure_resonance" || cls === "sentiment_tech") return cls;
   return SIX_TO_THREE[cls] ?? null;
+}
+
+// 构成字典归并三类（新旧词表通吃：六类映射、三类透传、count_only/no_ref 注记不进和）
+export function mergedComposition(raw: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = { news_driven: 0, pure_resonance: 0, sentiment_tech: 0 };
+  for (const [k, v] of Object.entries(raw)) {
+    if (k === "no_ref") continue;
+    const three = toWindowClass(k);
+    if (three) out[three] += v;
+  }
+  return out;
 }
 
 export function classMeta(cls: string | null | undefined): { label: string; cls: string } {
