@@ -29,17 +29,19 @@ import {
 
 const SYMBOL = "BTC/USDT";
 const REFRESH_MS = 5 * 60_000;
-const UP = "#1f9d63";
-const DOWN = "#d24a43";
-const INK = "#5c6270";
-const REF_COLORS: Record<string, string> = {
-  "NQ=F": "#3D6FD6",
-  "^N225": "#4B93C8",
-  "GC=F": "#C08A2A",
-  "US_2Y": "#A06E15",
-  "DX-Y.NYB": "#8B5CC0",
-  "CL=F": "#159C8C",
+const UP = "#5eead4";      // 站内 --up
+const DOWN = "#fb7185";    // 站内 --down
+const INK = "#8ea0b6";     // 站内 --muted（次级线/网格）
+const TEXT = "#dbe7f3";    // 站内 --text（主线）
+const REF_COLORS: Record<string, string> = {   // dark 主题组，过 CVD 六项校验
+  "NQ=F": "#5E86E0",
+  "^N225": "#4F9CCB",
+  "GC=F": "#C89B3C",
+  "US_2Y": "#93691A",
+  "DX-Y.NYB": "#9873CC",
+  "CL=F": "#2AA38F",
 };
+const TOOLTIP_STYLE = { background: "#0f172a", border: "1px solid #263142", color: "#e2e8f0" };
 
 function bjShort(ts: string | null | undefined): string {
   return (ts ?? "").slice(5, 16);
@@ -116,11 +118,11 @@ export function BehaviorPage() {
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" hide />
                 <YAxis width={34} tick={{ fontSize: 10 }} />
-                <Tooltip />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <ReferenceLine y={0} stroke={INK} />
                 <Bar dataKey="up" name="涨段" stackId="s" fill={UP} opacity={0.65} />
                 <Bar dataKey={(r: { down: number }) => -r.down} name="跌段" stackId="s" fill={DOWN} opacity={0.65} />
-                <Line dataKey="net" name="净差" stroke="#23262c" strokeWidth={2} dot={false} />
+                <Line dataKey="net" name="净差" stroke={TEXT} strokeWidth={2} dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
             <div className="mini-title">强度 · 触及 0.5 / 0.8 档段数（档位右移 = 情绪变猛）</div>
@@ -128,9 +130,9 @@ export function BehaviorPage() {
               <LineChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <XAxis dataKey="date" hide />
                 <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
-                <Tooltip />
-                <Line dataKey="t05" name="0.5档" stroke="#98a0b3" strokeWidth={1.8} dot={false} />
-                <Line dataKey="t08" name="0.8档" stroke="#4a5468" strokeWidth={1.8} dot={false} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <Line dataKey="t05" name="0.5档" stroke="#b48a3c" strokeWidth={1.8} dot={false} />
+                <Line dataKey="t08" name="0.8档" stroke="#fbbf24" strokeWidth={1.8} dot={false} />
               </LineChart>
             </ResponsiveContainer>
             <div className="mini-title">情绪候选向下段（红） vs 构成段总数（灰虚，分母&lt;5 不读占比）</div>
@@ -138,9 +140,9 @@ export function BehaviorPage() {
               <LineChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <XAxis dataKey="date" hide />
                 <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
-                <Tooltip />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <Line dataKey="comp" name="构成段" stroke={INK} strokeDasharray="4 4" strokeWidth={1.5} dot={false} />
-                <Line dataKey="sent" name="情绪候选" stroke="#c24631" strokeWidth={2} dot={false} />
+                <Line dataKey="sent" name="情绪候选" stroke="#fb7185" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
             <div className="mini-title">跌段净幅合计</div>
@@ -148,7 +150,7 @@ export function BehaviorPage() {
               <ComposedChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                 <YAxis width={34} tick={{ fontSize: 10 }} />
-                <Tooltip />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <Bar dataKey="downSumNeg" name="跌段净幅Σ" fill={DOWN} opacity={0.75} radius={[2, 2, 0, 0]} />
               </ComposedChart>
             </ResponsiveContainer>
@@ -175,11 +177,11 @@ export function BehaviorPage() {
               <LineChart data={link.frames} syncId="linkage" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <XAxis dataKey="t" hide />
                 <YAxis width={34} domain={[0, 1]} tick={{ fontSize: 10 }} />
-                <Tooltip />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <ReferenceLine y={0.5} strokeDasharray="4 3" stroke={INK} />
                 <ReferenceLine y={0.3} strokeDasharray="2 3" stroke={INK} />
-                {centre !== null ? <ReferenceLine y={centre} stroke="#2c6bd9" strokeDasharray="6 4" label={{ value: `中枢 ${centre.toFixed(2)}`, fontSize: 10, position: "right" }} /> : null}
-                <Line dataKey="maxAbs" name="max|S|" stroke="#23262c" strokeWidth={2} dot={false} connectNulls={false} />
+                {centre !== null ? <ReferenceLine y={centre} stroke="#6e97e8" strokeDasharray="6 4" label={{ value: `中枢 ${centre.toFixed(2)}`, fontSize: 10, position: "right" }} /> : null}
+                <Line dataKey="maxAbs" name="max|S|" stroke={TEXT} strokeWidth={2} dot={false} connectNulls={false} />
               </LineChart>
             </ResponsiveContainer>
             {link.symbols.map(({ symbol, label }) => (
@@ -187,8 +189,8 @@ export function BehaviorPage() {
                 <LineChart data={link.frames} syncId="linkage" margin={{ top: 2, right: 60, left: 0, bottom: 0 }}>
                   <XAxis dataKey="t" hide />
                   <YAxis width={34} domain={[-1, 1]} ticks={[0]} tick={{ fontSize: 9 }} />
-                  <Tooltip />
-                  <ReferenceLine y={0} stroke="#e3e2dc" />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <ReferenceLine y={0} stroke="#263142" />
                   <Line dataKey={symbol} name={label} stroke={REF_COLORS[symbol] ?? INK} strokeWidth={1.6} dot={false} connectNulls={false} />
                 </LineChart>
               </ResponsiveContainer>
@@ -198,7 +200,7 @@ export function BehaviorPage() {
               <LineChart data={link.frames} syncId="linkage" margin={{ top: 2, right: 60, left: 0, bottom: 0 }}>
                 <XAxis dataKey="t" tick={{ fontSize: 10 }} minTickGap={60} />
                 <YAxis width={34} domain={[0, 6]} ticks={[0, 3, 6]} tick={{ fontSize: 10 }} />
-                <Tooltip />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <Line dataKey="breadth" name="同步参照数" type="stepAfter" stroke={INK} strokeWidth={1.5} dot={false} connectNulls={false} />
               </LineChart>
             </ResponsiveContainer>
