@@ -606,6 +606,28 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
     return out
 
 
+def _behavior_segment_events(session: Session, symbol: str, display_cutoff: datetime,
+                             scale: dict, asset_class: str, name: str) -> list[dict]:
+    """behavior_segments（0.5 档以上）→ _scale_events 同形 raw dict（Task 8 开关路径）。
+    只做字段映射，不再做触发/合并——段检测语义已与 _scale_events 对齐（behavior_segments.py）。"""
+    from models.behavior import BehaviorSegment
+
+    rows = (
+        session.query(BehaviorSegment)
+        .filter(BehaviorSegment.symbol == symbol,
+                BehaviorSegment.end_dt >= display_cutoff,
+                BehaviorSegment.tier_idx >= 1)
+        .order_by(BehaviorSegment.start_dt.asc())
+        .all()
+    )
+    return [{
+        "start": r.start_dt, "end": r.end_dt, "sign": r.direction, "segments": 1,
+        "asset_class": asset_class, "name": name,
+        "wm": int(scale["window_minutes"]),
+        "pre": int(scale.get("pre_minutes", CONTEXT_PRE_MINUTES_DEFAULT)),
+    } for r in rows]
+
+
 def load_price_windows(
     session: Session,
     symbol: str,
@@ -651,7 +673,14 @@ def load_price_windows(
     }
 
     # 单档（Phase 2）：_scale_events 内部已做同向相邻合并，无跨档合并。
-    merged = _scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap)
+    # 行为引擎切换开关（price-behavior-engine-plan Task 8）：开 = 待标窗口改读 behavior_segments
+    # （0.5 档以上，字段映射为同形 raw dict，下游富化/冻结/对标逻辑原样复用）；显式调试参数仍走原始扫描。
+    if (getattr(config, "BEHAVIOR_REPLACES_ANNOTATION_WINDOWS", False)
+            and threshold_pct is None and window_minutes is None and rows):
+        merged = _behavior_segment_events(session, symbol, display_cutoff, scale,
+                                          rows[-1].asset_class, rows[-1].name)
+    else:
+        merged = _scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap)
 
     # A策略①（2026-06-28 简化）：**只冻结「最新且仍在生长边缘」的那一个窗口**——它后面还没有更晚的
     # 窗口/价格来确认它走完，可能随新 bar 继续合并。更早的窗口后面都已有更晚窗口 → 已走完 → 可标。
