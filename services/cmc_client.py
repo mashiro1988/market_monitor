@@ -4,7 +4,7 @@
 - 拉 CMC `/v1/cryptocurrency/categories` 取全量板块列表
 - 对在白名单内的板块（config.SECTOR_WHITELIST）逐个拉 `/v1/cryptocurrency/category?id=`
   取其下币种，把 (symbol, category) 多对多关系 upsert 到 `cmc_symbol_categories` 表
-- 用 7 天 TTL 控制：默认启动时检查最新 updated_at，距今 ≥ 7 天才刷新
+- 用 7 天 TTL 控制：默认启动时检查每个白名单板块的 updated_at，缺失或任一过期才刷新
 - 提供 `python run.py refresh-sectors` CLI 强制刷新（force=True）
 
 存的是 CMC 视角的 symbol（如 "ETH"、"BTC"），不带后缀。sector_scanner 自己负责把
@@ -38,7 +38,7 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,15}$")
 # CMC API 在国内可直连，且走代理（Clash 等）容易在长会话里掐掉 SSL。
 # 默认 bypass 代理；若用户在墙外或要强行走代理，设 CMC_USE_PROXY=1。
 _CMC_USE_PROXY = os.getenv("CMC_USE_PROXY", "0").strip().lower() in {"1", "true", "yes", "on"}
-# 重试参数（SSL 抖动、Clash 抽风、5xx 等都重试）
+# 重试参数（SSL 抖动、Clash 抽风、429 限流、5xx 等都重试）
 _RETRY_MAX_ATTEMPTS = 3
 _RETRY_BASE_BACKOFF = 2.0  # 秒；第 N 次重试 sleep base * 2^N
 
@@ -96,9 +96,9 @@ def _get(path: str, params: Optional[dict] = None, *, timeout: float = 30.0) -> 
                 continue
             raise
         except requests.exceptions.HTTPError as exc:
-            # 5xx 也重试；4xx 直接抛
+            # 429 限流与 5xx 都重试；其他 4xx 直接抛
             status_code = exc.response.status_code if exc.response is not None else 0
-            if 500 <= status_code < 600 and attempt < _RETRY_MAX_ATTEMPTS:
+            if (status_code == 429 or 500 <= status_code < 600) and attempt < _RETRY_MAX_ATTEMPTS:
                 last_exc = exc
                 backoff = _RETRY_BASE_BACKOFF * (2 ** (attempt - 1))
                 logger.warning("CMC {} 返回 {} 第 {} 次, {:.1f}s 后重试",
@@ -157,12 +157,20 @@ def fetch_category_coins(category_id: str) -> list[dict]:
 # TTL 检查
 # ============================================================
 def needs_refresh(session: Session, *, ttl_days: Optional[int] = None) -> bool:
-    """表为空 or MAX(updated_at) 距今 ≥ ttl_days → True。"""
+    """表为空、白名单板块缺失，或任一白名单板块过期 → True。"""
     ttl = ttl_days if ttl_days is not None else config.CMC_CACHE_TTL_DAYS
-    latest = session.execute(select(func.max(CmcSymbolCategory.updated_at))).scalar()
-    if latest is None:
+    whitelist = set(config.all_whitelisted_cmc_categories())
+    if not whitelist:
+        return False
+    rows = session.execute(
+        select(CmcSymbolCategory.category, func.max(CmcSymbolCategory.updated_at))
+        .group_by(CmcSymbolCategory.category)
+    ).all()
+    latest_by_category = {category: latest for category, latest in rows if category in whitelist}
+    if set(latest_by_category) != whitelist:
         return True
-    age = datetime.utcnow() - latest
+    oldest = min(latest_by_category.values())
+    age = datetime.utcnow() - oldest
     return age >= timedelta(days=ttl)
 
 

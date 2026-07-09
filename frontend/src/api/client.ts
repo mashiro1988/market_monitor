@@ -45,6 +45,13 @@ export class ApiError extends Error {
 }
 
 const API_BASE = "/api";
+const AUTH_STORAGE_KEY = "marketMonitor.authToken";
+
+function authHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = window.localStorage.getItem(AUTH_STORAGE_KEY)?.trim();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 function buildQuery(params: Record<string, string | number | boolean | null | undefined | string[]> = {}) {
   const search = new URLSearchParams();
@@ -64,6 +71,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...(init?.headers ?? {})
     },
     ...init

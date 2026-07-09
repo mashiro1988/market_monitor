@@ -6,7 +6,7 @@ from loguru import logger
 from database import get_session
 from models.news import NewsItem
 from services import market_calendar
-from scanners.base import BaseSource, NewsRecord
+from scanners.base import BaseSource, NewsRecord, SourceHealthMixin
 from scanners.sources.jin10_source import Jin10Source
 from scanners.sources.rss_source import create_rss_sources
 from scanners.scorer import NewsScorer
@@ -19,7 +19,7 @@ def _chunks(items: list[str], size: int = 500):
         yield items[idx:idx + size]
 
 
-class NewsScanner:
+class NewsScanner(SourceHealthMixin):
     """新闻扫描器 - 5分钟频率多源新闻聚合"""
 
     def __init__(self):
@@ -33,19 +33,23 @@ class NewsScanner:
         self.sources.extend(create_rss_sources())
 
         self.scorer = NewsScorer()
+        self._reset_source_statuses()
 
     def scan(self) -> list[NewsRecord]:
         """执行一次完整的新闻扫描"""
         all_records: list[NewsRecord] = []
         scan_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        self._reset_source_statuses()
 
         for source in self.sources:
             try:
                 logger.info(f"[NewsScanner] 采集 {source.name}...")
                 records = source.fetch()
+                self._record_source_status(source.name, records, stage="scan")
                 all_records.extend(records)
                 logger.info(f"[NewsScanner] {source.name} 返回 {len(records)} 条新闻")
             except Exception as e:
+                self._record_source_error(source.name, e, stage="scan")
                 logger.error(f"[NewsScanner] {source.name} 采集失败: {e}")
 
         if not all_records:
@@ -91,6 +95,7 @@ class NewsScanner:
         """
         requested_hours = int(config.NEWS_BACKFILL_MAX_HOURS if max_hours is None else max_hours)
         window_hours = min(max(requested_hours, 0), 72)
+        self._reset_source_statuses()
         if window_hours <= 0:
             logger.info("[NewsBackfill] 已禁用（window_hours <= 0）")
             return []
@@ -210,9 +215,11 @@ class NewsScanner:
                         r for r in source_records
                         if r.published_at is not None and start_time <= r.published_at < end_time
                     ]
+                self._record_source_status(source.name, source_records, stage="backfill")
                 records.extend(source_records)
                 logger.info(f"[NewsBackfill] {source.name} 返回 {len(source_records)} 条")
             except Exception as e:
+                self._record_source_error(source.name, e, stage="backfill")
                 logger.error(f"[NewsBackfill] {source.name} 回补失败: {e}")
         return records
 

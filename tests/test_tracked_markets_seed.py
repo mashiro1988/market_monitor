@@ -23,7 +23,7 @@ def session():
     s.close()
 
 
-def test_seed_inserts_slugs_and_tags(session):
+def test_seed_inserts_slugs_and_ignores_tags(session):
     seed_tracked_markets(
         session,
         slugs=["how-many-fed-rate-cuts-in-2026", "fed-decision-in-june-825"],
@@ -31,12 +31,11 @@ def test_seed_inserts_slugs_and_tags(session):
     )
 
     rows = session.query(TrackedMarket).order_by(TrackedMarket.kind, TrackedMarket.identifier).all()
-    assert len(rows) == 4
+    assert len(rows) == 2
     kinds = {(r.kind, r.identifier) for r in rows}
     assert ("slug", "how-many-fed-rate-cuts-in-2026") in kinds
     assert ("slug", "fed-decision-in-june-825") in kinds
-    assert ("tag", "fed") in kinds
-    assert ("tag", "inflation") in kinds
+    assert all(kind == "slug" for kind, _ in kinds)
     assert all(r.enabled for r in rows)
 
 
@@ -45,7 +44,7 @@ def test_seed_is_idempotent(session):
     seed_tracked_markets(session, slugs=["foo", "baz"], tags=["bar"])
 
     rows = session.query(TrackedMarket).all()
-    assert len(rows) == 3
+    assert len(rows) == 2
 
 
 def test_seed_does_not_overwrite_user_changes(session):

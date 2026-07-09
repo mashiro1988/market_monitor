@@ -47,7 +47,7 @@ class PredictionsResponse(BaseModel):
 
 class TrackedMarketSchema(BaseModel):
     id: int
-    kind: Literal["slug", "tag"]
+    kind: Literal["slug"]
     identifier: str
     display_name: str | None = None
     enabled: bool
@@ -55,7 +55,7 @@ class TrackedMarketSchema(BaseModel):
 
 
 class TrackedMarketCreate(BaseModel):
-    kind: Literal["slug", "tag"]
+    kind: Literal["slug"]
     identifier: str
     display_name: str | None = None
     notes: str | None = None

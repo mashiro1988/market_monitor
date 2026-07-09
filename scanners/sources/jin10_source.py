@@ -67,14 +67,22 @@ class Jin10Source(BaseSource):
                 proxies=proxies,
             )
             data = r.json()
-            items = data.get("data", [])
+            if not isinstance(data, dict):
+                return records
+            items = data.get("data") or []
+            if not isinstance(items, list):
+                return records
         except Exception as e:
             logger.error(f"金十数据请求失败: {e}")
             return records
 
         for it in items:
             try:
-                content_data = it.get("data", {})
+                if not isinstance(it, dict):
+                    continue
+                content_data = it.get("data") or {}
+                if not isinstance(content_data, dict):
+                    content_data = {}
                 title = content_data.get("title", "").strip()
                 content = content_data.get("content", "").strip()
 
@@ -130,6 +138,7 @@ class Jin10Source(BaseSource):
         pages = 0
 
         while cursor > start_time and pages < max_pages:
+            seen_before_page = len(seen_ids)
             page_records = self.fetch(max_time=cursor)
             pages += 1
             dated_records = [r for r in page_records if r.published_at is not None]
@@ -148,8 +157,12 @@ class Jin10Source(BaseSource):
             if oldest <= start_time:
                 break
             if oldest >= cursor:
-                break
-            cursor = oldest - timedelta(seconds=1)
+                if len(seen_ids) == seen_before_page:
+                    cursor = cursor - timedelta(seconds=1)
+                else:
+                    cursor = oldest
+            else:
+                cursor = oldest
 
         if pages >= max_pages:
             logger.warning(f"金十数据回补达到最大页数 {max_pages}，可能仍有更早新闻未拉完")

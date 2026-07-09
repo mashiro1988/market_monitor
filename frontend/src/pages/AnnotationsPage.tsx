@@ -307,7 +307,7 @@ export function AnnotationsPage() {
         // 派生兼容字段（与后端 _derive_compat_fields 同口径）
         const roleIds = Object.keys(merged.news_roles).map(Number);
         const selected = roleIds.filter((id) => merged.news_roles[id] === "driver");
-        const noClear = selected.length === 0;
+        const noClear = selected.length === 0 || merged.market_reaction_type === "no_news_driver";
         const full: AutoAnnotateBatchItem = { ...merged, selected_news_ids: selected, no_clear_news: noClear };
         // 用户把窗口清回全空且无 AI 痕迹 → 删草稿而不是存空条目（保持「没动过=无草稿」语义，
         // 批量自动标注的 pending 列表也依赖这一点）。
@@ -495,14 +495,20 @@ export function AnnotationsPage() {
             context_pre_minutes: w.context_pre_minutes ?? 30
           }))
         });
+        const chunkEntries = new Map<string, AutoAnnotateBatchItem>();
         for (const item of response.results) {
           accum.set(`${item.symbol}|${item.window_start_utc}|${item.window_end_utc}`, item);
+          chunkEntries.set(`${item.symbol}|${item.window_start_utc}|${item.window_end_utc}`, item);
         }
         // 多片时各 chunk 的 reasoning 互相独立，前端只展示最近一片，避免拼太长。
         lastReasoning = response.reasoning;
         lastModel = response.model;
         totalDuration += response.duration_seconds;
-        setBatchByKey(new Map(accum));
+        setBatchByKey((prev) => {
+          const next = new Map(prev);
+          chunkEntries.forEach((item, key) => next.set(key, item));
+          return next;
+        });
         setBatchMeta({ reasoning: lastReasoning, model: lastModel, duration_seconds: totalDuration });
         setBatchProgress({ done: i + 1, total: chunks.length });
       }
@@ -517,6 +523,7 @@ export function AnnotationsPage() {
   };
 
   const batchInFlight = batchProgress != null && batchProgress.done < batchProgress.total;
+  const saveDisabled = save.isPending || contextNews.isLoading || contextNews.isFetching || !contextNews.data;
 
   // 候选新闻表 columns：必须 useMemo，否则父级每次 re-render（hover、textarea 输入等）都新建
   // columns 数组 + 新 cell 闭包，DataTable 收到新 props → 整张表全部重渲。
@@ -787,7 +794,7 @@ export function AnnotationsPage() {
                   />
                 </label>
                 <div className="annotation-save-row">
-                  <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                  <Button disabled={saveDisabled} onClick={() => save.mutate()}>
                     <Save size={16} />保存标注
                   </Button>
                   {save.data ? <div className="task-banner succeeded">已保存标注 #{save.data.id}</div> : null}

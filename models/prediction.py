@@ -18,7 +18,7 @@ class PredictionMarket(Base):
     probability = Column(Float, nullable=False)          # 0.0 - 1.0
     prev_probability = Column(Float, nullable=True)     # 上次快照的概率
     volume = Column(Float, nullable=True)                # 交易量
-    # 来源跟踪项："slug:<identifier>" / "tag:<identifier>"（对应 tracked_markets.kind:identifier）。
+    # 来源跟踪项："slug:<identifier>"（对应 tracked_markets.kind:identifier）。
     # 图表按它精确过滤软删跟踪项；2026-06-10 之前的旧快照为 NULL。
     origin = Column(String(120), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

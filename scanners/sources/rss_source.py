@@ -6,7 +6,6 @@ import hashlib
 import re
 import time
 from datetime import datetime
-from email.utils import parsedate_to_datetime
 import requests
 from loguru import logger
 from scanners.base import BaseSource, NewsRecord
@@ -70,17 +69,25 @@ class RSSSource(BaseSource):
                 # 提取链接
                 link = entry.get("link", "")
 
-                # 提取 source_id
-                source_id = entry.get("id", link or title)
-
                 # 提取发布时间
                 published_at = None
+                parsed_time = None
                 if hasattr(entry, "published_parsed") and entry.published_parsed:
+                    parsed_time = entry.published_parsed
+                elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
+                    parsed_time = entry.updated_parsed
+                if parsed_time:
                     try:
                         import calendar
-                        published_at = datetime.utcfromtimestamp(calendar.timegm(entry.published_parsed))
+                        published_at = datetime.utcfromtimestamp(calendar.timegm(parsed_time))
                     except Exception:
                         pass
+
+                # 提取 source_id；空 guid/id 不能让整条 feed 坍缩到同一个键。
+                source_id = (entry.get("id") or entry.get("guid") or link or title).strip()
+                source_fingerprint = "|".join(
+                    part for part in (source_id, title, published_at.isoformat() if published_at else "") if part
+                )
 
                 # 提取分类
                 categories = ""
@@ -89,7 +96,7 @@ class RSSSource(BaseSource):
 
                 records.append(NewsRecord(
                     source=self.source_key,
-                    source_id=str(hashlib.md5(source_id.encode()).hexdigest()),
+                    source_id=str(hashlib.md5(source_fingerprint.encode()).hexdigest()),
                     title=title,
                     content=content[:2000] if content else None,
                     url=link,

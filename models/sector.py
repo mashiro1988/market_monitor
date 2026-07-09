@@ -2,7 +2,7 @@
 
 两张表：
 - cmc_symbol_categories  — symbol → CMC category 的本地映射缓存（7 天 TTL，从 CMC API 刷新）
-- sector_returns         — 每个板块在每个 snapshot_at 时的等权涨跌（多周期）
+- sector_returns         — 每个板块在每个 snapshot_at 时的均值/中位数涨跌（多周期）
 
 时间字段都是 UTC naive，跟 market_monitor 现有约定一致。
 详细背景见 docs/specs/remote_data_integration.md §4。
@@ -18,7 +18,7 @@ class CmcSymbolCategory(Base):
     """Symbol → CMC 板块 的多对多映射的本地缓存。
 
     刷新策略：
-    - 启动时若表为空或 MAX(updated_at) 距今 ≥ CMC_CACHE_TTL_DAYS，触发一次刷新
+    - 启动时若任一白名单板块缺失或过期，触发一次刷新
     - Phase 2 起，APScheduler 每周一凌晨自动刷新
     - 手动：`python run.py refresh-sectors`
 
@@ -49,6 +49,7 @@ class SectorReturn(Base):
 
     token_count 是参与计算的活跃 symbol 数。
     ret_*h 是该板块下 symbol 的 1h / 24h / 168h / 720h 等权平均涨跌（百分比）。
+    ret_*h_median 是同一批 symbol 的中位数涨跌，用来衡量板块广度。
     """
     __tablename__ = "sector_returns"
 
@@ -61,6 +62,10 @@ class SectorReturn(Base):
     ret_24h = Column(Float, nullable=True)
     ret_168h = Column(Float, nullable=True)
     ret_720h = Column(Float, nullable=True)
+    ret_1h_median = Column(Float, nullable=True)
+    ret_24h_median = Column(Float, nullable=True)
+    ret_168h_median = Column(Float, nullable=True)
+    ret_720h_median = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

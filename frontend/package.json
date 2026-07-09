@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc -b",
+    "generate:api-types": "python ../scripts/generate_openapi_types.py",
+    "build": "npm run generate:api-types && tsc -b && vite build",
+    "typecheck": "npm run generate:api-types && tsc -b",
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {

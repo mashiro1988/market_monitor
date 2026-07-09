@@ -16,6 +16,8 @@ import time
 import pandas as pd
 from typing import Optional, Dict, Any
 
+from loguru import logger
+
 import config
 
 try:
@@ -84,7 +86,7 @@ class DuneQueryRunner:
                     'failed to fetch', 'core-api', 'connection', 'timeout', 
                     'server error', '503', '502', '504'
                 ]):
-                    print(f"⚠ Dune服务器问题，尝试 {attempt + 1}/{max_retries}...")
+                    logger.warning("Dune 服务器问题，尝试 {}/{}...", attempt + 1, max_retries)
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                         continue

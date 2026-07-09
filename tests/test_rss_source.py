@@ -33,5 +33,22 @@ def test_rss_retries_once_on_429(monkeypatch):
     monkeypatch.setattr(config, "proxies", lambda: {})
 
     records = RSSSource("financialjuice", "http://x/feed", "FinancialJuice", "en").fetch()
-    assert calls["n"] == 2                        # 429 后退避重试了一次
+    assert any(r.title == "Fed hikes" for r in records)
+    assert calls["n"] == 2
+
+
+def test_rss_empty_guid_uses_title_and_time_fingerprint(monkeypatch):
+    feed = b"""
+    <rss><channel>
+      <item><title>Fed hikes</title><guid></guid><pubDate>Mon, 06 Jul 2026 10:00:00 GMT</pubDate></item>
+      <item><title>Fed hikes</title><guid></guid><pubDate>Mon, 06 Jul 2026 10:05:00 GMT</pubDate></item>
+    </channel></rss>
+    """
+
+    monkeypatch.setattr(rss_source.requests, "get", lambda *a, **k: _Resp(200, feed))
+    monkeypatch.setattr(config, "proxies", lambda: {})
+
+    records = RSSSource("financialjuice", "http://x/feed", "FinancialJuice", "en").fetch()
+    assert len(records) == 2
+    assert len({record.source_id for record in records}) == 2
     assert any(r.title == "Fed hikes" for r in records)

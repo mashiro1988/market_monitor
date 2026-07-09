@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from scanners.base import NewsRecord
 from scanners.sources.jin10_source import Jin10Source
 
 
@@ -42,3 +43,62 @@ def test_jin10_importance_is_flag_not_score():
         records = Jin10Source().fetch()
 
     assert [r.importance for r in records] == [1, 0]
+
+
+def test_fetch_handles_null_data_page():
+    response = MagicMock()
+    response.json.return_value = {"data": None}
+
+    with patch("scanners.sources.jin10_source.requests.get", return_value=response):
+        assert Jin10Source().fetch() == []
+
+
+def test_backfill_revisits_same_second_boundary():
+    class StubJin10Source(Jin10Source):
+        def __init__(self):
+            self.cursors = []
+            self.pages = [
+                [
+                    NewsRecord(
+                        source="jin10",
+                        source_id="a",
+                        title="A",
+                        published_at=datetime(2026, 1, 1, 10, 0, 1),
+                    ),
+                    NewsRecord(
+                        source="jin10",
+                        source_id="b",
+                        title="B",
+                        published_at=datetime(2026, 1, 1, 10, 0, 0),
+                    ),
+                ],
+                [
+                    NewsRecord(
+                        source="jin10",
+                        source_id="b",
+                        title="B",
+                        published_at=datetime(2026, 1, 1, 10, 0, 0),
+                    ),
+                    NewsRecord(
+                        source="jin10",
+                        source_id="c",
+                        title="C",
+                        published_at=datetime(2026, 1, 1, 10, 0, 0),
+                    ),
+                ],
+                [],
+            ]
+
+        def fetch(self, max_time=None):
+            self.cursors.append(max_time)
+            return self.pages.pop(0)
+
+    source = StubJin10Source()
+
+    records = source.fetch_backfill(
+        start_time=datetime(2026, 1, 1, 9, 59, 0),
+        end_time=datetime(2026, 1, 1, 10, 2, 0),
+    )
+
+    assert [record.source_id for record in records] == ["a", "b", "c"]
+    assert source.cursors[1] == datetime(2026, 1, 1, 10, 0, 0)

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+import hmac
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,13 +25,22 @@ from api.errors import (
 )
 from api.routes import router
 from database import create_tables
-from run import next_aligned_run_time, run_scan_once, run_startup_backfill_once
+from services.logging_config import configure_logging
+from services.scan_runtime import (
+    configure_proxy_env,
+    next_aligned_run_time,
+    run_scan_once,
+    run_startup_backfill_once,
+)
+
+configure_logging()
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 
 
 def _start_background_scheduler() -> BackgroundScheduler:
+    configure_proxy_env()
     create_tables()
     scheduler = BackgroundScheduler(timezone="UTC")
 
@@ -72,9 +82,18 @@ def _start_background_scheduler() -> BackgroundScheduler:
         """
         try:
             from services.remote_puller import run_remote_data_cycle
+            from services.remote_monitoring import check_remote_data_health
+
             stats = run_remote_data_cycle()
+            check_remote_data_health(stats=stats)
             logger.info("[FastAPI Scheduler] remote_data_cycle finished: {}", stats)
         except Exception as exc:
+            try:
+                from services.remote_monitoring import check_remote_data_health
+
+                check_remote_data_health(exception=exc)
+            except Exception:
+                logger.exception("[FastAPI Scheduler] remote_data_cycle monitor failed")
             logger.exception("[FastAPI Scheduler] remote_data_cycle failed: {}", exc)
 
     def gap_repair_cycle() -> None:
@@ -105,6 +124,16 @@ def _start_background_scheduler() -> BackgroundScheduler:
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] news_tagging failed: {}", exc)
 
+    def data_retention_cycle() -> None:
+        """每日清理过期快照；被标注/训练集引用的新闻由 service 层保护。"""
+        try:
+            from services.data_retention import cleanup_retained_data
+
+            stats = cleanup_retained_data()
+            logger.info("[FastAPI Scheduler] data_retention finished: {}", stats)
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] data_retention failed: {}", exc)
+
     def cmc_bootstrap() -> None:
         """启动后异步检查 CMC 板块映射是否过期(7 天 TTL),过期了就刷新。
         作为 date trigger 一次性 job,不阻塞 lifespan。首次启动大概 2 分钟。
@@ -125,6 +154,22 @@ def _start_background_scheduler() -> BackgroundScheduler:
                 session.close()
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] cmc_bootstrap failed: {}", exc)
+
+    def cmc_refresh() -> None:
+        """每周强制刷新 CMC 板块映射，处理 CMC 侧新增/退出板块成员。"""
+        try:
+            from database import SessionLocal
+            from services import cmc_client
+
+            session = SessionLocal()
+            try:
+                logger.info("[FastAPI Scheduler] cmc_refresh: 开始每周强制刷新板块映射...")
+                result = cmc_client.refresh_categories(session=session, force=True)
+                logger.info("[FastAPI Scheduler] cmc_refresh done: {}", result)
+            finally:
+                session.close()
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] cmc_refresh failed: {}", exc)
 
     price_interval = max(1, int(config.SCAN_INTERVALS.get("price", 5)))
     scheduler.add_job(
@@ -173,6 +218,14 @@ def _start_background_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        data_retention_cycle,
+        CronTrigger(hour=3, minute=17),
+        id="data_retention",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # CMC 板块映射启动检查:lifespan 起来后 10s 跑一次。如果 TTL 过期会触发刷新(~2min)。
     scheduler.add_job(
         cmc_bootstrap,
@@ -181,6 +234,14 @@ def _start_background_scheduler() -> BackgroundScheduler:
         id="cmc_bootstrap",
         replace_existing=True,
         max_instances=1,
+    )
+    scheduler.add_job(
+        cmc_refresh,
+        CronTrigger(day_of_week="mon", hour=2, minute=17),
+        id="cmc_refresh",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     scheduler.start()
     return scheduler
@@ -213,6 +274,27 @@ def create_app(enable_scheduler: bool = True) -> FastAPI:
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(Exception, unhandled_error_handler)
+
+    @app.middleware("http")
+    async def optional_api_auth(request: Request, call_next):
+        token = config.APP_AUTH_TOKEN.strip()
+        path = request.url.path
+        if (
+            token
+            and path.startswith("/api/")
+            and path != "/api/health"
+            and request.method != "OPTIONS"
+        ):
+            auth = request.headers.get("authorization", "")
+            supplied = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+            supplied = supplied or request.headers.get("x-app-token", "").strip()
+            if not hmac.compare_digest(supplied, token):
+                return JSONResponse(
+                    status_code=401,
+                    content={"code": "UNAUTHORIZED", "message": "未授权", "details": {}},
+                )
+        return await call_next(request)
+
     app.include_router(router)
 
     @app.get("/api/openapi.json", include_in_schema=False)
@@ -244,8 +326,13 @@ def create_app(enable_scheduler: bool = True) -> FastAPI:
                 status_code=404,
                 content={"code": "NOT_FOUND", "message": "API 路径不存在", "details": {"path": path}},
             )
-        target = FRONTEND_DIST / path
-        if target.exists() and target.is_file():
+        frontend_root = FRONTEND_DIST.resolve()
+        try:
+            target = (FRONTEND_DIST / path).resolve()
+            target.relative_to(frontend_root)
+        except (OSError, ValueError):
+            target = None
+        if target is not None and target.exists() and target.is_file():
             return FileResponse(target)
         index = FRONTEND_DIST / "index.html"
         if index.exists():

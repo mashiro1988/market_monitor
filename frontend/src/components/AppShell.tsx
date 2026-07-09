@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, Bell, Database, Grid, LineChart, Newspaper, PenSquare, Radar } from "lucide-react";
+import { Activity, Bell, Grid, LineChart, Newspaper, PenSquare, Radar } from "lucide-react";
 
 const navItems = [
   { to: "/market", label: "市场概览", icon: LineChart },
@@ -7,8 +7,7 @@ const navItems = [
   { to: "/news", label: "新闻快讯", icon: Newspaper },
   { to: "/predictions", label: "预测市场", icon: Radar },
   { to: "/alerts", label: "告警设置", icon: Bell },
-  { to: "/annotations", label: "新闻标注", icon: PenSquare },
-  { to: "/onchain", label: "链上数据", icon: Database }
+  { to: "/annotations", label: "新闻标注", icon: PenSquare }
 ];
 
 export function AppShell() {

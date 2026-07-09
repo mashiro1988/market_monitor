@@ -89,14 +89,7 @@ class YFinancePriceSource(BaseSource):
         valid_items = self._iter_closed_bars(close_series)
 
         if not valid_items:
-            # fallback: 即使 end > now 也取最后一根（盘中某些品种 bar 未完全同步时）
-            idx = close_series.index[-1]
-            end = self._to_utc_naive(idx)
-            if end is None:
-                return None
-            return end + timedelta(minutes=5), float(close_series.iloc[-1]), (
-                float(close_series.iloc[-2]) if len(close_series) >= 2 else None
-            )
+            return None
 
         last_end, last_close = valid_items[-1]
         prev_close = valid_items[-2][1] if len(valid_items) >= 2 else None

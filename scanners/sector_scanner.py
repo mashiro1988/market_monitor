@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import median
 from typing import Optional
 
 import pandas as pd
@@ -50,7 +51,7 @@ _SYMBOL_MAPPING = {"BEAMX": "BEAM", "DODOX": "DODO"}
 _VALID_SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,20}$")
 
 # 一个板块至少要这么多匹配的 symbol 才计算（信号太少就跳过）
-MIN_TOKENS_PER_SECTOR = 3
+MIN_TOKENS_PER_SECTOR = 10
 
 # 涨跌计算的 lookback bar 数（pivot 是 1h 频率，所以 1, 24, 168, 720 对应 1h, 1d, 1w, 30d）
 RETURN_LOOKBACKS = {
@@ -119,23 +120,51 @@ def _load_pivot(market: str) -> Optional[dict]:
 # ============================================================
 # 涨跌计算
 # ============================================================
-def _compute_returns_for_close(close_df: pd.DataFrame) -> tuple[Optional[datetime], dict[str, dict[str, float]]]:
+def _timestamp_to_utc_naive(ts) -> Optional[datetime]:
+    if ts is None:
+        return None
+    if hasattr(ts, "to_pydatetime"):
+        ts = ts.to_pydatetime()
+    if ts.tzinfo is not None:
+        return ts.astimezone(timezone.utc).replace(tzinfo=None)
+    return ts
+
+
+def _latest_snapshot_for_close(close_df: pd.DataFrame) -> Optional[datetime]:
+    if close_df.empty:
+        return None
+    return _timestamp_to_utc_naive(close_df.index.max())
+
+
+def _slice_close_as_of(close_df: pd.DataFrame, as_of: Optional[datetime]) -> pd.DataFrame:
+    sorted_df = close_df.sort_index()
+    if as_of is None:
+        return sorted_df
+    target = pd.Timestamp(as_of)
+    index_tz = getattr(sorted_df.index, "tz", None)
+    if index_tz is not None and target.tzinfo is None:
+        target = target.tz_localize("UTC")
+    elif index_tz is None and target.tzinfo is not None:
+        target = target.tz_convert("UTC").tz_localize(None)
+    return sorted_df.loc[sorted_df.index <= target]
+
+
+def _compute_returns_for_close(
+    close_df: pd.DataFrame,
+    *,
+    as_of: Optional[datetime] = None,
+) -> tuple[Optional[datetime], dict[str, dict[str, float]]]:
     """给一份 close DataFrame（index=DatetimeIndex, columns=symbol），算每个 symbol 的多周期涨跌。
 
     Returns:
         (snapshot_at_utc_naive, {pivot_col: {ret_1h: float | None, ret_24h: ..., ...}})
     """
+    close_df = _slice_close_as_of(close_df, as_of)
     if close_df.empty:
         return None, {}
 
     # snapshot_at = pivot 最新一行的 candle_begin_time
-    latest_ts = close_df.index.max()
-    if hasattr(latest_ts, "to_pydatetime"):
-        latest_ts = latest_ts.to_pydatetime()
-    if latest_ts.tzinfo is not None:
-        snapshot_at = latest_ts.astimezone(timezone.utc).replace(tzinfo=None)
-    else:
-        snapshot_at = latest_ts
+    snapshot_at = _latest_snapshot_for_close(close_df)
 
     out: dict[str, dict[str, float]] = {}
     latest = close_df.iloc[-1]
@@ -159,7 +188,7 @@ def _compute_returns_for_close(close_df: pd.DataFrame) -> tuple[Optional[datetim
 # ============================================================
 @dataclass
 class SectorAggregate:
-    """单个板块的等权聚合结果。"""
+    """单个板块的均值/中位数聚合结果。"""
     category: str
     group_name: Optional[str]
     token_count: int
@@ -167,6 +196,10 @@ class SectorAggregate:
     ret_24h: Optional[float]
     ret_168h: Optional[float]
     ret_720h: Optional[float]
+    ret_1h_median: Optional[float]
+    ret_24h_median: Optional[float]
+    ret_168h_median: Optional[float]
+    ret_720h_median: Optional[float]
 
 
 @dataclass
@@ -177,6 +210,48 @@ class SectorComputeResult:
     considered_cats: int
     skipped_thin: list[str]
     skipped_reason: Optional[str] = None  # 失败时填
+
+
+def _load_aligned_market_returns(
+    *,
+    use_pivot_cache: bool = False,
+) -> tuple[Optional[datetime], dict[str, dict[str, float]], dict[str, dict[str, float]]]:
+    if use_pivot_cache:
+        # 延迟 import 避免循环 (sector_service 导入了 sector_scanner)
+        from services.sector_service import _load_pivot_cached as _loader
+    else:
+        _loader = _load_pivot
+
+    spot_pivot = _loader("spot")
+    swap_pivot = _loader("swap")
+    if spot_pivot is None and swap_pivot is None:
+        return None, {}, {}
+
+    spot_close = spot_pivot.get("close") if spot_pivot is not None else None
+    swap_close = swap_pivot.get("close") if swap_pivot is not None else None
+
+    latest_times = [
+        ts for ts in (
+            _latest_snapshot_for_close(spot_close) if spot_close is not None else None,
+            _latest_snapshot_for_close(swap_close) if swap_close is not None else None,
+        )
+        if ts is not None
+    ]
+    if not latest_times:
+        return None, {}, {}
+
+    # When both spot and swap exist, calculate both as of the older latest bar.
+    # This keeps one sector snapshot from mixing two different market times.
+    snapshot_at = min(latest_times) if len(latest_times) > 1 else latest_times[0]
+
+    spot_returns: dict[str, dict[str, float]] = {}
+    swap_returns: dict[str, dict[str, float]] = {}
+    if spot_close is not None:
+        _, spot_returns = _compute_returns_for_close(spot_close, as_of=snapshot_at)
+    if swap_close is not None:
+        _, swap_returns = _compute_returns_for_close(swap_close, as_of=snapshot_at)
+
+    return snapshot_at, spot_returns, swap_returns
 
 
 def _load_per_symbol_returns(
@@ -193,30 +268,12 @@ def _load_per_symbol_returns(
     Returns:
         (snapshot_at, {normalized_symbol: {ret_1h: float, ...}})
     """
-    if use_pivot_cache:
-        # 延迟 import 避免循环 (sector_service 导入了 sector_scanner)
-        from services.sector_service import _load_pivot_cached as _loader
-    else:
-        _loader = _load_pivot
-
-    spot_pivot = _loader("spot")
-    swap_pivot = _loader("swap")
-    if spot_pivot is None and swap_pivot is None:
+    snapshot_at, spot_returns, swap_returns = _load_aligned_market_returns(
+        use_pivot_cache=use_pivot_cache
+    )
+    if snapshot_at is None:
         return None, {}
 
-    snapshot_at: Optional[datetime] = None
-    spot_returns: dict[str, dict[str, float]] = {}
-    swap_returns: dict[str, dict[str, float]] = {}
-
-    if spot_pivot is not None:
-        s_at, spot_returns = _compute_returns_for_close(spot_pivot["close"])
-        snapshot_at = s_at
-    if swap_pivot is not None:
-        s_at, swap_returns = _compute_returns_for_close(swap_pivot["close"])
-        if snapshot_at is None or (s_at is not None and s_at > snapshot_at):
-            snapshot_at = s_at
-
-    # 规范化 + 合并（spot 覆盖 swap）
     sym_to_returns: dict[str, dict[str, float]] = {}
     for col, rets in swap_returns.items():
         nsym = normalize_pivot_symbol(col)
@@ -283,6 +340,10 @@ def compute_all_sector_returns(
             ret_name: (round(sum(values) / len(values), 4) if values else None)
             for ret_name, values in agg.items()
         }
+        medians: dict[str, Optional[float]] = {
+            ret_name: (round(float(median(values)), 4) if values else None)
+            for ret_name, values in agg.items()
+        }
         aggregates.append(SectorAggregate(
             category=category,
             group_name=config.cmc_category_to_group(category),
@@ -291,6 +352,10 @@ def compute_all_sector_returns(
             ret_24h=means["ret_24h"],
             ret_168h=means["ret_168h"],
             ret_720h=means["ret_720h"],
+            ret_1h_median=medians["ret_1h"],
+            ret_24h_median=medians["ret_24h"],
+            ret_168h_median=medians["ret_168h"],
+            ret_720h_median=medians["ret_720h"],
         ))
 
     return SectorComputeResult(
@@ -334,6 +399,10 @@ class SectorScanner:
                     ret_24h=a.ret_24h,
                     ret_168h=a.ret_168h,
                     ret_720h=a.ret_720h,
+                    ret_1h_median=a.ret_1h_median,
+                    ret_24h_median=a.ret_24h_median,
+                    ret_168h_median=a.ret_168h_median,
+                    ret_720h_median=a.ret_720h_median,
                 )
                 for a in result.aggregates
             ]

@@ -20,7 +20,6 @@ Phase 4 会在同一个 cycle 末尾加 factor_compute（按需订阅币的 1h c
 """
 from __future__ import annotations
 
-import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -28,6 +27,7 @@ from typing import Optional
 
 from loguru import logger
 
+import config
 from services import remote_fs
 
 
@@ -40,8 +40,8 @@ from services import remote_fs
 # Phase 1 全部 hourly,所以 cycle 间隔也是 1h,跟 dataset 节奏对齐.
 # Phase 4 加 5min focal candle 后,把这个降到 300s,5min dataset 每次都查,
 # hourly dataset 每 12 次 cycle 才会被检查.
-POLL_INTERVAL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "3600"))
-REMOTE_OFFSET = os.getenv("REMOTE_OFFSET", "30m")  # BMAC 的 hour offset 子目录
+POLL_INTERVAL_SECONDS = config.REMOTE_PULLER_POLL_SECONDS
+REMOTE_OFFSET = config.REMOTE_OFFSET  # BMAC 的 hour offset 子目录
 
 
 # ============================================================

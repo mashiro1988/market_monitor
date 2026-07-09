@@ -1,4 +1,4 @@
-"""Filtering rules for Polymarket market discovery."""
+"""Filtering rules retained for Polymarket market quality checks."""
 
 NOISE_KEYWORDS = [
     # 足球/体育联赛
@@ -29,11 +29,14 @@ INCLUDE_KEYWORDS = [
     "fed", "fomc", "federal reserve", "interest rate", "rate cut", "rate cuts",
     "bps", "inflation", "cpi", "consumer price index",
     "hormuz", "strait", "shipping", "transit", "portwatch",
+    "oil", "crude", "brent", "wti", "opec",
+    "iran", "israel", "middle east", "red sea", "houthi", "gaza",
+    "war", "ceasefire", "sanction", "geopolitical",
 ]
 
 
 class PolymarketMarketFilter:
-    """Classifies discovered Gamma markets as relevant or noise."""
+    """Classifies Gamma markets as relevant or noise."""
 
     def __init__(
         self,

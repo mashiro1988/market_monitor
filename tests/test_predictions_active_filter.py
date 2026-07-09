@@ -1,6 +1,6 @@
 """图表数据只含「仍在跟踪」的市场。
 
-快照带 origin（"slug:<identifier>" / "tag:<identifier>"）时按 tracked_markets 的软删状态
+快照带 origin（"slug:<identifier>"）时按 tracked_markets 的软删状态
 **精确过滤**：删除跟踪立即清图；市场结算 / 接口抖动导致的断流不误伤。
 旧数据（origin 为 NULL）退回断流启发式：最后一笔快照落后表内最新快照超过
 config.PREDICTION_ACTIVE_GRACE_MINUTES（相对表内最新时间而非墙钟）即视为已停跟踪。
@@ -125,8 +125,8 @@ def test_dismissed_origin_market_hidden_even_when_fresh(session):
     assert prediction_service.get_market_history(session, "dead", hours=24) == []
 
 
-def test_settled_tag_market_history_preserved_while_tag_tracked(session):
-    """tag 发现型市场结算后断流（如 CPI 公布），只要 tag 还在跟踪 → 历史保留，可复盘。"""
+def test_tag_origin_history_is_not_preserved_after_discovery_removed(session):
+    """tag 自动发现已退场；旧 tag-origin 快照不再因为 tag 行存在而保持活跃。"""
     now = utc_now_naive()
     _track(session, "tag", "cpi")
     _track(session, "slug", "live-market")
@@ -139,8 +139,8 @@ def test_settled_tag_market_history_preserved_while_tag_tracked(session):
     session.commit()
 
     res = prediction_service.get_predictions(session, hours=24)
-    assert {m.market_id for m in res.markets} == {"cpi03", "live"}
-    assert len(prediction_service.get_market_history(session, "cpi03", hours=24)) == 3
+    assert {m.market_id for m in res.markets} == {"live"}
+    assert prediction_service.get_market_history(session, "cpi03", hours=24) == []
 
 
 def test_mixed_legacy_and_origin_rows_follow_origin_verdict(session):

@@ -6,41 +6,40 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 from database import get_session
 from models.price import PriceSnapshot
-from scanners.base import BaseSource, PriceRecord
+from scanners.base import BaseSource, PriceRecord, SourceHealthMixin
 from scanners.sources.yfinance_source import YFinancePriceSource
 from scanners.sources.okx_source import OkxPriceSource
-from scanners.sources.coingecko_source import CoinGeckoPriceSource
 from scanners.sources.cnbc_bond_source import CnbcBondQuoteSource
 from scanners.gap_filler import GapFiller
 import config
 
 
-class PriceScanner:
+class PriceScanner(SourceHealthMixin):
     """价格扫描器 - 5分钟频率采集所有资产价格"""
 
     def __init__(self):
         self.yfinance = YFinancePriceSource()
         self.okx = OkxPriceSource()              # 加密货币主源：OKX 合约优先，现货补位
-        self.coingecko = CoinGeckoPriceSource()  # 加密货币备用源：OKX 缺失时使用实时价
         self.cnbc_bonds = CnbcBondQuoteSource()   # 美/日债收益率：CNBC 行情 API（海外可达）
         self.gap_filler = GapFiller()
+        self._reset_source_statuses()
 
     def scan(self) -> list[PriceRecord]:
         """执行一次完整的价格扫描"""
         all_records: list[PriceRecord] = []
         scan_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        self._reset_source_statuses()
 
         # 1. yfinance: 股指、期货、亚洲指数、商品、部分债券
         all_records.extend(self._fetch_safe(self.yfinance))
 
-        # 2. 加密货币：OKX 先查合约 5m K 线，合约不存在则现货 5m K 线；缺失品种再用 CoinGecko 实时价兜底
+        # 2. 加密货币：OKX 先查合约 5m K 线，合约不存在则现货 5m K 线；缺失品种等待小时级回补，不写实时 tick。
         crypto_records = self._fetch_safe(self.okx)
         expected_crypto = set(config.PRICE_SOURCES.get("crypto", {}).keys())
         fetched_crypto = {r.name for r in crypto_records}
         missing_crypto = sorted(expected_crypto - fetched_crypto)
         if missing_crypto:
-            logger.warning(f"[PriceScanner] OKX 缺失 {missing_crypto}，降级到 CoinGecko 实时价")
-            crypto_records.extend(self._fetch_coingecko_symbols(missing_crypto))
+            logger.warning(f"[PriceScanner] OKX 缺失 {missing_crypto}，本轮不写实时兜底，等待历史回补补齐")
         all_records.extend(crypto_records)
 
         # 3. CNBC: 美债/日债 2Y/10Y 盘中收益率（海外可达，替代东方财富）
@@ -72,8 +71,8 @@ class PriceScanner:
         """
         回补最近最多 72 小时的 5m 价格历史。
 
-        yfinance / OKX 可以按历史 K 线回补；CoinGecko 与 CNBC quote 只有当前价口径，
-        不伪造历史点。重复的 (symbol, timestamp) 会在写入时跳过。
+        yfinance / OKX 可以按历史 K 线回补；CNBC quote 只有当前价口径，不伪造历史点。
+        重复的 (symbol, timestamp) 会在写入时跳过。
         """
         requested_hours = int(config.PRICE_BACKFILL_MAX_HOURS if max_hours is None else max_hours)
         window_hours = min(max(requested_hours, 0), 72)
@@ -125,8 +124,7 @@ class PriceScanner:
         )
 
         logger.info(
-            "[PriceBackfill] 回补完成；CNBC 债券与 CoinGecko 备用源无历史 5m K 线，"
-            "只会由常规扫描写入当前报价"
+            "[PriceBackfill] 回补完成；CNBC 债券源无历史 5m K 线，只会由常规扫描写入当前报价"
         )
         return all_records
 
@@ -135,19 +133,12 @@ class PriceScanner:
         try:
             logger.info(f"[PriceScanner] 采集 {source.name}...")
             records = source.fetch()
+            self._record_source_status(source.name, records, stage="scan")
             logger.info(f"[PriceScanner] {source.name} 返回 {len(records)} 条记录")
             return records
         except Exception as e:
+            self._record_source_error(source.name, e, stage="scan")
             logger.error(f"[PriceScanner] {source.name} 采集失败: {e}")
-            return []
-
-    def _fetch_coingecko_symbols(self, symbols: list[str]) -> list[PriceRecord]:
-        try:
-            records = self.coingecko.fetch_symbols(symbols)
-            logger.info(f"[PriceScanner] coingecko_realtime 返回 {len(records)} 条记录")
-            return records
-        except Exception as e:
-            logger.error(f"[PriceScanner] coingecko_realtime 采集失败: {e}")
             return []
 
     def _save_records(self, records: list[PriceRecord], scan_time: datetime) -> int:

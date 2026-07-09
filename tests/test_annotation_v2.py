@@ -96,6 +96,19 @@ def test_upsert_no_clear_derivation(session):
     assert d.selected_news_ids == []
 
 
+def test_upsert_rejects_inconsistent_v21_labels(session):
+    n1, n2, _ = _seed(session)
+    bad_requests = [
+        _req([n1, n2], news_roles={n2: "redundant"}),
+        _req([n1, n2], news_roles={}, market_reaction_type="event_driven"),
+        _req([n1, n2], news_roles={n1: "driver"}, market_reaction_type="no_news_driver"),
+    ]
+    for request in bad_requests:
+        with pytest.raises(ValueError):
+            annotation_service.upsert_annotation(session, request)
+        session.rollback()
+
+
 def test_upsert_legacy_request_normalized(session):
     """老格式请求（selected/no_clear）：全部 selected → driver；no_clear → no_news_driver。"""
     n1, n2, _ = _seed(session)
@@ -232,6 +245,30 @@ def test_export_jsonl_with_auto_labels(session):
     assert row["auto_labels"]["news_roles"] == {str(n1): "driver", str(n3): "driver"}
     assert row["prompt_version"] == annotation_service.ANNOTATION_PROMPT_VERSION
     assert row["eval_set"] is False
+
+
+def test_export_uses_frozen_reference_changes(session):
+    n1, n2, n3 = _seed(session)
+    annotation_service.upsert_annotation(session, _req(
+        [n1, n2, n3],
+        news_roles={n1: "driver"},
+        market_reaction_type="event_driven",
+        confidence=0.85,
+    ))
+    annotation = session.query(NewsPriceAnnotation).one()
+    frozen = json.loads(annotation.reference_changes)
+    assert frozen
+
+    end_ref = (
+        session.query(PriceSnapshot)
+        .filter(PriceSnapshot.symbol == "NQ=F", PriceSnapshot.timestamp == W_END)
+        .one()
+    )
+    end_ref.price = 21000.0
+    session.commit()
+
+    exported = json.loads(annotation_service.export_training_jsonl(session, days=30)[0])
+    assert exported["window"]["reference_changes"] == frozen
 
 
 def test_export_keeps_manual_redundant(session):

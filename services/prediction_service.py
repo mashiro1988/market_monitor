@@ -51,14 +51,17 @@ def load_prediction_rows(session: Session, hours: int = 24) -> list[PredictionMa
     if not rows:
         return rows
     # 图表只显示「仍在跟踪」的市场，按市场粒度整体保留/剔除：
-    # 1) 快照带 origin（"slug:x"/"tag:y"）→ 按 tracked_markets 软删状态精确判定：
-    #    删除跟踪立即清图；市场结算/接口抖动导致的断流不误伤（tag 还在跟踪就保留历史）。
+    # 1) 快照带 origin（"slug:x"）→ 按 tracked_markets 软删状态精确判定：
+    #    删除跟踪立即清图；市场结算/接口抖动导致的断流不误伤。
     # 2) 旧快照（origin 为 NULL，无法关联跟踪项）→ 断流启发式兜底：最后一笔快照落后
     #    表内最新快照超过宽限期视为已停跟踪。基准取表内最新时间而非墙钟，调度器宕机不误杀。
     active_keys = {
         f"{t.kind}:{t.identifier}"
         for t in session.query(TrackedMarket.kind, TrackedMarket.identifier)
-        .filter(TrackedMarket.dismissed.is_(False))
+        .filter(
+            TrackedMarket.dismissed.is_(False),
+            TrackedMarket.kind == "slug",
+        )
         .all()
     }
     origins_by_market: dict[str, set[str]] = defaultdict(set)
@@ -270,7 +273,10 @@ def _tracked_to_schema(row: TrackedMarket) -> TrackedMarketSchema:
 def list_tracked_markets(session: Session) -> list[TrackedMarketSchema]:
     rows = (
         session.query(TrackedMarket)
-        .filter(TrackedMarket.dismissed.is_(False))
+        .filter(
+            TrackedMarket.dismissed.is_(False),
+            TrackedMarket.kind == "slug",
+        )
         .order_by(TrackedMarket.kind, TrackedMarket.identifier)
         .all()
     )

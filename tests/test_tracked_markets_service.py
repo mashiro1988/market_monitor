@@ -46,13 +46,13 @@ def test_create_duplicate_raises(session):
 
 def test_update_toggles_enabled(session):
     created = prediction_service.create_tracked_market(
-        session, TrackedMarketCreate(kind="tag", identifier="fed")
+        session, TrackedMarketCreate(kind="slug", identifier="fed-decision-in-june-825")
     )
     updated = prediction_service.update_tracked_market(
         session, created.id, TrackedMarketUpdate(enabled=False)
     )
     assert updated.enabled is False
-    assert updated.identifier == "fed"
+    assert updated.identifier == "fed-decision-in-june-825"
 
 
 def test_update_unknown_id_returns_none(session):

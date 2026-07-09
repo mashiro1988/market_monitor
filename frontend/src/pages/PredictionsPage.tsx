@@ -23,12 +23,15 @@ function buildFamilyChart(family: PredictionFamily): { data: ChartPoint[]; keys:
     keys.push(series.label);
     series.points.forEach((point) => {
       const time = point.timestamp_bj?.slice(5, 16) ?? "";
-      const row = byTime.get(time) ?? { time };
+      const row = byTime.get(time) ?? { time, sort_key: point.timestamp_utc ?? point.timestamp_bj ?? time };
       row[series.label] = point.probability_pct;
       byTime.set(time, row);
     });
   });
-  return { data: Array.from(byTime.values()), keys };
+  const data = Array.from(byTime.values())
+    .sort((a, b) => String(a.sort_key ?? a.time).localeCompare(String(b.sort_key ?? b.time)))
+    .map(({ sort_key, ...row }) => row);
+  return { data, keys };
 }
 
 function buildMarketChart(history: PredictionRow[]): { data: ChartPoint[]; keys: string[] } {
@@ -36,11 +39,14 @@ function buildMarketChart(history: PredictionRow[]): { data: ChartPoint[]; keys:
   const keys = Array.from(new Set(history.map((row) => row.outcome)));
   history.forEach((row) => {
     const time = row.timestamp_bj?.slice(5, 16) ?? "";
-    const entry = byTime.get(time) ?? { time };
+    const entry = byTime.get(time) ?? { time, sort_key: row.timestamp_utc ?? row.timestamp_bj ?? time };
     entry[row.outcome] = row.probability_pct;
     byTime.set(time, entry);
   });
-  return { data: Array.from(byTime.values()), keys };
+  const data = Array.from(byTime.values())
+    .sort((a, b) => String(a.sort_key ?? a.time).localeCompare(String(b.sort_key ?? b.time)))
+    .map(({ sort_key, ...row }) => row);
+  return { data, keys };
 }
 
 function MarketCard({ market, hours }: { market: PredictionMarketSummary; hours: number }) {

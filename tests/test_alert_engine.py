@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,6 +14,9 @@ import alerts.engine as engine_module
 from alerts.engine import AlertEngine, PriceWindowMove
 from alerts.rules import AlertRule
 from chart_utils import format_beijing_time
+from database import Base
+from models.alert_log import AlertLog
+from models.price import PriceSnapshot
 from scanners.base import NewsRecord, PredictionRecord, PriceRecord
 import config
 
@@ -56,8 +61,104 @@ def test_non_jin10_low_llm_does_not_trigger_news_alert():
     assert AlertEngine._is_important_news(record, 8) is False
 
 
+def test_failed_news_alert_is_retried_from_log(monkeypatch):
+    engine_db = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine_db)
+    Session = sessionmaker(bind=engine_db)
+    monkeypatch.setattr(engine_module, "get_session", lambda: Session())
+
+    session = Session()
+    session.add(AlertLog(
+        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+        rule_name="important_news",
+        channel="wechat_work",
+        delivered=False,
+        message="news:jin10:42\n重要新闻 | 1 条\n> **[jin10]** 决策层释放重要信号",
+    ))
+    session.commit()
+    session.close()
+
+    class _Channel:
+        def __init__(self):
+            self.sent: list[tuple[str, str]] = []
+
+        def send(self, title, content):
+            self.sent.append((title, content))
+            return True
+
+    channel = _Channel()
+    engine = AlertEngine.__new__(AlertEngine)
+    engine.channels = {"wechat_work": channel}
+    engine.rules = [
+        AlertRule(
+            name="important_news",
+            rule_type="news_importance",
+            params={"min_importance": 8},
+            channels=["wechat_work"],
+            cooldown_minutes=0,
+            enabled=True,
+        )
+    ]
+
+    engine.evaluate_news([])
+    engine.evaluate_news([])
+
+    assert len(channel.sent) == 1
+    assert channel.sent[0][0] == "重要新闻 | 1 条"
+    assert "决策层释放重要信号" in channel.sent[0][1]
+
+
 def test_format_beijing_time_for_hourly_summary_title():
     assert format_beijing_time(datetime(2026, 4, 23, 6, 42, 29), "%H:%M") == "14:42"
+
+
+def test_hourly_snapshot_change_pct_uses_current_minus_past_direction():
+    engine_db = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine_db)
+    Session = sessionmaker(bind=engine_db)
+    session = Session()
+    t0 = datetime(2026, 4, 28, 0, 0)
+    t1 = t0 + timedelta(hours=1)
+    down_base = PriceSnapshot(
+        timestamp=t0,
+        asset_class="futures",
+        symbol="DOWN",
+        name="下跌样本",
+        price=100.0,
+        source="test",
+    )
+    down_current = PriceSnapshot(
+        timestamp=t1,
+        asset_class="futures",
+        symbol="DOWN",
+        name="下跌样本",
+        price=99.0,
+        source="test",
+    )
+    up_base = PriceSnapshot(
+        timestamp=t0,
+        asset_class="futures",
+        symbol="UP",
+        name="上涨样本",
+        price=100.0,
+        source="test",
+    )
+    up_current = PriceSnapshot(
+        timestamp=t1,
+        asset_class="futures",
+        symbol="UP",
+        name="上涨样本",
+        price=102.0,
+        source="test",
+    )
+    session.add_all([down_base, down_current, up_base, up_current])
+    session.commit()
+
+    try:
+        assert AlertEngine._snapshot_change_pct(session, down_current, 60) == pytest.approx(-1.0)
+        assert AlertEngine._snapshot_change_pct(session, up_current, 60) == pytest.approx(2.0)
+    finally:
+        session.close()
 
 
 def test_price_window_change_uses_configured_15m_window(monkeypatch):
@@ -113,7 +214,7 @@ def test_price_alert_message_includes_time_window_and_price_range(monkeypatch):
         low_price=2348.41,
         high_price=2361.99,
     )
-    monkeypatch.setattr(engine, "_is_in_cooldown", lambda rule_name, cooldown: False)
+    monkeypatch.setattr(engine, "_is_in_cooldown", lambda *a: False)
     monkeypatch.setattr(engine, "_price_window_move", lambda record, window: move)
 
     sent = []
@@ -135,6 +236,37 @@ def test_price_alert_message_includes_time_window_and_price_range(monkeypatch):
     assert "时间区间: 04-27 02:00-02:15 北京时间" in content
     assert "价格: $2,348.41 → $2,361.99" in content
     assert "区间 $2,348.41-$2,361.99" in content
+
+
+def test_price_level_rule_alerts_above_threshold(monkeypatch):
+    engine = AlertEngine.__new__(AlertEngine)
+    engine.rules = [
+        AlertRule(
+            name="btc_above_100k",
+            rule_type="price_level",
+            params={"symbol": "BTC/USDT", "above": 100000},
+            channels=["wechat_work"],
+            cooldown_minutes=0,
+            enabled=True,
+        )
+    ]
+    monkeypatch.setattr(engine, "_is_in_cooldown", lambda *a: False)
+    sent = []
+    monkeypatch.setattr(engine, "_dispatch", lambda rule, title, content: sent.append((title, content)))
+
+    engine.evaluate_prices([
+        PriceRecord(
+            asset_class="crypto",
+            symbol="BTC/USDT",
+            name="BTC",
+            price=100001,
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+    ])
+
+    assert sent
+    assert "BTC" in sent[0][1]
+    assert "$100,000.00" in sent[0][1]
 
 
 def test_prediction_alert_uses_saved_prev_probability(monkeypatch):
@@ -170,7 +302,7 @@ def test_prediction_alert_uses_saved_prev_probability(monkeypatch):
             pass
 
     monkeypatch.setattr(engine_module, "get_session", lambda: FakeSession())
-    monkeypatch.setattr(engine, "_is_in_cooldown", lambda rule_name, cooldown: False)
+    monkeypatch.setattr(engine, "_is_in_cooldown", lambda *a: False)
 
     sent = []
     monkeypatch.setattr(engine, "_dispatch", lambda rule, title, content: sent.append((title, content)))

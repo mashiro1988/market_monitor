@@ -34,7 +34,6 @@ from schemas.annotations import (
 from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
 from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta, NewsTagUpdateRequest
-from schemas.onchain import OnchainDataset
 from schemas.predictions import (
     PredictionFamily,
     PredictionRow,
@@ -45,7 +44,7 @@ from schemas.predictions import (
 )
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, market_service, news_service, news_tagging, onchain_service, prediction_service, sector_service, task_service
+from services import alerts_service, annotation_service, market_service, news_service, news_tagging, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -58,6 +57,13 @@ def _csv_list(values: list[str] | None) -> list[str] | None:
     for value in values:
         result.extend([part.strip() for part in value.split(",") if part.strip()])
     return result or None
+
+
+def _parse_query_datetime(value: str | None) -> datetime | None:
+    parsed = parse_datetime(value)
+    if value is not None and value.strip() and parsed is None:
+        raise ApiError("INVALID_DATETIME", "Invalid datetime query parameter", status_code=400)
+    return parsed
 
 
 @router.get("/health")
@@ -114,8 +120,8 @@ def market_history(
         db,
         symbols=_csv_list(symbols),
         hours=hours,
-        start=parse_datetime(start_utc),
-        end=parse_datetime(end_utc),
+        start=_parse_query_datetime(start_utc),
+        end=_parse_query_datetime(end_utc),
     )
 
 
@@ -220,21 +226,6 @@ def prediction_history(market_id: str, hours: int = 24, db: Session = Depends(ge
     return prediction_service.get_market_history(db, market_id=market_id, hours=hours)
 
 
-@router.get("/onchain/eth/top100-netflow", response_model=OnchainDataset)
-def onchain_top100(force_refresh: bool = False) -> OnchainDataset:
-    return onchain_service.top100_netflow(force_refresh)
-
-
-@router.get("/onchain/eth/daily-stats", response_model=OnchainDataset)
-def onchain_daily(force_refresh: bool = False) -> OnchainDataset:
-    return onchain_service.daily_stats(force_refresh)
-
-
-@router.get("/onchain/eth/cex-flows", response_model=OnchainDataset)
-def onchain_cex(force_refresh: bool = False) -> OnchainDataset:
-    return onchain_service.cex_flows(force_refresh)
-
-
 @router.get("/alerts/rules", response_model=list[AlertRuleSchema])
 def alert_rules() -> list[AlertRuleSchema]:
     return alerts_service.get_rules()
@@ -284,9 +275,12 @@ def annotation_context_news(
     post_minutes: int = 30,
     db: Session = Depends(get_db),
 ) -> ContextNewsResponse:
-    return annotation_service.load_context_news_for_window(
-        db, window_start_utc, window_end_utc, pre_minutes, post_minutes
-    )
+    try:
+        return annotation_service.load_context_news_for_window(
+            db, window_start_utc, window_end_utc, pre_minutes, post_minutes
+        )
+    except ValueError as exc:
+        raise ApiError("INVALID_DATETIME", str(exc), status_code=400) from exc
 
 
 @router.get("/annotations/tag-options")

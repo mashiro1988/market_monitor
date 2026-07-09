@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Download, Maximize2, Minimize2, Play } from "lucide-react";
 import { api } from "../api/client";
+import { OKX_GAPFILL_SOURCE } from "../api/constants";
 import type { MarketHistoryResponse, MarketLatestItem, MarketTableRow } from "../api/types";
-import { OKX_GAPFILL_SOURCE } from "../api/types";
 import { MultiLineChart, type ChartPoint } from "../components/Charts";
 import { Button, MultiSelectControl, PageHeader, SelectControl, Stat } from "../components/Controls";
 import type { MultiOption } from "../components/Controls";
@@ -247,7 +247,7 @@ export function MarketPage() {
     const valid = new Set(items.map((s) => s.symbol));
     const filtered = chartSymbols.filter((s) => valid.has(s));
     if (filtered.length === chartSymbols.length) return;
-    setChartSymbols(filtered.length ? filtered : DEFAULT_CHART_SYMBOLS.filter((s) => valid.has(s)));
+    setChartSymbolsState(filtered.length ? filtered : DEFAULT_CHART_SYMBOLS.filter((s) => valid.has(s)));
   }, [symbolsList.data, chartSymbols]);
 
   const history = useQuery({

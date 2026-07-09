@@ -8,12 +8,12 @@ import requests
 class PolymarketGammaClient:
     """Small Gamma API wrapper used by the Polymarket source."""
 
-    def __init__(self, gamma_url: str, proxy: str = ""):
+    def __init__(self, gamma_url: str, proxies: dict[str, str] | None = None):
         self.gamma_url = gamma_url.rstrip("/")
-        self.proxy = proxy
+        self._proxies = proxies or {}
 
     def get_proxies(self) -> dict[str, str]:
-        return {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+        return dict(self._proxies)
 
     def request_with_retry(self, url: str, params: dict, attempts: int = 2):
         """GET with one retry on transient network/TLS errors."""
@@ -39,17 +39,6 @@ class PolymarketGammaClient:
             data = response.json()
             return data if isinstance(data, list) else []
         return []
-
-    def search_markets(self, tag: str, limit: int = 10) -> list[dict]:
-        url = f"{self.gamma_url}/markets"
-        params = {
-            "tag": tag,
-            "closed": "false",
-            "limit": limit,
-            "order": "volume",
-            "ascending": "false",
-        }
-        return self._markets_from_response(self.request_with_retry(url, params))
 
     def get_market_by_slug(self, slug: str) -> dict | None:
         url = f"{self.gamma_url}/markets"

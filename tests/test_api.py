@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+import api.app as app_module
 from api.app import create_app
 
 
@@ -22,6 +23,23 @@ def test_health_and_status():
     assert "database" in status.json()
 
 
+def test_optional_api_auth(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "APP_AUTH_TOKEN", "secret-token")
+    c = client()
+
+    health = c.get("/api/health")
+    assert health.status_code == 200
+
+    blocked = c.get("/api/status")
+    assert blocked.status_code == 401
+    assert blocked.json()["code"] == "UNAUTHORIZED"
+
+    allowed = c.get("/api/status", headers={"Authorization": "Bearer secret-token"})
+    assert allowed.status_code == 200
+
+
 def test_market_latest_and_csv():
     c = client()
     latest = c.get("/api/market/latest")
@@ -36,6 +54,26 @@ def test_market_latest_and_csv():
     assert csv_response.status_code == 200
     assert "text/csv" in csv_response.headers["content-type"]
     assert "北京时间" in csv_response.content.decode("utf-8-sig").splitlines()[0]
+
+
+def test_market_history_rejects_invalid_datetime():
+    c = client()
+    response = c.get("/api/market/history", params={"start_utc": "not-a-date"})
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_DATETIME"
+
+
+def test_annotation_context_news_rejects_invalid_datetime():
+    c = client()
+    response = c.get(
+        "/api/annotations/context-news",
+        params={
+            "window_start_utc": "not-a-date",
+            "window_end_utc": "2026-01-01T00:00:00",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_DATETIME"
 
 
 def test_news_pagination_filters():
@@ -93,3 +131,43 @@ def test_task_retention_cleanup():
     )
     task_service._TASKS[old.task_id] = old
     assert task_service.get_task("old") is None
+
+
+def test_scheduler_registers_operational_jobs(monkeypatch):
+    class FakeScheduler:
+        def __init__(self, timezone):
+            self.timezone = timezone
+            self.jobs = []
+            self.started = False
+
+        def add_job(self, func, trigger, **kwargs):
+            self.jobs.append({"func": func, "trigger": trigger, **kwargs})
+
+        def start(self):
+            self.started = True
+
+    created = {}
+
+    def fake_scheduler(timezone):
+        scheduler = FakeScheduler(timezone)
+        created["scheduler"] = scheduler
+        return scheduler
+
+    monkeypatch.setattr(app_module, "BackgroundScheduler", fake_scheduler)
+    monkeypatch.setattr(app_module, "configure_proxy_env", lambda: None)
+    monkeypatch.setattr(app_module, "create_tables", lambda: None)
+
+    scheduler = app_module._start_background_scheduler()
+
+    job_ids = {job["id"] for job in scheduler.jobs}
+    assert scheduler.started is True
+    assert {
+        "scan_cycle",
+        "startup_backfill",
+        "hourly_summary",
+        "remote_data_cycle",
+        "gap_repair",
+        "data_retention",
+        "cmc_bootstrap",
+        "cmc_refresh",
+    }.issubset(job_ids)

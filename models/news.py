@@ -57,6 +57,7 @@ class NewsPriceAnnotation(Base):
     change_pct = Column(Float, nullable=True)
     causal_news_ids = Column(Text, nullable=True)        # JSON 数组，元素为 news_items.id；v2 起为派生值 = roles 中 primary+secondary
     candidate_news_ids = Column(Text, nullable=True)     # JSON 数组：标注时整个 context 窗口里的全部候选新闻 ID（含负样本，训练用）
+    reference_changes = Column(Text, nullable=True)      # JSON dict：保存标注当时的同期对标特征，训练导出优先使用
     # —— v2 标签（docs/specs/annotation-v2.md；v2.1 枚举见 schemas/annotations.py）——
     news_roles = Column(Text, nullable=True)             # JSON dict {news_id: causal_role}，只存非 noise 条目
     market_reaction_type = Column(String(40), nullable=True)   # macro_policy / event_driven / no_news_driver
