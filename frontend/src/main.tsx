@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import { AppShell } from "./components/AppShell";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AnnotationsPage } from "./pages/AnnotationsPage";
+import { BehaviorPage } from "./pages/BehaviorPage";
 import { MarketPage } from "./pages/MarketPage";
 import { NewsPage } from "./pages/NewsPage";
 import { PredictionsPage } from "./pages/PredictionsPage";
@@ -31,7 +32,8 @@ const router = createBrowserRouter([
       { path: "news", element: <NewsPage /> },
       { path: "predictions", element: <PredictionsPage /> },
       { path: "alerts", element: <AlertsPage /> },
-      { path: "annotations", element: <AnnotationsPage /> }
+      { path: "annotations", element: <AnnotationsPage /> },
+      { path: "behavior", element: <BehaviorPage /> }
     ]
   }
 ]);

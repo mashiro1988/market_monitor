@@ -1,6 +1,9 @@
 import type {
   AlertLog,
   AlertRule,
+  BehaviorDailyResponse,
+  BehaviorLinkageResponse,
+  BehaviorSegmentsResponse,
   AlertTestResponse,
   AlertWebhookStatus,
   AnnotationCreateRequest,
@@ -132,6 +135,12 @@ export const api = {
     request<Page<AlertLog>>(`/alerts/logs${buildQuery(params)}`),
   webhookStatus: () => request<AlertWebhookStatus>("/alerts/webhook-status"),
   testWechat: () => request<AlertTestResponse>("/alerts/test-wechat", { method: "POST" }),
+  behaviorSegments: (params: { symbol?: string; days?: number }) =>
+    request<BehaviorSegmentsResponse>(`/behavior/segments${buildQuery(params)}`),
+  behaviorDaily: (params: { symbol?: string; days?: number }) =>
+    request<BehaviorDailyResponse>(`/behavior/daily${buildQuery(params)}`),
+  behaviorLinkage: (params: { symbol?: string; hours?: number }) =>
+    request<BehaviorLinkageResponse>(`/behavior/linkage${buildQuery(params)}`),
   priceRules: () => request<PriceRule[]>("/annotations/price-rules"),
   annotationSymbols: (hours = 72) => request<AnnotationSymbol[]>(`/annotations/symbols${buildQuery({ hours })}`),
   annotationWindows: (params: { symbol: string; hours?: number; threshold_pct?: number; window_minutes?: number }) =>
