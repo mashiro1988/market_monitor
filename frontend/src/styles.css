@@ -1366,3 +1366,9 @@ code {
 .behavior-page .num-big { font-size: 22px; }
 .behavior-page .small { font-size: 11.5px; }
 .behavior-page .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.review-cell { white-space: nowrap; }
+.review-cell .reviewed { color: var(--up); font-size: 12px; font-weight: 600; margin-right: 6px; }
+.mini-btn { font-size: 11.5px; padding: 2px 9px; border-radius: 4px; border: 1px solid var(--accent); background: rgba(94,234,212,.08); color: var(--accent); cursor: pointer; margin-right: 5px; }
+.mini-btn:disabled { opacity: .4; cursor: default; }
+.mini-select { font-size: 11.5px; padding: 2px 4px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
+.link-btn { font-size: 11px; background: none; border: none; color: var(--muted); text-decoration: underline; cursor: pointer; }

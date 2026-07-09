@@ -35,6 +35,8 @@ class BehaviorSegmentSchema(BaseModel):
     classification: str | None = None     # count_only / macro_news / pure_resonance / industry_news
                                           # / sentiment / no_ref_news / no_ref_pending / null=未settle
     class_version: str | None = None
+    human_class: str | None = None        # 人工确认/改判后的类别；null=未审。构成聚合优先取它
+    human_confirmed_at: TimeFields | None = None
     s_scores: dict[str, SScoreSchema] = Field(default_factory=dict)
     max_abs_s: float | None = None        # 判级依据（最强参照）
     news: list[BehaviorNewsBrief] = Field(default_factory=list)
@@ -83,3 +85,14 @@ class BehaviorLinkageResponse(BaseModel):
     rolling_points: int                   # 滚动窗口点数（config BEHAVIOR_ROLLING_POINTS）
     series: list[LinkageSeries]
     breadth: list[BreadthPoint]
+
+
+REVIEWABLE_CLASSES = (
+    "macro_news", "pure_resonance", "industry_news", "sentiment",
+    "no_ref_news", "no_ref_pending",
+)
+
+
+class BehaviorReviewRequest(BaseModel):
+    """人工审计一个段：human_class=某类 → 确认/改判；null → 撤销人工结论（回到机器类）。"""
+    human_class: str | None = None

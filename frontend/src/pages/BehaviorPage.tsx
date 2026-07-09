@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar,
   CartesianGrid,
@@ -47,7 +47,9 @@ function bjShort(ts: string | null | undefined): string {
   return (ts ?? "").slice(5, 16);
 }
 
-function SegRow({ seg }: { seg: BehaviorSegmentSchema }) {
+const REVIEW_OPTIONS = ["macro_news", "pure_resonance", "industry_news", "sentiment", "no_ref_news", "no_ref_pending"];
+
+function SegRow({ seg, onReview, busy }: { seg: BehaviorSegmentSchema; onReview: (id: number, cls: string | null) => void; busy: boolean }) {
   const meta = classMeta(seg.classification);
   const scores = Object.entries(seg.s_scores).sort((a, b) => Math.abs(b[1].s) - Math.abs(a[1].s));
   const maxSym = scores[0]?.[0];
@@ -72,11 +74,38 @@ function SegRow({ seg }: { seg: BehaviorSegmentSchema }) {
       </td>
       <td>{seg.news.length ? `${seg.news[0].title}${seg.news.length > 1 ? ` (+${seg.news.length - 1})` : ""}` : <span className="muted-text">无</span>}</td>
       <td><span className={`klass ${meta.cls}`}>{meta.label}</span></td>
+      <td className="review-cell">
+        {seg.human_class ? (
+          <>
+            <span className="reviewed">✓ {classMeta(seg.human_class).label}</span>
+            <button className="link-btn" disabled={busy} onClick={() => onReview(seg.id, null)}>撤销</button>
+          </>
+        ) : (
+          <>
+            <button className="mini-btn" disabled={busy || !seg.classification}
+              title="确认机器分类无误"
+              onClick={() => seg.classification && onReview(seg.id, seg.classification)}>确认</button>
+            <select className="mini-select" disabled={busy} value=""
+              onChange={(e) => e.target.value && onReview(seg.id, e.target.value)}>
+              <option value="">改判…</option>
+              {REVIEW_OPTIONS.map((c) => <option key={c} value={c}>{classMeta(c).label}</option>)}
+            </select>
+          </>
+        )}
+      </td>
     </tr>
   );
 }
 
 export function BehaviorPage() {
+  const qc = useQueryClient();
+  const review = useMutation({
+    mutationFn: ({ id, cls }: { id: number; cls: string | null }) => api.behaviorReview(id, cls),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["behavior-segments"] });
+      qc.invalidateQueries({ queryKey: ["behavior-daily"] });
+    },
+  });
   const daily = useQuery({ queryKey: ["behavior-daily"], queryFn: () => api.behaviorDaily({ symbol: SYMBOL, days: 14 }), refetchInterval: REFRESH_MS });
   const segs = useQuery({ queryKey: ["behavior-segments"], queryFn: () => api.behaviorSegments({ symbol: SYMBOL, days: 2 }), refetchInterval: REFRESH_MS });
   const linkage = useQuery({ queryKey: ["behavior-linkage"], queryFn: () => api.behaviorLinkage({ symbol: SYMBOL, hours: 48 }), refetchInterval: REFRESH_MS });
@@ -221,11 +250,11 @@ export function BehaviorPage() {
                   <tr>
                     <th>时间(BJ)</th><th>档位</th><th>净幅</th>
                     <th>共振证据 S（蓝框=最强参照=判级 max|S|）</th>
-                    <th>证据厚度 ESS</th><th>新闻命中</th><th>分类</th>
+                    <th>证据厚度 ESS</th><th>新闻命中</th><th>分类（机器）</th><th>人工审核</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {composedSegs.map((seg) => <SegRow key={seg.id} seg={seg} />)}
+                  {composedSegs.map((seg) => <SegRow key={seg.id} seg={seg} onReview={(id, cls) => review.mutate({ id, cls })} busy={review.isPending} />)}
                 </tbody>
               </table>
             </div>
@@ -244,6 +273,7 @@ export function BehaviorPage() {
                 <div><b className="num-big">{today.up + today.down}</b> 段 · <span className="ret-up">{today.up}↑</span> <span className="ret-down">{today.down}↓</span></div>
                 <div>构成段 <b>{today.comp}</b> · 情绪候选↓ <b className="k-sent-text">{today.sent}</b>{today.comp < 5 ? <span className="muted-text small">（分母&lt;5 不读占比）</span> : null}</div>
                 <div className="muted-text small">{today.live ? "盘中现算（live）" : "已固化（PIT）"}</div>
+                <div className="muted-text small">近2天段：已人工确认 {composedSegs.filter((x) => x.human_class).length} / {composedSegs.length}（未确认留存，随时可审）</div>
               </div>
             ) : <EmptyState title="暂无数据" />}
           </section>

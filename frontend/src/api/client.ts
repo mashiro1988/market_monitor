@@ -141,6 +141,11 @@ export const api = {
     request<BehaviorDailyResponse>(`/behavior/daily${buildQuery(params)}`),
   behaviorLinkage: (params: { symbol?: string; hours?: number }) =>
     request<BehaviorLinkageResponse>(`/behavior/linkage${buildQuery(params)}`),
+  behaviorReview: (segmentId: number, humanClass: string | null) =>
+    request<{ id: number; human_class: string | null }>(`/behavior/segments/${segmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ human_class: humanClass })
+    }),
   priceRules: () => request<PriceRule[]>("/annotations/price-rules"),
   annotationSymbols: (hours = 72) => request<AnnotationSymbol[]>(`/annotations/symbols${buildQuery({ hours })}`),
   annotationWindows: (params: { symbol: string; hours?: number; threshold_pct?: number; window_minutes?: number }) =>

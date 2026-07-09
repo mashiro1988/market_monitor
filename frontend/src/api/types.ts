@@ -217,6 +217,10 @@ export type BehaviorNewsBrief = {
   topic: string | null;
 };
 
+export type BehaviorReviewRequest = {
+  human_class: string | null;
+};
+
 export type BehaviorSegmentSchema = {
   id: number;
   symbol: string;
@@ -230,6 +234,8 @@ export type BehaviorSegmentSchema = {
   amp_pct: number | null;
   classification: string | null;
   class_version: string | null;
+  human_class: string | null;
+  human_confirmed_at: TimeFields | null;
   s_scores: Record<string, SScoreSchema>;
   max_abs_s: number | null;
   news: BehaviorNewsBrief[];

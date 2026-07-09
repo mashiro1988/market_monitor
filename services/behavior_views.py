@@ -68,6 +68,8 @@ def list_segments(session: Session, symbol: str, days: int = 2) -> BehaviorSegme
             direction=r.direction, tier_idx=r.tier_idx, tier_max=r.tier_max,
             net_pct=r.net_pct, amp_pct=r.amp_pct,
             classification=r.classification, class_version=r.class_version,
+            human_class=r.human_class,
+            human_confirmed_at=_tf(r.human_confirmed_at) if r.human_confirmed_at else None,
             s_scores=scores,
             max_abs_s=max((abs(v.s) for v in scores.values()), default=None),
             news=[briefs[i] for i in ids if i in briefs],
@@ -143,3 +145,19 @@ def linkage(session: Session, symbol: str, hours: int = 48) -> BehaviorLinkageRe
         breadth.append(BreadthPoint(t=_tf(t), count=count))
     return BehaviorLinkageResponse(symbol=symbol, hours=hours, rolling_points=points,
                                    series=series, breadth=breadth)
+
+
+def review_segment(session: Session, segment_id: int, human_class: str | None):
+    """人工审计（price-behavior-engine 2026-07-09）：确认=写当前机器类，改判=写新类，null=撤销。
+    只动 human_*，机器 classification/class_version 原样保留作对照。"""
+    from schemas.behavior import REVIEWABLE_CLASSES
+
+    row = session.query(BehaviorSegment).filter_by(id=segment_id).one_or_none()
+    if row is None:
+        return None
+    if human_class is not None and human_class not in REVIEWABLE_CLASSES:
+        raise ValueError(f"非法类别: {human_class!r}（可选: {', '.join(REVIEWABLE_CLASSES)}）")
+    row.human_class = human_class
+    row.human_confirmed_at = datetime.utcnow() if human_class is not None else None
+    session.commit()
+    return row

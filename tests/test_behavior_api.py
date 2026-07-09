@@ -82,3 +82,28 @@ def test_daily_live_and_linkage_shape(client_session):
     assert "NQ=F" in syms
     nq = next(s for s in linkage["series"] if s["symbol"] == "NQ=F")
     assert len(nq["points"]) == len(linkage["breadth"]) > 0
+
+
+def test_review_confirm_override_and_daily_priority(client_session):
+    client, session = client_session
+    _seed(session)
+    seg = client.get("/api/behavior/segments?days=2").json()["segments"]
+    target = next(s for s in seg if s["tier_idx"] >= 1)
+    assert target["human_class"] is None
+    # 确认（写机器类）
+    r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": target["classification"]})
+    assert r.status_code == 200 and r.json()["human_class"] == "pure_resonance"
+    # 改判 → 构成聚合优先人工结论
+    r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": "sentiment"})
+    assert r.status_code == 200
+    today = client.get("/api/behavior/daily?days=1").json()["days"][-1]
+    assert today["composition"]["sentiment"] == 1
+    assert today["composition"]["pure_resonance"] == 0
+    # 撤销 → 回机器类
+    r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": None})
+    assert r.status_code == 200 and r.json()["human_class"] is None
+    today = client.get("/api/behavior/daily?days=1").json()["days"][-1]
+    assert today["composition"]["pure_resonance"] == 1
+    # 非法类别 400 / 不存在 404
+    assert client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": "count_only"}).status_code == 400
+    assert client.patch("/api/behavior/segments/999999", json={"human_class": "sentiment"}).status_code == 404

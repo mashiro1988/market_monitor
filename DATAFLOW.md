@@ -174,6 +174,7 @@ symbol -> CMC 板块 的多对多映射本地缓存。
 | `net_pct / amp_pct / key_ts` | float / float / dt | 净幅、振幅、段内 \|5min\| 最大 bar（新闻对时锚点） |
 | `classification` | str \| null | `count_only`(0.3档) / `macro_news` / `pure_resonance` / `industry_news` / `sentiment` / `no_ref_news`(无对照×新闻命中) / `no_ref_pending`；null=未 settle（段止+后窗1h+`ANNOTATION_SETTLE_MARGIN_MINUTES`） |
 | `s_scores / news_ids / class_version` | JSON / JSON / str | `{ref: {s, ess, coverage}}`；±30min 大/中新闻 id；分类口径版本（换版可全历史重跑——段是原始数据） |
+| `human_class / human_confirmed_at` | str \| null / dt \| null | 人工审计（2026-07-09）：`PATCH /api/behavior/segments/{id}` 确认/改判/撤销；**构成聚合优先 human_class**，机器 classification 保留作对照；机器重跑不碰人工结论 |
 
 **写入方：** `behavior_classifier.classify`（APScheduler `behavior_cycle`，5min）。**读取方：** `behavior_views.list_segments`（API）、`aggregate_day`（日汇总）、`annotation_service.load_price_windows`（仅当 `BEHAVIOR_REPLACES_ANNOTATION_WINDOWS=True`，0.5 档以上映射为待标窗口）。
 

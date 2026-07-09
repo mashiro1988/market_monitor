@@ -31,6 +31,10 @@ class BehaviorSegment(Base):
     # / no_ref_news(无对照×新闻命中) / no_ref_pending(无对照×无新闻) / NULL=未分类(未 settle)
     classification = Column(String(30), nullable=True)
     class_version = Column(String(20), nullable=True)
+    # 人工审计（2026-07-09 补）：human_class 非空 = 人已确认/改判，构成聚合优先取它；
+    # 机器重跑（class_version 换版）只更新 classification，不碰人工结论。
+    human_class = Column(String(30), nullable=True)
+    human_confirmed_at = Column(DateTime, nullable=True)
     s_scores = Column(Text, nullable=True)               # JSON {ref_symbol: {s, ess, coverage}}
     news_ids = Column(Text, nullable=True)               # JSON [news_id, ...]（±30min 大/中命中）
     created_at = Column(DateTime, default=datetime.utcnow)

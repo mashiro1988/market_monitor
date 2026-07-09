@@ -168,8 +168,9 @@ def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, d
         tier_key = f"{r.tier_max:g}"
         bucket = counts.setdefault(tier_key, {"up": 0, "down": 0})
         bucket["up" if r.direction > 0 else "down"] += 1
-        if r.classification in composition:
-            composition[r.classification] += 1
+        effective = r.human_class or r.classification   # 人工确认/改判优先（审计结果进读数）
+        if effective in composition:
+            composition[effective] += 1
         if r.direction < 0 and r.net_pct is not None:
             down_sum += r.net_pct
     return counts, composition, round(down_sum, 4)

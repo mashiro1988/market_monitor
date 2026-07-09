@@ -31,7 +31,7 @@ from schemas.annotations import (
     PriceRuleSchema,
     PriceWindowSchema,
 )
-from schemas.behavior import BehaviorDailyResponse, BehaviorLinkageResponse, BehaviorSegmentsResponse
+from schemas.behavior import BehaviorDailyResponse, BehaviorLinkageResponse, BehaviorReviewRequest, BehaviorSegmentsResponse
 from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
 from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta, NewsTagUpdateRequest
@@ -307,6 +307,20 @@ def behavior_linkage(symbol: str = "BTC/USDT", hours: int = Query(48, ge=6, le=1
                      db: Session = Depends(get_db)) -> BehaviorLinkageResponse:
     """rolling S 联动曲线（逐参照）+ 同步参照数。纯展示层，compute-on-read。"""
     return behavior_views.linkage(db, symbol, hours)
+
+
+@router.patch("/behavior/segments/{segment_id}", response_model=dict)
+def behavior_review(segment_id: int, request: BehaviorReviewRequest,
+                    db: Session = Depends(get_db)) -> dict:
+    """人工审计段分类：human_class=类别（确认/改判），null=撤销。机器分类保留作对照，构成聚合优先人工。"""
+    try:
+        row = behavior_views.review_segment(db, segment_id, request.human_class)
+    except ValueError as exc:
+        raise ApiError("INVALID_CLASS", str(exc), status_code=400) from exc
+    if row is None:
+        raise ApiError("NOT_FOUND", f"段不存在: {segment_id}", status_code=404)
+    return {"id": row.id, "human_class": row.human_class,
+            "human_confirmed_at": row.human_confirmed_at.isoformat() if row.human_confirmed_at else None}
 
 
 @router.get("/annotations/tag-options")

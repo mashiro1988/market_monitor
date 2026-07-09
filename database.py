@@ -47,6 +47,16 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
     table_names = set(inspector.get_table_names())
 
     with engine.begin() as conn:
+        # behavior_segments：补人工审计列（price-behavior-engine 2026-07-09）。
+        if "behavior_segments" in table_names:
+            existing = {col["name"] for col in inspector.get_columns("behavior_segments")}
+            for column_name, column_type in {
+                "human_class": "VARCHAR(30)",
+                "human_confirmed_at": "DATETIME",
+            }.items():
+                if column_name not in existing:
+                    conn.execute(text(f"ALTER TABLE behavior_segments ADD COLUMN {column_name} {column_type}"))
+
         # news_items：补 LLM 评分列 + 修索引。
         if "news_items" in table_names:
             existing = {col["name"] for col in inspector.get_columns("news_items")}
