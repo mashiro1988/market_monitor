@@ -35,6 +35,9 @@ PY
 backup_sqlite
 git pull --ff-only
 .venv/bin/pip install -r requirements.txt
-( cd frontend && npm install && npm run build )   # 必须先构建再重启：/assets 挂载在 app 导入时决定
+# 必须先构建再重启：/assets 挂载在 app 导入时决定。
+# venv 前置 PATH：npm build 的 generate:api-types 调裸 `python`（Ubuntu 无此命令，且脚本需要项目依赖），
+# 不前置的话 set -e 会在构建步中止、永远走不到 restart（2026-07-09 线上踩坑）。
+( cd frontend && npm install && PATH="$(pwd)/../.venv/bin:$PATH" npm run build )
 sudo systemctl restart market-monitor
 sudo systemctl --no-pager status market-monitor
