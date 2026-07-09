@@ -181,6 +181,10 @@ def test_prompts_document_reference_changes():
         assert "核心推理顺序" in prompt
         # v11 守卫：共振分 S 证据链取代 ±1h Pearson 判据（price-behavior-engine-plan Task 8b）
         assert "共振分 S" in prompt
+        # v12 守卫：窗口级三类结论 + rolling 峰值口径（phase2-plan Task 7）
+        assert "window_class" in prompt
+        assert "news_driven|pure_resonance|sentiment_tech" in prompt
+        assert "峰值" in prompt
         assert "max|S|" in prompt
         assert "machine_class" in prompt
         assert "证据薄" in prompt

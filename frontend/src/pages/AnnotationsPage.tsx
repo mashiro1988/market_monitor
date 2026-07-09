@@ -275,6 +275,7 @@ export function AnnotationsPage() {
     if (cached && batchMeta) {
       setNewsRoles((prev) => rolesEqual(prev, cached.news_roles ?? {}) ? prev : (cached.news_roles ?? {}));
       setConfidence((prev) => prev === (cached.confidence ?? null) ? prev : (cached.confidence ?? null));
+      if (cached.window_class) setWindowClass((prev) => prev === cached.window_class ? prev : cached.window_class!);
       setNotes((prev) => prev === cached.summary ? prev : cached.summary);
       setAutoResult((prev) => {
         const expectedReasoning = cached.reasoning || batchMeta.reasoning;
@@ -293,6 +294,7 @@ export function AnnotationsPage() {
           news_roles: cached.news_roles ?? {},
           market_reaction_type: null,
           confidence: cached.confidence ?? null,
+          window_class: cached.window_class ?? null,
           summary: cached.summary,
           // 优先用本窗口结构化输出里的 reasoning；为空时退回到整批 thinking trace（debug 用）
           reasoning: expectedReasoning,
@@ -306,6 +308,7 @@ export function AnnotationsPage() {
       // 这里是兜底：纯人工编辑过的窗口没有 AI 元数据，但表单内容还是要还原）
       setNewsRoles((prev) => rolesEqual(prev, cached.news_roles ?? {}) ? prev : (cached.news_roles ?? {}));
       setConfidence((prev) => prev === (cached.confidence ?? null) ? prev : (cached.confidence ?? null));
+      if (cached.window_class) setWindowClass((prev) => prev === cached.window_class ? prev : cached.window_class!);
       setNotes((prev) => prev === cached.summary ? prev : cached.summary);
       setAutoResult((prev) => prev === null ? prev : null);
     } else {
@@ -333,6 +336,7 @@ export function AnnotationsPage() {
           news_roles: existing?.news_roles ?? {},
           market_reaction_type: null,
           confidence: existing?.confidence ?? null,
+          window_class: existing?.window_class ?? null,
           summary: existing?.summary ?? "",
           reasoning: existing?.reasoning ?? "",
           candidate_count: existing?.candidate_count ?? 0,
@@ -456,6 +460,7 @@ export function AnnotationsPage() {
       setAutoResult(result);
       setNewsRoles(result.news_roles ?? {});
       setConfidence(result.confidence ?? null);
+      if (result.window_class) setWindowClass(result.window_class);
       if (result.confidence != null) setSaveValidation("");
       setNotes(result.summary);
       // 单窗口自动标注的结果也写入 batchByKey，让批量按钮把这条视为已处理。
@@ -471,6 +476,7 @@ export function AnnotationsPage() {
             news_roles: result.news_roles ?? {},
             market_reaction_type: null,
             confidence: result.confidence ?? null,
+            window_class: result.window_class ?? null,
             summary: result.summary,
             reasoning: result.reasoning,  // 单窗口直接拿 DeepSeek thinking 全文做该窗口 reasoning
             candidate_count: result.candidate_count,

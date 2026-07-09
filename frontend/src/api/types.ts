@@ -135,6 +135,7 @@ export type AutoAnnotateBatchItem = {
   news_roles: Record<string, string>;
   market_reaction_type: string | null;
   confidence: number | null;
+  window_class: string | null;
   summary: string;
   reasoning: string;
   candidate_count: number;
@@ -180,6 +181,7 @@ export type AutoAnnotateResponse = {
   news_roles: Record<string, string>;
   market_reaction_type: string | null;
   confidence: number | null;
+  window_class: string | null;
   summary: string;
   reasoning: string;
   model: string;

@@ -170,6 +170,7 @@ class AutoAnnotateResponse(BaseModel):
     news_roles: dict[int, str] = Field(default_factory=dict)
     market_reaction_type: str | None = None
     confidence: float | None = None
+    window_class: str | None = None   # v12：窗口级三类建议（news_driven/pure_resonance/sentiment_tech）
     summary: str = ""
     reasoning: str = ""  # DeepSeek 的 message.reasoning_content
     model: str
@@ -192,6 +193,7 @@ class AutoAnnotateBatchItem(BaseModel):
     news_roles: dict[int, str] = Field(default_factory=dict)
     market_reaction_type: str | None = None
     confidence: float | None = None
+    window_class: str | None = None   # v12：窗口级三类建议
     summary: str = ""
     reasoning: str = ""  # 模型对该窗口的逐条解释（来自结构化 JSON，不是 message.reasoning_content）
     candidate_count: int = 0
