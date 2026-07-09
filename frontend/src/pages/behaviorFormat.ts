@@ -28,7 +28,10 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       down += v.down ?? 0;
     }
     const tier = (k: string) => (d.counts[k]?.up ?? 0) + (d.counts[k]?.down ?? 0);
-    const comp = Object.values(d.composition).reduce((a, b) => a + b, 0);
+    const comp = ["news_driven", "pure_resonance", "sentiment_tech"]
+      .map((k) => d.composition[k] ?? 0)
+      .reduce((a, b) => a + b, 0)
+      || Object.entries(d.composition).filter(([k]) => k !== "no_ref").reduce((a, [, v]) => a + v, 0);
     return {
       date: d.utc_date.slice(5),
       weekend: d.day_type === "weekend",
@@ -38,7 +41,7 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       net: up - down,
       t05: tier("0.5"),
       t08: tier("0.8"),
-      sent: d.composition["sentiment"] ?? 0,
+      sent: d.composition["sentiment_tech"] ?? d.composition["sentiment"] ?? 0,
       comp,
       downSumNeg: -Math.abs(d.down_net_sum ?? 0),
     };
@@ -56,14 +59,30 @@ export function tierName(tierIdx: number): string {
 }
 
 export const CLASS_META: Record<string, { label: string; cls: string }> = {
-  macro_news: { label: "宏观新闻", cls: "k-macro" },
+  // 三类（窗口级，人工标注/结论页口径）
+  news_driven: { label: "新闻驱动", cls: "k-macro" },
   pure_resonance: { label: "纯共振", cls: "k-reso" },
+  sentiment_tech: { label: "情绪·技术面 ⚠", cls: "k-sent" },
+  // 机器六类（底层保留，展示归并）
+  macro_news: { label: "宏观新闻", cls: "k-macro" },
   industry_news: { label: "行业事件", cls: "k-ind" },
   sentiment: { label: "情绪候选 ⚠", cls: "k-sent" },
   no_ref_news: { label: "新闻驱动(无对照)", cls: "k-noref" },
   no_ref_pending: { label: "待定(无对照)", cls: "k-noref" },
   count_only: { label: "计数", cls: "k-count" },
 };
+
+const SIX_TO_THREE: Record<string, string> = {
+  macro_news: "news_driven", industry_news: "news_driven", no_ref_news: "news_driven",
+  pure_resonance: "pure_resonance",
+  sentiment: "sentiment_tech", no_ref_pending: "sentiment_tech",
+};
+
+export function toWindowClass(cls: string | null | undefined): string | null {
+  if (!cls) return null;
+  if (cls === "news_driven" || cls === "pure_resonance" || cls === "sentiment_tech") return cls;
+  return SIX_TO_THREE[cls] ?? null;
+}
 
 export function classMeta(cls: string | null | undefined): { label: string; cls: string } {
   if (!cls) return { label: "未分类(未settle)", cls: "k-count" };

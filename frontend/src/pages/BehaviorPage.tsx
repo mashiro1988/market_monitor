@@ -25,6 +25,7 @@ import {
   parseUtc,
   stripBlocks,
   tierName,
+  toWindowClass,
 } from "./behaviorFormat";
 
 const SYMBOL = "BTC/USDT";
@@ -47,7 +48,7 @@ function bjShort(ts: string | null | undefined): string {
   return (ts ?? "").slice(5, 16);
 }
 
-const REVIEW_OPTIONS = ["macro_news", "pure_resonance", "industry_news", "sentiment", "no_ref_news", "no_ref_pending"];
+const REVIEW_OPTIONS = ["news_driven", "pure_resonance", "sentiment_tech"];   // 窗口级三类（Phase 2）
 
 function SegRow({ seg, onReview, busy }: { seg: BehaviorSegmentSchema; onReview: (id: number, cls: string | null) => void; busy: boolean }) {
   const meta = classMeta(seg.classification);
@@ -82,9 +83,9 @@ function SegRow({ seg, onReview, busy }: { seg: BehaviorSegmentSchema; onReview:
           </>
         ) : (
           <>
-            <button className="mini-btn" disabled={busy || !seg.classification}
-              title="确认机器分类无误"
-              onClick={() => seg.classification && onReview(seg.id, seg.classification)}>确认</button>
+            <button className="mini-btn" disabled={busy || !toWindowClass(seg.classification)}
+              title="确认机器分类无误（按三类归并写入）"
+              onClick={() => { const c = toWindowClass(seg.classification); if (c) onReview(seg.id, c); }}>确认</button>
             <select className="mini-select" disabled={busy} value=""
               onChange={(e) => e.target.value && onReview(seg.id, e.target.value)}>
               <option value="">改判…</option>

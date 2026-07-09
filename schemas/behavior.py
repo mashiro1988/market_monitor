@@ -87,10 +87,8 @@ class BehaviorLinkageResponse(BaseModel):
     breadth: list[BreadthPoint]
 
 
-REVIEWABLE_CLASSES = (
-    "macro_news", "pure_resonance", "industry_news", "sentiment",
-    "no_ref_news", "no_ref_pending",
-)
+# 人工审核只标三类（Phase 2）；机器六类经 to_window_class 归并展示。
+REVIEWABLE_CLASSES = ("news_driven", "pure_resonance", "sentiment_tech")
 
 
 class BehaviorReviewRequest(BaseModel):

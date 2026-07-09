@@ -140,3 +140,21 @@ def test_daily_summary_pit(session):
     counts = json.loads(rows[-1].counts)
     assert counts["0.5"]["up"] == 1
     assert rows[-1].day_type == "weekday"        # 2026-07-08 周三
+
+
+def test_window_class_mapping_and_merge():
+    assert bc.to_window_class("macro_news") == "news_driven"
+    assert bc.to_window_class("industry_news") == "news_driven"
+    assert bc.to_window_class("no_ref_news") == "news_driven"
+    assert bc.to_window_class("pure_resonance") == "pure_resonance"
+    assert bc.to_window_class("sentiment") == "sentiment_tech"
+    assert bc.to_window_class("no_ref_pending") == "sentiment_tech"
+    assert bc.to_window_class("news_driven") == "news_driven"     # 三类幂等
+    assert bc.to_window_class("count_only") is None
+    assert bc.to_window_class(None) is None
+    # 历史六类 PIT 行读取归并（不重写历史）
+    merged = bc.merge_composition({"macro_news": 3, "industry_news": 1, "sentiment": 2,
+                                   "no_ref_news": 1, "no_ref_pending": 1, "pure_resonance": 1})
+    assert merged == {"news_driven": 5, "pure_resonance": 1, "sentiment_tech": 3, "no_ref": 2}
+    # 新三类行幂等
+    assert bc.merge_composition(merged) == merged

@@ -27,7 +27,7 @@ from schemas.behavior import (
     SScoreSchema,
 )
 from schemas.common import TimeFields
-from services.behavior_classifier import _points, aggregate_day, day_type_of
+from services.behavior_classifier import _points, aggregate_day, day_type_of, merge_composition, to_window_class
 from services.resonance_score import chg_map, rolling_s
 from services.time_utils import timestamp_pair
 
@@ -92,7 +92,8 @@ def daily_series(session: Session, symbol: str, days: int = 14) -> BehaviorDaily
         if row is not None:
             out.append(BehaviorDailySchema(
                 utc_date=utc_date, day_type=row.day_type,
-                counts=json.loads(row.counts), composition=json.loads(row.composition),
+                counts=json.loads(row.counts),
+                composition=merge_composition(json.loads(row.composition)),   # 历史六类 PIT 行读取归并
                 down_net_sum=row.down_net_sum, computed_at=_tf(row.computed_at), live=False,
             ))
         else:
@@ -155,8 +156,10 @@ def review_segment(session: Session, segment_id: int, human_class: str | None):
     row = session.query(BehaviorSegment).filter_by(id=segment_id).one_or_none()
     if row is None:
         return None
-    if human_class is not None and human_class not in REVIEWABLE_CLASSES:
-        raise ValueError(f"非法类别: {human_class!r}（可选: {', '.join(REVIEWABLE_CLASSES)}）")
+    if human_class is not None:
+        human_class = to_window_class(human_class)      # 兼容旧六类入参 → 归并三类
+        if human_class not in REVIEWABLE_CLASSES:
+            raise ValueError(f"非法类别: {human_class!r}（可选: {', '.join(REVIEWABLE_CLASSES)}）")
     row.human_class = human_class
     row.human_confirmed_at = datetime.utcnow() if human_class is not None else None
     session.commit()

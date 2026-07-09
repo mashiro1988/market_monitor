@@ -30,6 +30,41 @@ COMPOSITION_CLASSES = (
     "macro_news", "pure_resonance", "industry_news", "sentiment",
     "no_ref_news", "no_ref_pending",
 )
+# 窗口级三类（Phase 2，2026-07-09 用户定）：人工标注与结论页构成的口径。
+# 机器六类保留在 classification 底层（无对照信息有用），展示/聚合经 to_window_class 归并。
+WINDOW_CLASSES = ("news_driven", "pure_resonance", "sentiment_tech")
+_SIX_TO_THREE = {
+    "macro_news": "news_driven",
+    "industry_news": "news_driven",
+    "no_ref_news": "news_driven",
+    "pure_resonance": "pure_resonance",
+    "sentiment": "sentiment_tech",
+    "no_ref_pending": "sentiment_tech",
+}
+
+
+def to_window_class(cls: str | None) -> str | None:
+    """六类/三类 → 三类归并（幂等：三类值原样通过；count_only/None → None）。"""
+    if cls in WINDOW_CLASSES:
+        return cls
+    return _SIX_TO_THREE.get(cls)
+
+
+def merge_composition(raw: dict) -> dict:
+    """构成字典归并为三类 + no_ref 注记（兼容历史 PIT 六类行，读取归并、不重写历史）。"""
+    if set(raw) <= set(WINDOW_CLASSES) | {"no_ref"}:
+        out = {k: int(raw.get(k, 0)) for k in WINDOW_CLASSES}
+        out["no_ref"] = int(raw.get("no_ref", 0))
+        return out
+    out = {k: 0 for k in WINDOW_CLASSES}
+    out["no_ref"] = 0
+    for k, v in raw.items():
+        three = to_window_class(k)
+        if three:
+            out[three] += int(v)
+        if k in ("no_ref_news", "no_ref_pending"):
+            out["no_ref"] += int(v)
+    return out
 
 
 # ---------- 取数 ----------
@@ -166,15 +201,18 @@ def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, d
         .all()
     )
     counts: dict[str, dict[str, int]] = {}
-    composition = {k: 0 for k in COMPOSITION_CLASSES}
+    composition = {k: 0 for k in WINDOW_CLASSES}
+    composition["no_ref"] = 0                            # 注记：无对照段数（已含在三类里，另计不另加）
     down_sum = 0.0
     for r in rows:
         tier_key = f"{r.tier_max:g}"
         bucket = counts.setdefault(tier_key, {"up": 0, "down": 0})
         bucket["up" if r.direction > 0 else "down"] += 1
-        effective = r.human_class or r.classification   # 人工确认/改判优先（审计结果进读数）
-        if effective in composition:
+        effective = to_window_class(r.human_class) or to_window_class(r.classification)  # 人工优先
+        if effective in WINDOW_CLASSES:
             composition[effective] += 1
+        if r.classification in ("no_ref_news", "no_ref_pending") and r.tier_idx >= 1:
+            composition["no_ref"] += 1
         if r.direction < 0 and r.net_pct is not None:
             down_sum += r.net_pct
     return counts, composition, round(down_sum, 4)
