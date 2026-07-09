@@ -176,6 +176,41 @@ ANNOTATION_REFERENCE_ASSETS = [
     ("BTC/USDT", "BTC"),
 ]
 
+# ============================================================
+# 价格行为引擎（docs/specs/price-behavior-engine-plan.md；spec = volume-behavior-engine-discussion.md v0.4）
+# ============================================================
+# 三档阈值阶梯（15min 开收净，%，绝对尺子：标准固定、数量浮动、频率即读数）。
+# BTC 0.3/0.5/0.8 = 计数基档 / 构成起点(生产现值) / 重拳档；
+# 宏观参照按"稀有度锚定"反解（该资产 15min 变动分布上与 BTC 对应档位同触发率的分位数，2026-07 实测圆整）。
+# None = 该参照未校准 → 整体禁用（不出段、不进 S、不上曲线），避免半配置状态；Task 9 校准脚本产出后填、用户拍板。
+BEHAVIOR_TIERS: dict[str, list[float] | None] = {
+    "BTC/USDT": [0.3, 0.5, 0.8],
+    "NQ=F": [0.23, 0.40, 0.69],
+    "GC=F": [0.23, 0.39, 0.61],
+    "DX-Y.NYB": [0.043, 0.069, 0.102],
+    "CL=F": None,
+    "^N225": None,
+    "US_2Y": None,
+}
+# 共振参照资产（有序 = 展示/S 计算顺序）；与 ANNOTATION_REFERENCE_ASSETS 同源，BTC 是主品种不进参照。
+BEHAVIOR_REF_SYMBOLS = ["NQ=F", "^N225", "GC=F", "US_2Y", "DX-Y.NYB", "CL=F"]
+# 共振分 S 判级 cutoff（回放校准项）：max|S| ≥ HI 共振；MID~HI 弱共振（仅展示证据）；< MID 独立。
+BEHAVIOR_S_HI = float(os.getenv("BEHAVIOR_S_HI", "0.5"))
+BEHAVIOR_S_MID = float(os.getenv("BEHAVIOR_S_MID", "0.3"))
+# ESS（有效样本数 (Σw)²/Σw²）低于此值标"证据薄"——分数靠一两根 bar 撑起，对插针/坏数据敏感。
+BEHAVIOR_ESS_THIN = float(os.getenv("BEHAVIOR_ESS_THIN", "5"))
+# 大窗口内参照覆盖（按 BTC 权重质量算）低于此比例 → 该参照不出分（休市/缺数 = 分数地基不实 → 无对照）。
+BEHAVIOR_COVERAGE_MIN = float(os.getenv("BEHAVIOR_COVERAGE_MIN", "0.5"))
+# 新闻命中：段窗 ± 分钟内存在 a-priori 量级 ∈ BEHAVIOR_NEWS_MAGNITUDES 的新闻（内容判，不看价格）。
+BEHAVIOR_NEWS_WINDOW_MIN = int(os.getenv("BEHAVIOR_NEWS_WINDOW_MIN", "30"))
+BEHAVIOR_NEWS_MAGNITUDES = ("大", "中")
+# rolling S 展示曲线窗口点数（2026-07-09 用户定 30 点 ≈ 2.5h）；纯展示——不触发、不分类、不告警。
+BEHAVIOR_ROLLING_POINTS = int(os.getenv("BEHAVIOR_ROLLING_POINTS", "30"))
+# 段→标注候选切换开关（默认关；Task 8 验证 runbook 过、用户拍板后才开——不长期双轨）。
+BEHAVIOR_REPLACES_ANNOTATION_WINDOWS = os.getenv(
+    "BEHAVIOR_REPLACES_ANNOTATION_WINDOWS", "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+
 # App / scheduler 启动后最多回补的 5m 价格历史小时数。
 # 回补按已入库的最新 timestamp 继续，重复 (symbol, timestamp) 会跳过。
 PRICE_BACKFILL_MAX_HOURS = int(os.getenv("PRICE_BACKFILL_MAX_HOURS", "72"))
@@ -544,7 +579,9 @@ def cmc_category_to_group(name: str) -> str | None:
 # 数据清理配置
 # ============================================================
 DATA_RETENTION = {
-    "price_snapshots_days": 30,     # 5分钟快照保留天数
+    # 2026-07-09 用户拍板 30→90：共振分 S 的稀有度锚定/回放校准需要 60-90 天基线。
+    # 注意：仓库目前**没有**清理 job，本值纯声明（改动无副作用，远程磁盘容量部署时看一眼）。
+    "price_snapshots_days": 90,     # 5分钟快照保留天数
     "news_items_days": 90,          # 新闻保留天数
     "prediction_markets_days": 30,  # 预测市场快照保留天数
     "alert_logs_days": 90,          # 告警日志保留天数
