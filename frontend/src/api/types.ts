@@ -186,6 +186,66 @@ export type AutoAnnotateResponse = {
   candidate_count: number;
 };
 
+export type BehaviorDailyResponse = {
+  symbol: string;
+  days: BehaviorDailySchema[];
+};
+
+export type BehaviorDailySchema = {
+  utc_date: string;
+  day_type: string;
+  counts: Record<string, Record<string, number>>;
+  composition: Record<string, number>;
+  down_net_sum: number | null;
+  computed_at: TimeFields;
+  live: boolean;
+};
+
+export type BehaviorLinkageResponse = {
+  symbol: string;
+  hours: number;
+  rolling_points: number;
+  series: LinkageSeries[];
+  breadth: BreadthPoint[];
+};
+
+export type BehaviorNewsBrief = {
+  id: number;
+  time: TimeFields;
+  title: string;
+  magnitude_tier: string | null;
+  topic: string | null;
+};
+
+export type BehaviorSegmentSchema = {
+  id: number;
+  symbol: string;
+  start: TimeFields;
+  end: TimeFields;
+  key_ts: TimeFields | null;
+  direction: number;
+  tier_idx: number;
+  tier_max: number;
+  net_pct: number;
+  amp_pct: number | null;
+  classification: string | null;
+  class_version: string | null;
+  s_scores: Record<string, SScoreSchema>;
+  max_abs_s: number | null;
+  news: BehaviorNewsBrief[];
+};
+
+export type BehaviorSegmentsResponse = {
+  symbol: string;
+  days: number;
+  segments: BehaviorSegmentSchema[];
+};
+
+export type BreadthPoint = {
+  t: TimeFields;
+  count: number | null;
+};
+
 export type ContextNewsResponse = {
   items: NewsItemSchema[];
 };
@@ -193,6 +253,17 @@ export type ContextNewsResponse = {
 export type DeleteAnnotationResponse = {
   id: number;
   deleted: boolean;
+};
+
+export type LinkagePoint = {
+  t: TimeFields;
+  s: number | null;
+};
+
+export type LinkageSeries = {
+  symbol: string;
+  label: string;
+  points: LinkagePoint[];
 };
 
 export type MarketHistoryPoint = {
@@ -368,9 +439,18 @@ export type PriceWindowSchema = {
 export type ReferenceChange = {
   symbol: string;
   label: string;
+  pre_pct: number | null;
   pct: number | null;
+  post_pct: number | null;
+  correlation: number | null;
   unit: string;
   is_self: boolean;
+};
+
+export type SScoreSchema = {
+  s: number;
+  ess: number;
+  coverage: number;
 };
 
 export type SectorLeaderboardResponse = {

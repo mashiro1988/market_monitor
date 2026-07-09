@@ -1336,3 +1336,33 @@ code {
 .netvalue-marker-empty {
   margin-top: 10px;
 }
+
+/* ============ 行为面板（price-behavior-engine-plan Task 7） ============ */
+.behavior-page .mini-title { font-size: 12px; color: #6b7280; margin: 10px 4px 2px; font-weight: 600; }
+.behavior-grid { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(240px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 980px) { .behavior-grid { grid-template-columns: 1fr; } }
+.behavior-aside { display: flex; flex-direction: column; gap: 16px; }
+.behavior-strip { position: relative; height: 16px; margin: 4px 40px 4px 34px; background: rgba(120,120,120,.08); border-radius: 4px; overflow: hidden; }
+.strip-block { position: absolute; top: 0; height: 100%; border-radius: 2px; }
+.strip-block.up { background: #1f9d63; }
+.strip-block.down { background: #d24a43; }
+.tier-chip { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 3px; padding: 0 6px; color: #fff; }
+.tier-chip.t0 { background: #c9cdd6; color: #23262c; }
+.tier-chip.t1 { background: #98a0b3; }
+.tier-chip.t2 { background: #4a5468; }
+.schip { display: inline-block; font-size: 11px; border: 1px solid rgba(120,120,120,.35); border-radius: 3px; padding: 0 5px; margin: 1px 3px 1px 0; white-space: nowrap; }
+.schip.max { border-color: #2c6bd9; }
+.schip b { font-weight: 700; }
+.thin-flag { font-size: 10px; color: #c24631; border: 1px solid #c24631; border-radius: 3px; padding: 0 4px; margin-left: 5px; }
+.klass { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.klass::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: #8a8f98; }
+.klass.k-macro::before { background: #2c6bd9; }
+.klass.k-reso::before { background: #0e8a78; }
+.klass.k-ind::before { background: #a9761c; }
+.klass.k-sent::before { background: #c24631; }
+.k-sent-text { color: #c24631; }
+.behavior-page .grammar { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 2; }
+.behavior-page .today-comp { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.behavior-page .num-big { font-size: 22px; }
+.behavior-page .small { font-size: 11.5px; }
+.behavior-page .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }

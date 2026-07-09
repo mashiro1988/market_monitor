@@ -35,10 +35,13 @@ class AnnotationSymbol(BaseModel):
 
 
 class ReferenceChange(BaseModel):
-    """标注窗口的「宏观同期对标」单项（纳指/原油/黄金/美债10Y/美元指数/BTC…）。"""
+    """标注窗口的「宏观同期对标」单项（纳指/原油/黄金/美债2Y/美元指数/BTC…）。"""
     symbol: str
     label: str
+    pre_pct: float | None = None
     pct: float | None = None   # 同期变动：unit=pct 时为涨跌%，unit=bp 时为基点；None=休市/无数据
+    post_pct: float | None = None
+    correlation: float | None = None  # 与标注品种在窗口 ±1h 的 5min 收益率 Pearson 相关；None=样本不足/无波动
     unit: str = "pct"          # "pct" | "bp"（收益率类品种用 bp）
     is_self: bool = False      # 标注品种本身（不对标自己）
 

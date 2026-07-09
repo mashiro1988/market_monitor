@@ -31,6 +31,7 @@ from schemas.annotations import (
     PriceRuleSchema,
     PriceWindowSchema,
 )
+from schemas.behavior import BehaviorDailyResponse, BehaviorLinkageResponse, BehaviorSegmentsResponse
 from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
 from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta, NewsTagUpdateRequest
@@ -44,7 +45,7 @@ from schemas.predictions import (
 )
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, market_service, news_service, news_tagging, prediction_service, sector_service, task_service
+from services import alerts_service, annotation_service, behavior_views, market_service, news_service, news_tagging, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -281,6 +282,31 @@ def annotation_context_news(
         )
     except ValueError as exc:
         raise ApiError("INVALID_DATETIME", str(exc), status_code=400) from exc
+
+
+# ============================================================
+# 价格行为引擎（docs/specs/price-behavior-engine-plan.md Task 6）
+# ============================================================
+
+@router.get("/behavior/segments", response_model=BehaviorSegmentsResponse)
+def behavior_segments(symbol: str = "BTC/USDT", days: int = Query(2, ge=1, le=30),
+                      db: Session = Depends(get_db)) -> BehaviorSegmentsResponse:
+    """段明细（含 S 证据/ESS/新闻命中/分类）。0.3 档段 classification=count_only。"""
+    return behavior_views.list_segments(db, symbol, days)
+
+
+@router.get("/behavior/daily", response_model=BehaviorDailyResponse)
+def behavior_daily(symbol: str = "BTC/USDT", days: int = Query(14, ge=1, le=90),
+                   db: Session = Depends(get_db)) -> BehaviorDailyResponse:
+    """日汇总序列：每日最新 PIT 行；当日盘中/缺口按同口径现算（live=true）。"""
+    return behavior_views.daily_series(db, symbol, days)
+
+
+@router.get("/behavior/linkage", response_model=BehaviorLinkageResponse)
+def behavior_linkage(symbol: str = "BTC/USDT", hours: int = Query(48, ge=6, le=168),
+                     db: Session = Depends(get_db)) -> BehaviorLinkageResponse:
+    """rolling S 联动曲线（逐参照）+ 同步参照数。纯展示层，compute-on-read。"""
+    return behavior_views.linkage(db, symbol, hours)
 
 
 @router.get("/annotations/tag-options")

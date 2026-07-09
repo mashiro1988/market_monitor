@@ -7,7 +7,8 @@ const navItems = [
   { to: "/news", label: "新闻快讯", icon: Newspaper },
   { to: "/predictions", label: "预测市场", icon: Radar },
   { to: "/alerts", label: "告警设置", icon: Bell },
-  { to: "/annotations", label: "新闻标注", icon: PenSquare }
+  { to: "/annotations", label: "新闻标注", icon: PenSquare },
+  { to: "/behavior", label: "行为面板", icon: Activity }
 ];
 
 export function AppShell() {
