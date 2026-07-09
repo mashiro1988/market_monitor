@@ -3,7 +3,7 @@ import type { MarketHistoryResponse, NewsItem } from "../api/types";
 import { buildNetValueChart, computeNetValueDomain, deriveMarkers, shiftUtcIso } from "./windowNetValue";
 
 function pt(symbol: string, name: string, price: number, utc: string, bj: string) {
-  return { symbol, name, price, normalized_pct: 0, timestamp_utc: utc, timestamp_bj: bj };
+  return { symbol, name, price, normalized_pct: 0, source: "test", timestamp_utc: utc, timestamp_bj: bj };
 }
 
 const history: MarketHistoryResponse = {

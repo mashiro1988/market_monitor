@@ -20,7 +20,7 @@ const mockedApi = api as unknown as {
 };
 
 function pt(price: number, utc: string, bj: string) {
-  return { symbol: "BTC/USDT", name: "BTC", price, normalized_pct: 0, timestamp_utc: utc, timestamp_bj: bj };
+  return { symbol: "BTC/USDT", name: "BTC", price, normalized_pct: 0, source: "test", timestamp_utc: utc, timestamp_bj: bj };
 }
 
 const history: MarketHistoryResponse = {
