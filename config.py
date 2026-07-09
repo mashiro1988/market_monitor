@@ -580,7 +580,8 @@ def cmc_category_to_group(name: str) -> str | None:
 # ============================================================
 DATA_RETENTION = {
     # 2026-07-09 用户拍板 30→90：共振分 S 的稀有度锚定/回放校准需要 60-90 天基线。
-    # 注意：仓库目前**没有**清理 job，本值纯声明（改动无副作用，远程磁盘容量部署时看一眼）。
+    # 每日 03:17 data_retention job 按此清理（services/data_retention.py）；放宽=多留数据，无删数风险，
+    # 远程磁盘容量部署时看一眼。
     "price_snapshots_days": 90,     # 5分钟快照保留天数
     "news_items_days": 90,          # 新闻保留天数
     "prediction_markets_days": 30,  # 预测市场快照保留天数

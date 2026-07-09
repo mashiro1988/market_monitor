@@ -134,6 +134,26 @@ def _start_background_scheduler() -> BackgroundScheduler:
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] data_retention failed: {}", exc)
 
+    def behavior_cycle() -> None:
+        """价格行为引擎：段检测 + settle 后共振分 S 分类（price-behavior-engine-plan Task 5）。"""
+        try:
+            from services.behavior_classifier import run_behavior_cycle
+
+            stats = run_behavior_cycle()
+            logger.info("[FastAPI Scheduler] behavior_cycle finished: {}", stats)
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] behavior_cycle failed: {}", exc)
+
+    def behavior_daily_summary() -> None:
+        """UTC 00:05 汇总昨日行为日报（point-in-time 追加，不覆盖历史读数）。"""
+        try:
+            from services.behavior_classifier import run_daily_summary
+
+            stats = run_daily_summary()
+            logger.info("[FastAPI Scheduler] behavior_daily_summary finished: {}", stats)
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] behavior_daily_summary failed: {}", exc)
+
     def cmc_bootstrap() -> None:
         """启动后异步检查 CMC 板块映射是否过期(7 天 TTL),过期了就刷新。
         作为 date trigger 一次性 job,不阻塞 lifespan。首次启动大概 2 分钟。
@@ -222,6 +242,24 @@ def _start_background_scheduler() -> BackgroundScheduler:
         data_retention_cycle,
         CronTrigger(hour=3, minute=17),
         id="data_retention",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # 价格行为引擎：与价格采集同节奏（5min），错峰 +2min 让本轮快照先落库；日报 UTC 00:05 汇总昨日。
+    scheduler.add_job(
+        behavior_cycle,
+        IntervalTrigger(minutes=price_interval,
+                        start_date=next_aligned_run_time(price_interval) + timedelta(minutes=2)),
+        id="behavior_cycle",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        behavior_daily_summary,
+        CronTrigger(hour=0, minute=5),
+        id="behavior_daily_summary",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
