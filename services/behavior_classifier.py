@@ -150,10 +150,9 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
 
 # ---------- 日汇总（point-in-time 追加） ----------
 
-def write_daily_summary(session: Session, symbol: str, utc_date: str,
-                        now: datetime | None = None) -> BehaviorDailySummary:
-    """按段的 start_dt 归日聚合，append 一条 PIT 记录（读取取 computed_at 最新）。"""
-    now = now or datetime.utcnow()
+def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, dict, float]:
+    """按段的 start_dt 归日聚合 → (counts, composition, down_net_sum)。
+    PIT 写入与当日盘中 live 读数（behavior_views）共用同一口径。"""
     day = datetime.strptime(utc_date, "%Y-%m-%d")
     rows = (
         session.query(BehaviorSegment)
@@ -173,11 +172,22 @@ def write_daily_summary(session: Session, symbol: str, utc_date: str,
             composition[r.classification] += 1
         if r.direction < 0 and r.net_pct is not None:
             down_sum += r.net_pct
+    return counts, composition, round(down_sum, 4)
+
+
+def day_type_of(utc_date: str) -> str:
+    return "weekend" if datetime.strptime(utc_date, "%Y-%m-%d").weekday() >= 5 else "weekday"
+
+
+def write_daily_summary(session: Session, symbol: str, utc_date: str,
+                        now: datetime | None = None) -> BehaviorDailySummary:
+    """append 一条 PIT 记录（追加不覆盖，读取取 computed_at 最新）。"""
+    now = now or datetime.utcnow()
+    counts, composition, down_sum = aggregate_day(session, symbol, utc_date)
     summary = BehaviorDailySummary(
-        symbol=symbol, utc_date=utc_date,
-        day_type="weekend" if day.weekday() >= 5 else "weekday",
+        symbol=symbol, utc_date=utc_date, day_type=day_type_of(utc_date),
         counts=json.dumps(counts), composition=json.dumps(composition),
-        down_net_sum=round(down_sum, 4), computed_at=now,
+        down_net_sum=down_sum, computed_at=now,
     )
     session.add(summary)
     session.commit()
