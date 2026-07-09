@@ -82,7 +82,9 @@ class AnnotationCreateRequest(BaseModel):
     # —— v2 标签（None = 旧格式请求，落库时由 selected/no_clear 归一化派生）——
     news_roles: dict[int, str] | None = None          # {news_id: causal_role}，只含非 noise
     market_reaction_type: str | None = None           # legacy: MARKET_REACTION_TYPES 之一
-    confidence: float | None = None                   # 0-1
+    confidence: float | None = None
+    # Phase 2 窗口级三类（news_driven / pure_resonance / sentiment_tech）；保存时回写行为段 human_class。
+    window_class: str | None = None                   # 0-1
     # AI 原始标注快照（人改前），用于沉淀人机分歧难例；纯人工标注为 None
     auto_news_roles: dict[int, str] | None = None
     # 候选新闻前置窗分钟数（多尺度窗口各档不同；不传用默认）

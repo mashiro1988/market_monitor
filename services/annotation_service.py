@@ -801,6 +801,40 @@ def _find_window_snapshot(session: Session, symbol: str, timestamp_value: dateti
     )
 
 
+def _write_back_window_class(session: Session, symbol: str,
+                             window_start: datetime, window_end: datetime,
+                             window_class: str | None) -> None:
+    """Phase 2（2026-07-09）：标注保存 = 人工审核。把窗口级三类回写到重叠的行为段 human_class。
+    匹配：同 symbol、tier≥0.5 档、区间重叠 ≥50%（以较短一方为分母——段边界是 0.3 基座合并，
+    通常比旧 0.5 窗口宽）。找不到段时静默跳过（并行期/历史窗口兜底），不影响标注本身。"""
+    if not window_class:
+        return
+    from models.behavior import BehaviorSegment
+    from services.behavior_classifier import WINDOW_CLASSES
+
+    if window_class not in WINDOW_CLASSES:
+        raise ValueError(f"window_class 非法: {window_class!r}（可选: {', '.join(WINDOW_CLASSES)}）")
+    candidates = (
+        session.query(BehaviorSegment)
+        .filter(BehaviorSegment.symbol == symbol,
+                BehaviorSegment.tier_idx >= 1,
+                BehaviorSegment.start_dt <= window_end,
+                BehaviorSegment.end_dt >= window_start)
+        .all()
+    )
+    best, best_ratio = None, 0.0
+    for seg in candidates:
+        overlap = (min(seg.end_dt, window_end) - max(seg.start_dt, window_start)).total_seconds()
+        shorter = min((seg.end_dt - seg.start_dt).total_seconds(),
+                      (window_end - window_start).total_seconds()) or 1.0
+        ratio = overlap / shorter
+        if ratio > best_ratio:
+            best, best_ratio = seg, ratio
+    if best is not None and best_ratio >= 0.5:
+        best.human_class = window_class
+        best.human_confirmed_at = datetime.utcnow()
+
+
 def upsert_annotation(session: Session, request: AnnotationCreateRequest) -> AnnotationResponse:
     window_start = parse_datetime(request.window_start_utc)
     window_end = parse_datetime(request.window_end_utc)
@@ -867,6 +901,8 @@ def upsert_annotation(session: Session, request: AnnotationCreateRequest) -> Ann
     if request.auto_reasoning is not None or request.auto_summary is not None:
         existing.prompt_version = ANNOTATION_PROMPT_VERSION
     existing.updated_at = utc_now_naive()
+    # Phase 2：标注保存 = 人工审核 → 窗口级三类回写行为段 human_class（重叠≥50% 匹配）。
+    _write_back_window_class(session, request.symbol, window_start, window_end, request.window_class)
     session.commit()
     return AnnotationResponse(id=existing.id)
 

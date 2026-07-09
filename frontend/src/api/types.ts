@@ -60,6 +60,7 @@ export type AnnotationCreateRequest = {
   news_roles?: Record<string, string> | null;
   market_reaction_type?: string | null;
   confidence?: number | null;
+  window_class?: string | null;
   auto_news_roles?: Record<string, string> | null;
   context_pre_minutes?: number | null;
 };
