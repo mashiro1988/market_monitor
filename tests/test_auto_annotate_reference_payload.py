@@ -179,11 +179,18 @@ def test_prompts_document_reference_changes():
         assert "reference_change_segments" in prompt
         assert "包含标注品种本身" in prompt
         assert "核心推理顺序" in prompt
-        assert "同步相关" in prompt
+        # v11 守卫：共振分 S 证据链取代 ±1h Pearson 判据（price-behavior-engine-plan Task 8b）
+        assert "共振分 S" in prompt
+        assert "max|S|" in prompt
+        assert "machine_class" in prompt
+        assert "证据薄" in prompt
+        assert "无对照（宏观休市）≠ 无宏观新闻" in prompt
         assert "不要做 lag" in prompt
-        assert "相关性低" in prompt
+        assert "|corr|≥0.7" not in prompt            # 旧判据不得复活
+        assert "±1h 的相关系数" not in prompt
+        assert "先看 `correlations`" not in prompt
         assert "日经" in prompt
-        assert "相关资产新闻 + 其它资产验证 + 时间靠近触发段" in prompt
+        assert "最强参照的新闻 + 其它资产验证 + 时间靠近触发段" in prompt
         assert "地缘" in prompt        # 跨资产风险事件解读指引
         # 全 null（对标品种集体休市，周末加密窗口的常态）必须有降级指引，
         # 否则模型可能拿"无矛盾"当"签名一致"，借地缘例外条款乱选。
