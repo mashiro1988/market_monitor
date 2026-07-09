@@ -1,6 +1,6 @@
-import { expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import type { MarketHistoryResponse, NewsItem } from "../api/types";
-import { buildNetValueChart, computeNetValueDomain, deriveMarkers, shiftUtcIso } from "./windowNetValue";
+import { buildNetValueChart, deriveSegmentBands, computeNetValueDomain, deriveMarkers, shiftUtcIso } from "./windowNetValue";
 
 function pt(symbol: string, name: string, price: number, utc: string, bj: string) {
   return { symbol, name, price, normalized_pct: 0, source: "test", timestamp_utc: utc, timestamp_bj: bj };
@@ -121,4 +121,33 @@ test("computeNetValueDomain 完全平线也给最小带宽", () => {
 test("computeNetValueDomain 无数值返回 undefined", () => {
   expect(computeNetValueDomain([], ["X"])).toBeUndefined();
   expect(computeNetValueDomain([{ time: "a", X: null }], ["X"])).toBeUndefined();
+});
+
+
+describe("deriveSegmentBands", () => {
+  const buckets = [
+    { time: "07-08 21:20", utcMinute: "2026-07-08T13:20" },
+    { time: "07-08 21:25", utcMinute: "2026-07-08T13:25" },
+    { time: "07-08 21:30", utcMinute: "2026-07-08T13:30" },
+    { time: "07-08 21:35", utcMinute: "2026-07-08T13:35" },
+  ];
+  it("maps segments to tier-colored bands snapped to buckets", () => {
+    const bands = deriveSegmentBands([
+      { start: { timestamp_utc: "2026-07-08T13:24:00" }, end: { timestamp_utc: "2026-07-08T13:32:00" }, direction: 1, tier_idx: 2 },
+      { start: { timestamp_utc: "2026-07-08T13:00:00" }, end: { timestamp_utc: "2026-07-08T13:05:00" }, direction: -1, tier_idx: 0 },  // 域外 → 丢
+    ], buckets);
+    expect(bands).toHaveLength(1);
+    expect(bands[0].x1).toBe("07-08 21:25");
+    expect(bands[0].x2).toBe("07-08 21:30");
+    expect(bands[0].fill).toContain("94,234,212");   // 涨 = 站内青
+    expect(bands[0].fill).toContain("0.22");          // 0.8 档不透明度
+  });
+  it("clips segment spilling out of the domain", () => {
+    const bands = deriveSegmentBands([
+      { start: { timestamp_utc: "2026-07-08T13:00:00" }, end: { timestamp_utc: "2026-07-08T13:27:00" }, direction: -1, tier_idx: 0 },
+    ], buckets);
+    expect(bands[0].x1).toBe("07-08 21:20");
+    expect(bands[0].x2).toBe("07-08 21:25");
+    expect(bands[0].fill).toContain("251,113,133");  // 跌 = 站内玫红
+  });
 });

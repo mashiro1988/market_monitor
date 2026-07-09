@@ -5,7 +5,8 @@ import type { NewsItem, PriceWindow } from "../api/types";
 import { MultiLineChart } from "./Charts";
 import { MultiSelectControl, type MultiOption } from "./Controls";
 import { ErrorState, LoadingState } from "./StateViews";
-import { buildNetValueChart, computeNetValueDomain, deriveMarkers, shiftUtcIso } from "./windowNetValue";
+import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveSegmentBands, shiftUtcIso } from "./windowNetValue";
+import type { SegmentBandInput } from "./windowNetValue";
 
 // 默认篮子（含美债10Y/美元指数——低波动，走右副轴）；独立持久化，与 MarketPage 互不影响。
 const DEFAULT_BASKET = ["YM=F", "NQ=F", "000001.SS", "^N225", "^KS11", "GC=F", "CL=F", "BTC/USDT", "US_10Y", "DX-Y.NYB"];
@@ -41,13 +42,15 @@ export function WindowNetValueChart({
   preMinutes,
   postMinutes,
   candidateNews,
-  newsRoles
+  newsRoles,
+  segments = []
 }: {
   activeWindow: PriceWindow;
   preMinutes: number;
   postMinutes: number;
   candidateNews: NewsItem[];
   newsRoles: Record<number, string>;
+  segments?: SegmentBandInput[];   // 行为段（含 0.3 簇拥）→ 档位色带
 }) {
   const [basket, setBasketState] = useState<string[]>(loadBasket);
   const setBasket = (next: string[]) => {
@@ -83,6 +86,8 @@ export function WindowNetValueChart({
     () => deriveMarkers(candidateNews, newsRoles, buckets),
     [candidateNews, newsRoles, buckets]
   );
+
+  const segmentBands = useMemo(() => deriveSegmentBands(segments, buckets), [segments, buckets]);
 
   // 美债/美元等低波动品种放右副轴（自适应各自量程，否则被 BTC/股指压成平线）。
   const secondaryKeys = useMemo(
@@ -128,6 +133,7 @@ export function WindowNetValueChart({
             markers={markers}
             highlightKey={highlightKey ?? undefined}
             secondaryKeys={secondaryKeys}
+            shadedBands={segmentBands}
           />
           {markers.length ? (
             <ul className="netvalue-marker-list">

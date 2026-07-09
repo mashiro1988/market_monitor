@@ -74,6 +74,14 @@ def _reference_change_for_window(
     return (e.price - s.price) / abs(s.price) * 100
 
 
+def _reference_endpoints(rows: list[PriceSnapshot], window_start: datetime, window_end: datetime,
+                         tolerance_minutes: int) -> tuple[float | None, float | None]:
+    """窗口内绝对起点/终点（端点最近快照价）；任一端无数据 → None。"""
+    s = _nearest_snapshot_any(rows, window_start, tolerance_minutes)
+    e = _nearest_snapshot_any(rows, window_end, tolerance_minutes)
+    return (s.price if s else None), (e.price if e else None)
+
+
 def _reference_rows_cutoff(window_start: datetime, tolerance_minutes: int) -> datetime:
     return window_start - timedelta(minutes=REFERENCE_SEGMENT_MINUTES + tolerance_minutes + 5)
 
@@ -114,11 +122,14 @@ def _reference_changes_for_window(
         post_pct = _reference_change_for_window(
             rows, window_end, window_end + timedelta(minutes=REFERENCE_SEGMENT_MINUTES), tolerance_minutes, unit
         )
+        price_start, price_end = _reference_endpoints(rows, window_start, window_end, tolerance_minutes)
         if sym == annotated_symbol:
             out.append(ReferenceChange(
                 symbol=sym,
                 label=label,
                 pre_pct=pre_pct,
+                price_start=price_start,
+                price_end=price_end,
                 pct=pct,
                 post_pct=post_pct,
                 correlation=None,
@@ -130,6 +141,8 @@ def _reference_changes_for_window(
             symbol=sym,
             label=label,
             pre_pct=pre_pct,
+            price_start=price_start,
+            price_end=price_end,
             pct=pct,
             post_pct=post_pct,
             correlation=(correlations_by_symbol or {}).get(sym),

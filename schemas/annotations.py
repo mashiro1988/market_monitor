@@ -39,6 +39,8 @@ class ReferenceChange(BaseModel):
     symbol: str
     label: str
     pre_pct: float | None = None
+    price_start: float | None = None   # 窗口内绝对起点（Phase 2：对标行显示"起点 → 终点 (涨跌)"）
+    price_end: float | None = None     # 窗口内绝对终点
     pct: float | None = None   # 同期变动：unit=pct 时为涨跌%，unit=bp 时为基点；None=休市/无数据
     post_pct: float | None = None
     correlation: float | None = None  # 与标注品种在窗口 ±1h 的 5min 收益率 Pearson 相关；None=样本不足/无波动

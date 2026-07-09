@@ -106,3 +106,32 @@ export function computeNetValueDomain(
   const pad = Math.max((max - min) * 0.15, 0.002);
   return [Math.floor((min - pad) * 1000) / 1000, Math.ceil((max + pad) * 1000) / 1000];
 }
+
+
+// Phase 2：行为段（含 0.3 档簇拥）映射为净值图色带——方向色 × 档位深浅，呈现"小推→爆发"的渐进式共振。
+export type SegmentBandInput = {
+  start: { timestamp_utc: string | null };
+  end: { timestamp_utc: string | null };
+  direction: number;
+  tier_idx: number;
+};
+
+export function deriveSegmentBands(
+  segments: SegmentBandInput[],
+  buckets: { time: string; utcMinute: string }[],
+): { x1: string; x2: string; fill: string }[] {
+  if (!buckets.length) return [];
+  const out: { x1: string; x2: string; fill: string }[] = [];
+  for (const seg of segments) {
+    const s = seg.start.timestamp_utc?.slice(0, 16);
+    const e = seg.end.timestamp_utc?.slice(0, 16);
+    if (!s || !e) continue;
+    const first = buckets.find((b) => b.utcMinute >= s);
+    const last = [...buckets].reverse().find((b) => b.utcMinute <= e);
+    if (!first || !last || first.utcMinute > last.utcMinute) continue;   // 段在图域外
+    const opacity = 0.08 + 0.07 * Math.min(seg.tier_idx, 2);
+    const rgb = seg.direction > 0 ? "94,234,212" : "251,113,133";        // 站内青涨/玫红跌
+    out.push({ x1: first.time, x2: last.time, fill: `rgba(${rgb},${opacity.toFixed(2)})` });
+  }
+  return out;
+}

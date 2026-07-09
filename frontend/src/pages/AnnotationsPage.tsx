@@ -11,7 +11,9 @@ const AUTO_BATCH_CHUNK = 3;
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
+import { LinkagePanel } from "../components/LinkagePanel";
 import { WindowNetValueChart } from "../components/WindowNetValueChart";
+import { classMeta, toWindowClass } from "./behaviorFormat";
 
 const hoursOptions = [
   { label: "24小时", value: "24" },
@@ -25,27 +27,29 @@ function windowKey(w: PriceWindow): string {
 
 // 单个宏观对标的展示文本 + 涨跌色类。本身 / 无数据（周末/休市）→ 中性灰。
 // 收益率类品种（unit=bp）显示基点变动，其余显示涨跌%。
-function fmtCorrelation(value: number | null | undefined): string {
-  if (value == null) return "同步相关 —";
-  const sign = value > 0 ? "+" : "";
-  return `同步相关 ${sign}${value.toFixed(2)}`;
-}
-
 function fmtRefMove(value: number | null | undefined, unit?: string | null): string {
   if (value == null) return "—";
   const sign = value > 0 ? "+" : "";
   return unit === "bp" ? `${sign}${value.toFixed(1)}bp` : `${sign}${value.toFixed(2)}%`;
 }
 
+function fmtRefPrice(value: number | null | undefined, unit?: string | null): string {
+  if (value == null) return "—";
+  if (unit === "bp") return `${value.toFixed(2)}%`;                 // 收益率本身
+  if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (Math.abs(value) >= 100) return value.toFixed(1);
+  return value.toFixed(2);
+}
+
+// Phase 2（2026-07-09 拍板）：对标行 = 绝对起点 → 终点 + 窗口内涨跌；
+// 同步相关与前/后段展示退役（时序上下文由 rolling S 曲线 + 档位色带承担）。
 function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
-  const moves = `前 ${fmtRefMove(ref.pre_pct, ref.unit)} / 窗 ${fmtRefMove(ref.pct, ref.unit)} / 后 ${fmtRefMove(ref.post_pct, ref.unit)}`;
-  if (ref.is_self) {
-    const cls = ref.pct == null ? "ref-neutral" : ref.pct >= 0 ? "up-text" : "down-text";
-    return { text: `${ref.label} 本身 ${moves}`, cls };
-  }
-  const corr = fmtCorrelation(ref.correlation);
-  if (ref.pct == null) return { text: `${ref.label} ${moves} · ${corr}`, cls: "ref-neutral" };
-  return { text: `${ref.label} ${moves} · ${corr}`, cls: ref.pct >= 0 ? "up-text" : "down-text" };
+  const span = ref.price_start != null && ref.price_end != null
+    ? `${fmtRefPrice(ref.price_start, ref.unit)} → ${fmtRefPrice(ref.price_end, ref.unit)} `
+    : "";
+  const text = `${ref.label}${ref.is_self ? "(本身)" : ""} ${span}(${fmtRefMove(ref.pct, ref.unit)})`;
+  if (ref.pct == null) return { text, cls: "ref-neutral" };
+  return { text, cls: ref.pct >= 0 ? "up-text" : "down-text" };
 }
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（角色/反应类型/notes）
@@ -77,6 +81,13 @@ const ROLE_OPTIONS = [
 ] as const;
 
 // 置信度三档（高/中/低 → 固定数值）；保留——训模型时作样本置信权重用。
+// Phase 2 窗口级三类（= 人工审核；保存必选，回写行为段 human_class）
+const WINDOW_CLASS_OPTIONS = [
+  { value: "news_driven", label: "新闻驱动" },
+  { value: "pure_resonance", label: "纯宏观共振" },
+  { value: "sentiment_tech", label: "情绪·技术面" },
+];
+
 const CONFIDENCE_TIERS = [
   { value: 0.9, label: "高" },
   { value: 0.65, label: "中" },
@@ -129,6 +140,7 @@ export function AnnotationsPage() {
   // 编辑表单状态（Phase3a：每条新闻 causal_role + 置信度/summary）
   const [newsRoles, setNewsRoles] = useState<Record<number, string>>({});   // 只存非 noise
   const [confidence, setConfidence] = useState<number | null>(null);
+  const [windowClass, setWindowClass] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [labeler, setLabeler] = useState(initialStored.labeler ?? "");
   const [autoResult, setAutoResult] = useState<AutoAnnotateResponse | null>(null);
@@ -182,6 +194,13 @@ export function AnnotationsPage() {
   const symbols = useQuery({ queryKey: ["annotation-symbols", hours], queryFn: () => api.annotationSymbols(Number(hours)) });
   const currentSymbol = symbol || symbols.data?.[0]?.symbol || "";
   const rule = rules.data?.find((item) => item.symbol === currentSymbol);
+
+  // Phase 2：行为段（含 0.3 档簇拥）→ 净值图档位色带；只取近 3 天，随窗口列表同刷。
+  const behaviorSegs = useQuery({
+    queryKey: ["behavior-segments", "annot", "BTC/USDT"],
+    queryFn: () => api.behaviorSegments({ symbol: "BTC/USDT", days: 3 }),
+    refetchInterval: 5 * 60_000,
+  });
 
   const windowsQuery = useQuery({
     queryKey: ["annotation-windows", currentSymbol, hours],
@@ -364,6 +383,11 @@ export function AnnotationsPage() {
     return () => clearTimeout(timer);
   }, [batchByKey, batchMeta, labeler, activeKey]);
 
+  // 三类预填：已有人工结论 > 机器预分类归并；切窗口时重置
+  useEffect(() => {
+    setWindowClass(activeWindow?.human_class ?? toWindowClass(activeWindow?.machine_class ?? null));
+  }, [activeKey, activeWindow?.human_class, activeWindow?.machine_class]);
+
   const save = useMutation({
     mutationFn: () => api.saveAnnotation({
       symbol: activeWindow!.symbol,
@@ -374,6 +398,7 @@ export function AnnotationsPage() {
       // v2 标签；selected_news_ids / no_clear_news 由后端从 news_roles 派生
       news_roles: newsRoles,
       confidence,
+      window_class: windowClass,
       notes,
       labeler: autoResult ? `${labeler || ""}${labeler ? " · " : ""}${autoResult.model} (auto, reviewed)` : labeler,
       // 训练数据：把当前展示的全部候选新闻 ID 一起存（即使是纯人工标注，也保留负样本信息）。
@@ -395,6 +420,9 @@ export function AnnotationsPage() {
       });
       void queryClient.invalidateQueries({ queryKey: ["annotation-windows"] });
       void queryClient.invalidateQueries({ queryKey: ["annotation-list"] });
+      // human_class 已回写行为段 → 结论页构成一并刷新
+      void queryClient.invalidateQueries({ queryKey: ["behavior-daily"] });
+      void queryClient.invalidateQueries({ queryKey: ["behavior-segments"] });
     }
   });
 
@@ -403,6 +431,9 @@ export function AnnotationsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["annotation-windows"] });
       void queryClient.invalidateQueries({ queryKey: ["annotation-list"] });
+      // human_class 已回写行为段 → 结论页构成一并刷新
+      void queryClient.invalidateQueries({ queryKey: ["behavior-daily"] });
+      void queryClient.invalidateQueries({ queryKey: ["behavior-segments"] });
     }
   });
 
@@ -697,13 +728,31 @@ export function AnnotationsPage() {
          !groups.length ? <EmptyState title="该回溯期内没有未标注的价格异动事件" /> : (
           <>
             {activeWindow ? (
-              <WindowNetValueChart
-                activeWindow={activeWindow}
-                preMinutes={activePre}
-                postMinutes={60}
-                candidateNews={contextNews.data?.items ?? []}
-                newsRoles={newsRoles}
-              />
+              <>
+                <WindowNetValueChart
+                  activeWindow={activeWindow}
+                  preMinutes={activePre}
+                  postMinutes={60}
+                  candidateNews={contextNews.data?.items ?? []}
+                  newsRoles={newsRoles}
+                  segments={activeWindow.symbol === "BTC/USDT" ? (behaviorSegs.data?.segments ?? []) : []}
+                />
+                {activeWindow.symbol === "BTC/USDT" ? (
+                  <section className="panel annotation-block">
+                    <div className="panel-head">
+                      <h2>联动证据 · rolling S（青色高亮 = 当前窗口）</h2>
+                    </div>
+                    <LinkagePanel
+                      symbol="BTC/USDT"
+                      hours={48}
+                      highlight={activeWindow.window_start.timestamp_bj && activeWindow.window_end.timestamp_bj ? {
+                        x1: activeWindow.window_start.timestamp_bj.slice(5, 16),
+                        x2: activeWindow.window_end.timestamp_bj.slice(5, 16),
+                      } : null}
+                    />
+                  </section>
+                ) : null}
+              </>
             ) : null}
             <div className="annotation-pair-grid">
               <section className="annotation-pair-panel">
@@ -738,6 +787,21 @@ export function AnnotationsPage() {
                             <span className="window-item-pct">
                               {sign}{primary.change_pct.toFixed(2)}%
                             </span>
+                            {primary.tier_idx != null ? (
+                              <span className={`tier-chip t${primary.tier_idx}`}>{["0.3档", "0.5档", "0.8档"][primary.tier_idx]}</span>
+                            ) : null}
+                            {(() => {
+                              const vals = Object.values(primary.s_scores ?? {}).map((v) => Math.abs((v as { s: number }).s));
+                              return vals.length ? <span className="schip max">S {Math.max(...vals).toFixed(2)}</span> : null;
+                            })()}
+                            {primary.cluster03_count ? (
+                              <span className="muted-text small" title="±1h 内簇拥的 0.3 档段（渐进式共振提示）">+{primary.cluster03_count}×0.3</span>
+                            ) : null}
+                            {primary.human_class ? (
+                              <span className={`klass ${classMeta(primary.human_class).cls}`} title="人工已审">✓{classMeta(primary.human_class).label}</span>
+                            ) : toWindowClass(primary.machine_class) ? (
+                              <span className={`klass ${classMeta(toWindowClass(primary.machine_class)!).cls}`} title="机器预分类（未审）">{classMeta(toWindowClass(primary.machine_class)!).label}</span>
+                            ) : null}
                             {locked ? <span className="window-item-lock" title="尚未 settle">⏳</span> : null}
                             {primary.references?.length ? (
                               <span className="window-item-refs" title="同期宏观对标（纳指/原油/黄金）">
@@ -779,6 +843,24 @@ export function AnnotationsPage() {
             {activeWindow ? (
               <div className="annotation-save-block">
                 <div className="field">
+                  <span>窗口驱动类型（三类 = 人工审核，保存后回写行为段）</span>
+                  <div className="confidence-tiers">
+                    {WINDOW_CLASS_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`tier-btn ${windowClass === opt.value ? "active" : ""}`}
+                        onClick={() => { setWindowClass(opt.value); setSaveValidation(""); }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                    {activeWindow?.machine_class ? (
+                      <span className="muted-text small">机器：{classMeta(toWindowClass(activeWindow.machine_class) ?? activeWindow.machine_class).label}</span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="field">
                   <span>归因置信度</span>
                   <div className="confidence-tiers">
                     {CONFIDENCE_TIERS.map((tier) => (
@@ -816,6 +898,10 @@ export function AnnotationsPage() {
                   <Button
                     disabled={saveDisabled}
                     onClick={() => {
+                      if (windowClass == null) {
+                        setSaveValidation("请先选择窗口驱动类型（新闻驱动 / 纯宏观共振 / 情绪·技术面），再保存。");
+                        return;
+                      }
                       if (confidence == null) {
                         setSaveValidation("请先选择归因置信度（高 / 中 / 低），再保存标注。");
                         return;

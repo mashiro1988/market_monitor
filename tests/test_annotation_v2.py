@@ -26,8 +26,9 @@ from models.price import PriceSnapshot
 from schemas.annotations import AnnotationCreateRequest
 from services import annotation_service
 
-W_START = datetime(2026, 6, 9, 17, 0)
-W_END = datetime(2026, 6, 9, 17, 30)
+# 相对时间夹具：写死日期会随真实时间流逝掉出 days=30 的导出/列表窗（2026-07-10 实翻车）。
+W_START = (datetime.utcnow() - timedelta(days=5)).replace(minute=0, second=0, microsecond=0)
+W_END = W_START + timedelta(minutes=30)
 
 
 @pytest.fixture

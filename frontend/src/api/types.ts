@@ -453,6 +453,8 @@ export type ReferenceChange = {
   symbol: string;
   label: string;
   pre_pct: number | null;
+  price_start: number | null;
+  price_end: number | null;
   pct: number | null;
   post_pct: number | null;
   correlation: number | null;
