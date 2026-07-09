@@ -441,6 +441,12 @@ export type PriceWindowSchema = {
   is_primary: boolean;
   context_pre_minutes: number;
   references: ReferenceChange[];
+  tier_idx: number | null;
+  tier_max: number | null;
+  s_scores: Record<string, Record<string, unknown>>;
+  machine_class: string | null;
+  human_class: string | null;
+  cluster03_count: number;
 };
 
 export type ReferenceChange = {

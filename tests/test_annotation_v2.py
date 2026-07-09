@@ -330,6 +330,8 @@ def test_list_annotations_needs_review(session):
         session.add(PriceSnapshot(timestamp=now - timedelta(minutes=mago),
                                   asset_class="crypto", symbol="BTC/USDT", name="BTC/USDT", price=p, source="t"))
     session.commit()
+    from services import behavior_classifier as _bc
+    _bc.classify(session, "BTC/USDT", now=now)          # Phase 2：窗口源=行为段，先跑一轮段检测
     wins = annotation_service.load_price_windows(session, "BTC/USDT", hours=24)
     assert wins, "需要至少一个窗口来测 needs_review"
     w = wins[0]

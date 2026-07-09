@@ -643,8 +643,8 @@ def _scale_events(rows: list[PriceSnapshot], display_cutoff: datetime, tolerance
 
 def _behavior_segment_events(session: Session, symbol: str, display_cutoff: datetime,
                              scale: dict, asset_class: str, name: str) -> list[dict]:
-    """behavior_segments（0.5 档以上）→ _scale_events 同形 raw dict（Task 8 开关路径）。
-    只做字段映射，不再做触发/合并——段检测语义已与 _scale_events 对齐（behavior_segments.py）。"""
+    """behavior_segments（0.5 档以上）→ 标注窗口 raw dict（Phase 2：标注页唯一窗口源）。
+    段证据（档位/S/机器类/人工类/簇拥 0.3 计数）随行携带，标注页工作台直接展示。"""
     from models.behavior import BehaviorSegment
 
     rows = (
@@ -655,12 +655,28 @@ def _behavior_segment_events(session: Session, symbol: str, display_cutoff: date
         .order_by(BehaviorSegment.start_dt.asc())
         .all()
     )
-    return [{
-        "start": r.start_dt, "end": r.end_dt, "sign": r.direction, "segments": 1,
-        "asset_class": asset_class, "name": name,
-        "wm": int(scale["window_minutes"]),
-        "pre": int(scale.get("pre_minutes", CONTEXT_PRE_MINUTES_DEFAULT)),
-    } for r in rows]
+    pad = timedelta(hours=1)
+    minors = (
+        session.query(BehaviorSegment.start_dt, BehaviorSegment.end_dt)
+        .filter(BehaviorSegment.symbol == symbol,
+                BehaviorSegment.tier_idx == 0,
+                BehaviorSegment.end_dt >= display_cutoff - pad)
+        .all()
+    ) if rows else []
+    out = []
+    for r in rows:
+        cluster03 = sum(1 for ms, me in minors if ms <= r.end_dt + pad and me >= r.start_dt - pad)
+        out.append({
+            "start": r.start_dt, "end": r.end_dt, "sign": r.direction, "segments": 1,
+            "asset_class": asset_class, "name": name,
+            "wm": int(scale["window_minutes"]),
+            "pre": int(scale.get("pre_minutes", CONTEXT_PRE_MINUTES_DEFAULT)),
+            "tier_idx": r.tier_idx, "tier_max": r.tier_max,
+            "s_scores": json.loads(r.s_scores) if r.s_scores else {},
+            "machine_class": r.classification, "human_class": r.human_class,
+            "cluster03_count": cluster03,
+        })
+    return out
 
 
 def load_price_windows(
@@ -707,11 +723,28 @@ def load_price_windows(
         (row.window_start, row.window_end): row.id for row in annotation_rows
     }
 
-    # 单档（Phase 2）：_scale_events 内部已做同向相邻合并，无跨档合并。
-    # 行为引擎切换开关（price-behavior-engine-plan Task 8）：开 = 待标窗口改读 behavior_segments
-    # （0.5 档以上，字段映射为同形 raw dict，下游富化/冻结/对标逻辑原样复用）；显式调试参数仍走原始扫描。
-    if (getattr(config, "BEHAVIOR_REPLACES_ANNOTATION_WINDOWS", False)
-            and threshold_pct is None and window_minutes is None and rows):
+    def _match_annotation(w_start: datetime, w_end: datetime) -> int | None:
+        """精确命中优先；否则重叠≥50%（以较短一方为分母）取最佳——段边界(0.3基座)比旧 0.5 窗口宽。"""
+        exact = annotation_index.get((w_start, w_end))
+        if exact is not None:
+            return exact
+        best_id, best_ratio = None, 0.0
+        for row in annotation_rows:
+            if row.window_start is None or row.window_end is None:
+                continue
+            overlap = (min(row.window_end, w_end) - max(row.window_start, w_start)).total_seconds()
+            if overlap <= 0:
+                continue
+            shorter = min((row.window_end - row.window_start).total_seconds(),
+                          (w_end - w_start).total_seconds()) or 1.0
+            ratio = overlap / shorter
+            if ratio > best_ratio:
+                best_id, best_ratio = row.id, ratio
+        return best_id if best_ratio >= 0.5 else None
+
+    # Phase 2（2026-07-09 拍板）：标注页唯一窗口源 = behavior_segments（0.5 档以上，0.3 只作簇拥上下文）。
+    # 显式传 threshold/window 的调试路径仍走原始扫描（回放/校验用）。
+    if threshold_pct is None and window_minutes is None and rows:
         merged = _behavior_segment_events(session, symbol, display_cutoff, scale,
                                           rows[-1].asset_class, rows[-1].name)
     else:
@@ -742,9 +775,15 @@ def load_price_windows(
             price_end=p_end,
             change_pct=net_pct,
             segment_count=m["segments"],
-            annotation_id=annotation_index.get((m["start"], m["end"])),
+            annotation_id=_match_annotation(m["start"], m["end"]),
             annotatable=not (m["end"] == latest_end and m["end"] > live_edge_cutoff),
             is_primary=True,
+            tier_idx=m.get("tier_idx"),
+            tier_max=m.get("tier_max"),
+            s_scores=m.get("s_scores", {}),
+            machine_class=m.get("machine_class"),
+            human_class=m.get("human_class"),
+            cluster03_count=m.get("cluster03_count", 0),
             context_pre_minutes=m["pre"],
             references=_reference_changes_for_window(
                 ref_rows,

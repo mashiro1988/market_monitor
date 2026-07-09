@@ -30,7 +30,6 @@ def test_behavior_cutoffs():
     assert config.BEHAVIOR_ESS_THIN > 0
     assert 0 < config.BEHAVIOR_COVERAGE_MIN <= 1
     assert config.BEHAVIOR_ROLLING_POINTS >= 10
-    assert config.BEHAVIOR_REPLACES_ANNOTATION_WINDOWS is False  # 默认关
     assert set(config.BEHAVIOR_NEWS_MAGNITUDES) <= set(config.NEWS_MAGNITUDE_TIERS)
     assert config.BEHAVIOR_NEWS_WINDOW_MIN > 0
 

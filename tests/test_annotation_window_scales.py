@@ -51,7 +51,7 @@ def test_directional_move_one_window(session):
     """单向急跌 -1.5%（15min 净 ≥ 1.0%）→ 1 个窗口，方向为负。"""
     prices = [10000.0] * 6 + [9950.0, 9900.0, 9870.0, 9850.0] + [9850.0] * 6
     _series(session, prices)
-    wins = load_price_windows(session, "TEST", hours=24)
+    wins = load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15)
     assert len(wins) == 1
     assert wins[0].change_pct == pytest.approx(-1.5, abs=0.1)
     assert wins[0].configured_window_minutes == 15
@@ -62,7 +62,7 @@ def test_subthreshold_drift_no_window(session):
     n = 16
     prices = [10000.0] * 4 + [10000.0 * (1 - 0.0125 * i / n) for i in range(1, n + 1)] + [9875.0] * 4
     _series(session, prices)
-    assert load_price_windows(session, "TEST", hours=24) == []
+    assert load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15) == []
 
 
 def test_subthreshold_chop_no_window(session):
@@ -72,7 +72,7 @@ def test_subthreshold_chop_no_window(session):
     for _ in range(6):
         prices += [base * 1.006, base * 1.006, base, base]
     _series(session, prices)
-    assert load_price_windows(session, "TEST", hours=24) == []
+    assert load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15) == []
 
 
 def test_single_skipped_bar_merges_no_overlap(session):
@@ -87,7 +87,7 @@ def test_single_skipped_bar_merges_no_overlap(session):
         + [9760.0, 9760.0, 9760.0]              # bars 11-13 平尾
     )
     _series(session, prices)
-    wins = load_price_windows(session, "TEST", hours=24)
+    wins = load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15)
     assert len(wins) == 1                       # 覆盖区间重叠 → 并成一个
 
 
@@ -99,7 +99,7 @@ def test_long_pause_splits_into_two(session):
         + [9760.0, 9760.0, 9760.0]                                 # bars 11-13：再 -1.2%
     )
     _series(session, prices)
-    wins = load_price_windows(session, "TEST", hours=24)
+    wins = load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15)
     assert len(wins) == 2                       # 覆盖区间不重叠、间隔 > 5min → 拆开
 
 
@@ -107,7 +107,7 @@ def test_continuous_same_direction_merges(session):
     """连续多根同向急跌(扫描点相邻) → 合并成 1 个窗口、segment_count > 1。"""
     prices = [10000.0] * 3 + [9930.0, 9860.0, 9790.0, 9720.0] + [9720.0] * 3
     _series(session, prices)
-    wins = load_price_windows(session, "TEST", hours=24)
+    wins = load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15)
     assert len(wins) == 1
     assert wins[0].segment_count >= 2
 
@@ -116,7 +116,7 @@ def test_direction_flip_closes_window(session):
     """急涨后紧接急跌(连续、变向) → 收口成 2 个窗口，符号相反。"""
     prices = [10000.0] * 3 + [10120.0, 10240.0] + [10120.0, 10000.0] + [10000.0] * 3
     _series(session, prices)
-    wins = load_price_windows(session, "TEST", hours=24)
+    wins = load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15)
     assert len(wins) == 2
     signs = {1 if w.change_pct > 0 else -1 for w in wins}
     assert signs == {1, -1}
@@ -126,5 +126,5 @@ def test_explicit_params_single_scale(session):
     """显式传 threshold/window（调试路径）：单档、阈值即净门槛。"""
     prices = [10000.0] * 3 + [9930.0, 9860.0, 9790.0] + [9790.0] * 3
     _series(session, prices)
-    wins = load_price_windows(session, "TEST", hours=24, threshold_pct=0.5, window_minutes=15)
+    wins = load_price_windows(session, "TEST", hours=24, threshold_pct=1.0, window_minutes=15)
     assert len(wins) >= 1

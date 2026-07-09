@@ -63,6 +63,13 @@ class PriceWindowSchema(BaseModel):
     is_primary: bool = True            # 合并事件窗口恒 True（不再发 secondary）
     context_pre_minutes: int = 30      # 候选新闻前置窗（按档位：15m 档 30 / 60m 档 60）
     references: list[ReferenceChange] = Field(default_factory=list)  # 宏观同期对标（纳指/原油/黄金…）
+    # —— Phase 2（窗口=行为段）：段证据直接进窗口，标注页工作台化 ——
+    tier_idx: int | None = None            # 0/1/2；窗口列表只出 0.5 档以上（≥1）
+    tier_max: float | None = None          # 触及最高档阈值（%）
+    s_scores: dict[str, dict] = Field(default_factory=dict)  # {ref: {s, ess, coverage}}（rolling 峰值口径）
+    machine_class: str | None = None       # 机器六类（展示归并三类）
+    human_class: str | None = None         # 人工三类结论（标注保存回写）
+    cluster03_count: int = 0               # 段 ±1h 内簇拥的 0.3 档段数（渐进式共振提示）
 
 
 class AnnotationCreateRequest(BaseModel):

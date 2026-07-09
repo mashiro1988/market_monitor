@@ -208,10 +208,8 @@ BEHAVIOR_NEWS_WINDOW_MIN = int(os.getenv("BEHAVIOR_NEWS_WINDOW_MIN", "30"))
 BEHAVIOR_NEWS_MAGNITUDES = ("大", "中")
 # rolling S 展示曲线窗口点数（2026-07-09 用户定 30 点 ≈ 2.5h）；纯展示——不触发、不分类、不告警。
 BEHAVIOR_ROLLING_POINTS = int(os.getenv("BEHAVIOR_ROLLING_POINTS", "30"))
-# 段→标注候选切换开关（默认关；Task 8 验证 runbook 过、用户拍板后才开——不长期双轨）。
-BEHAVIOR_REPLACES_ANNOTATION_WINDOWS = os.getenv(
-    "BEHAVIOR_REPLACES_ANNOTATION_WINDOWS", "0"
-).strip().lower() in {"1", "true", "yes", "on"}
+# （Phase 2 退役）BEHAVIOR_REPLACES_ANNOTATION_WINDOWS 开关已删除：标注页固定以 behavior_segments
+# 为唯一窗口源（2026-07-09 用户拍板，不再两套窗口口径并行）；显式 threshold/window 调试参数仍走原始扫描。
 
 # App / scheduler 启动后最多回补的 5m 价格历史小时数。
 # 回补按已入库的最新 timestamp 继续，重复 (symbol, timestamp) 会跳过。
