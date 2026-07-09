@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>架构地图 - market_monitor</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 1200px; margin: 24px auto; padding: 0 24px; color: #222; line-height: 1.6; }
+  h1 { border-bottom: 2px solid #333; padding-bottom: 8px; }
+  h2 { margin-top: 36px; color: #1f4f82; }
+  .meta { color: #666; font-size: 13px; margin-bottom: 12px; }
+  .nav a { margin-right: 16px; color: #1f4f82; text-decoration: none; }
+  .nav a:hover { text-decoration: underline; }
+  .legend { background: #f5f7fa; border-left: 4px solid #1f4f82; padding: 8px 12px; font-size: 13px; margin: 8px 0 16px; }
+  .mermaid { background: #fafbfc; border: 1px solid #e1e4e8; border-radius: 6px; padding: 16px; margin: 12px 0; text-align: center; }
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #ddd; color: #888; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>架构地图 - market_monitor</h1>
+<div class="meta">最近一次基于代码扫描确认：2026-07-02（标注 Phase3a v10、宏观对标含本身+对标资产前/窗/后涨跌和同步相关、pytest 配置、板块 pending retry）· 此 HTML 是 <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> 的可视化伴侣，事实必须与 Markdown 完全一致</div>
+<div class="nav">
+  <a href="ARCHITECTURE.md">📄 查看 Markdown 版本</a>
+  <a href="DATAFLOW.html">🔁 数据流地图</a>
+  <a href="DATAFLOW.md">🔁 数据流 Markdown</a>
+  <a href="DECISIONS.md">📜 决策日志</a>
+  <a href="PENDING.md">📌 待办</a>
+</div>
+
+<h2>① 分层架构（flowchart TD）</h2>
+<div class="legend">从上到下：UI 层 → API 层 → 服务层 → 数据 / 扫描 / 告警层 → SQLite + 外部 API。蓝色子图是板块远程数据管道；FastAPI lifespan 负责完整后台调度，独立 schedule CLI 已移除。</div>
+<pre class="mermaid">
+flowchart TD
+    Frontend["React / Vite SPA<br/>frontend/<br/>(含板块轮动页)"]
+    API["FastAPI 路由<br/>api/app.py · api/routes.py"]
+    Services["服务层<br/>services/<br/>(annotation Phase3a v10<br/>references: 本身+前/窗/后+同步相关 · sector_service)"]
+    Models["ORM<br/>models/ (含 sector)"]
+    Scanners["扫描器<br/>scanners/ (含 sector_scanner)"]
+    Alerts["告警<br/>alerts/"]
+    Config["config.py<br/>PROXY + SECTOR_WHITELIST"]
+    DB[("SQLite<br/>market_monitor.db<br/>活跃业务表")]
+    External["外部 API<br/>yfinance · OKX · CoinGecko · Eastmoney<br/>Jin10 · CNBC RSS · Polymarket Gamma<br/>DeepSeek · Dune · WeCom webhook"]
+    OnchainData["onchain_data/<br/>(Dune 封装)"]
+
+    subgraph RemotePipe["板块远程数据管道 (2026-05-17 新增)"]
+      Puller["remote_puller<br/>remote_data_cycle job"]
+      RemoteFS["remote_fs<br/>SFTP + numpy shim"]
+      CMC["cmc_client<br/>板块映射 7天TTL"]
+      SectorScan["sector_scanner<br/>等权板块涨跌"]
+    end
+    BMAC["BMAC 数据中心<br/>SFTP root@47.243.252.92"]
+    CMCAPI["CoinMarketCap API"]
+
+    Frontend -- "fetch /api/*" --> API
+    API --> Services
+    Services --> Models
+    Services --> OnchainData
+    OnchainData --> External
+    Scanners --> External
+    Models --> DB
+    Scanners --> DB
+    Alerts --> DB
+    Alerts --> External
+    Scanners -- 写入 --> Models
+    Alerts -- 写入 --> Models
+    Config -. 读取 .-> Scanners
+    Config -. 读取 .-> Alerts
+    Config -. 读取 .-> Services
+
+    Puller --> RemoteFS
+    RemoteFS -- SFTP 拉 pkl --> BMAC
+    Puller -- 拉到新 pivot 触发 --> SectorScan
+    SectorScan --> DB
+    CMC -- 刷板块映射 --> CMCAPI
+    CMC --> DB
+    SectorScan -. 读 .-> CMC
+    Services -. 读 sector_returns/pivot .-> DB
+
+    classDef frontend fill:#e8f4fd,stroke:#1f4f82,color:#1f4f82
+    classDef api fill:#fff3e0,stroke:#d97706,color:#d97706
+    classDef service fill:#f3e8ff,stroke:#7c3aed,color:#7c3aed
+    classDef data fill:#dcfce7,stroke:#16a34a,color:#166534
+    classDef ext fill:#fef2f2,stroke:#b91c1c,color:#7f1d1d
+    classDef remote fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
+    class Frontend frontend
+    class API api
+    class Services,Scanners,Alerts service
+    class Models,DB,Config,OnchainData data
+    class External,BMAC,CMCAPI ext
+    class Puller,RemoteFS,CMC,SectorScan remote
+</pre>
+
+<h2>② 模块依赖（graph LR · 红线=反向依赖违规 · 橙线=受控延迟 import 环）</h2>
+<div class="legend">正常方向：<code>run → api → services → models / database / config</code> 等。<strong style="color:#e74c3c">红色虚线</strong> = 已知反向依赖 <code>api/app.py:27 → run.py</code>（#1），后续应抽 runtime 共享模块。<strong style="color:#d97706">橙色虚线</strong> = 板块管道受控延迟 import 环 <code>remote_puller → sector_scanner → sector_service → remote_fs</code>，靠函数体内延迟 import 打破（#11）。</div>
+<pre class="mermaid">
+graph LR
+    run["run.py<br/>~486 行"]
+    api["api/<br/>app.py · routes.py · deps.py · errors.py"]
+    services["services/<br/>市场·新闻·预测·告警·标注·链上·任务·sector"]
+    scanners["scanners/<br/>价格·新闻·预测·scorer·sector·sources/"]
+    alerts["alerts/<br/>engine · channels"]
+    models["models/<br/>price·news·prediction·alert_log·sector"]
+    config["config.py"]
+    database["database.py"]
+    remote_fs["services/remote_fs<br/>SFTP+shim"]
+    remote_puller["services/remote_puller<br/>remote_data_cycle"]
+    cmc["services/cmc_client"]
+    sector_scan["scanners/sector_scanner"]
+    sector_svc["services/sector_service"]
+
+    run --> api
+    run --> scanners
+    run --> alerts
+    run --> remote_puller
+    api --> services
+    api --> remote_puller
+    services --> models
+    services --> database
+    scanners --> models
+    scanners --> database
+    scanners --> config
+    alerts --> models
+    remote_puller --> remote_fs
+    remote_puller -. 延迟import .-> sector_scan
+    sector_scan --> cmc
+    sector_scan -. 延迟import .-> sector_svc
+    sector_svc --> remote_fs
+    cmc --> models
+    api -.反向依赖.-> run
+
+    linkStyle 13 stroke:#d97706,stroke-width:2px,stroke-dasharray:6 4
+    linkStyle 15 stroke:#d97706,stroke-width:2px,stroke-dasharray:6 4
+    linkStyle 18 stroke:#e74c3c,stroke-width:3px,stroke-dasharray:6 4
+</pre>
+
+<h2>③ 一次扫描周期的主调用链（sequenceDiagram）</h2>
+<div class="legend">从 <code>python run.py scan</code> 到落库 + 告警的完整链路。每条参与方对应一个真实模块；详细 file:line 见 <a href="ARCHITECTURE.md#主调用链一次扫描周期">ARCHITECTURE.md</a>。</div>
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor User as 用户
+    participant CLI as run.py:CLI
+    participant Lock as run.py:_scan_lock<br/>(.scan.lock)
+    participant PS as PriceScanner
+    participant NS as NewsScanner
+    participant Scorer as NewsScorer<br/>(DeepSeek)
+    participant PMS as PredictionScanner
+    participant DB as SQLite<br/>(price/news/prediction)
+    participant AE as AlertEngine
+    participant Logs as alert_logs
+    participant WeCom as WeCom webhook
+
+    User->>CLI: python run.py scan
+    CLI->>Lock: 获取跨进程锁
+    Lock-->>CLI: ok
+    CLI->>PS: scan()
+    PS->>DB: INSERT price_snapshots
+    PS-->>CLI: list[PriceRecord]
+    CLI->>NS: scan()
+    NS->>Scorer: enrich_batch(records)
+    Scorer-->>NS: llm_importance
+    NS->>DB: INSERT news_items
+    NS-->>CLI: list[NewsRecord]
+    CLI->>PMS: scan()
+    PMS->>DB: INSERT prediction_markets<br/>(含 prev_probability)
+    PMS-->>CLI: list[PredictionRecord]
+    CLI->>AE: evaluate_all(prices, news, predictions)
+    AE->>Logs: SELECT 检查冷却
+    AE->>WeCom: 推送告警
+    AE->>Logs: INSERT alert_logs
+    CLI->>CLI: _run_rolling_backfill()<br/>(price + news 仅落库)
+    CLI->>Lock: 释放
+</pre>
+
+<h2>④ 一次远程数据周期 remote_data_cycle（sequenceDiagram）</h2>
+<div class="legend">独立于 5min 扫描的 APScheduler job（默认 1h）。pull → 板块计算 → 写 DB 串行；若 sector_scan 失败或写出 0 行，会保留 pending 并在后续 cycle 重扫同一 cutoff，详细 file:line 见 <a href="ARCHITECTURE.md#主调用链一次远程数据周期-remote_data_cycle">ARCHITECTURE.md</a>。</div>
+<pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant Sched as APScheduler
+    participant Puller as remote_puller<br/>cycle()
+    participant FS as remote_fs<br/>(SFTP)
+    participant BMAC as BMAC 服务器
+    participant SS as sector_scanner
+    participant CMCdb as cmc_symbol_categories
+    participant DB as sector_returns
+
+    Sched->>Puller: run_remote_data_cycle()
+    loop 每个 dataset (按 poll_interval 闸门)
+        Puller->>FS: find_latest_ready()
+        FS->>BMAC: 列 .ready cutoff
+        alt cutoff 比上次新
+            Puller->>FS: pull(pkl)
+            FS->>BMAC: SFTP 下载
+            FS-->>Puller: 原子写 data/remote_cache/
+        end
+    end
+    alt market_pivot_* 有更新
+        Puller->>SS: scan() (延迟 import)
+        SS->>SS: 读 pivot 缓存 + normalize_pivot_symbol
+        SS->>CMCdb: load_category_to_symbols()
+        SS->>DB: DELETE 同 snapshot + INSERT 板块涨跌
+    end
+    Note over Sched,DB: cmc_bootstrap job 另起：启动+10s 检查 7天TTL，过期才刷 cmc_symbol_categories
+</pre>
+
+<footer>
+  本图由 building-a-project-map skill 生成。Mermaid 通过 CDN（jsDelivr）加载，离线时图无法渲染但 HTML 仍可读源码。<br/>
+  维护规则：每次 git commit 之前都需要重新校对架构图与代码是否一致 —— 详见 <a href="AGENTS.md">AGENTS.md</a>。
+</footer>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "default", securityLevel: "loose" });
+</script>
+</body>
+</html>

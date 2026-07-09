@@ -368,7 +368,10 @@ export type PriceWindowSchema = {
 export type ReferenceChange = {
   symbol: string;
   label: string;
+  pre_pct: number | null;
   pct: number | null;
+  post_pct: number | null;
+  correlation: number | null;
   unit: string;
   is_self: boolean;
 };

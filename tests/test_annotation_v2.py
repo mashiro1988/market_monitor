@@ -109,6 +109,12 @@ def test_upsert_rejects_inconsistent_v21_labels(session):
         session.rollback()
 
 
+def test_upsert_v2_requires_confidence(session):
+    n1, _, _ = _seed(session)
+    with pytest.raises(ValueError, match="归因置信度"):
+        annotation_service.upsert_annotation(session, _req([n1], news_roles={n1: "driver"}))
+
+
 def test_upsert_legacy_request_normalized(session):
     """老格式请求（selected/no_clear）：全部 selected → driver；no_clear → no_news_driver。"""
     n1, n2, _ = _seed(session)
@@ -237,6 +243,8 @@ def test_export_jsonl_with_auto_labels(session):
     assert len(lines) == 1
     row = json.loads(lines[0])
     assert row["schema_version"] == 2
+    assert "correlations" in row["window"]
+    assert "reference_change_segments" in row["window"]
     assert row["labels"]["market_reaction_type"] == "event_driven"
     roles = {c["id"]: c["causal_role"] for c in row["candidates"]}
     assert roles[n1] == "driver"
@@ -386,5 +394,5 @@ def test_prompts_drop_retired_roles():
         assert "market_reaction_type" not in p          # Part A：市场反应类型退场
         assert "redundant" in p                          # redundant 可标角色
         assert "confidence" in p                         # confidence 保留（训模型用）
-        assert "correlations" in p and "trigger_move_start_bj" in p and "pre_window_move_pct" in p  # Part B 派生信号
+        assert "correlations" in p and "reference_change_segments" in p and "trigger_move_start_bj" in p and "pre_window_move_pct" in p  # Part B 派生信号
     assert annotation_service.ANNOTATION_PROMPT_VERSION != "v4-20260612"
