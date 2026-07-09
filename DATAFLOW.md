@@ -1,6 +1,6 @@
 # 数据流地图 - market_monitor
 
-> 运行时数据形状：磁盘上有什么、模块间运行时传什么、API 契约是什么。最近一次基于代码扫描确认：2026-07-02（标注 Phase3a 三角色、reaction type 仅历史兼容、prompt v10 三段方向链优先、宏观对标带标注品种本身 + 对标资产的前/窗/后涨跌和同步相关、pytest 根目录收集配置、板块 pending retry、代理 import-time 探测）。
+> 运行时数据形状：磁盘上有什么、模块间运行时传什么、API 契约是什么。最近一次基于代码扫描确认：2026-07-09（**价格行为引擎**：新表 `behavior_segments`/`behavior_daily_summaries`（PIT 追加）、`/api/behavior/*` 三端点、`behavior_cycle`/`behavior_daily_summary` 两个 job；**prompt v11**：auto-annotate payload 用 `s_scores/max_ref/sync_ref_count/machine_class` 取代 ±1h Pearson `correlations`，训练导出 window 同步换 `s_scores`；标注窗口源开关 `BEHAVIOR_REPLACES_ANNOTATION_WINDOWS` 默认关；retention `price_snapshots_days` 30→90。承接 2026-07-02：标注 Phase3a 三角色、宏观对标带本身三段）。
 >
 > **维护契约：** 当运行时数据形状、持久化规则、生产者 / 消费者关系或外部集成发生改变时，必须在同一次 commit 内更新本文件。
 
@@ -77,7 +77,7 @@
 | `market_reaction_type` | str \| null | 历史兼容字段（三分类 macro_policy / event_driven / no_news_driver）；前端新保存不再传，prompt 不再要求输出。 |
 | `confidence` | float \| null | **v2**：0-1；新 Phase3a 保存请求（`news_roles` 非空/空字典都算）必填；null 仅表示 v1/legacy 迁移样本（导出时 `schema_version:1` 低保真标记）。 |
 | `auto_news_roles` | str (JSON) \| null | AI 原始标注快照（人改前），与 `news_roles` 的差异 = 人机分歧难例。 |
-| `prompt_version` | str \| null | 产生 auto_* 的提示词版本（当前 `annotation_service.ANNOTATION_PROMPT_VERSION = "v10-20260702"`，见 `services/annotation_service.py:459`）。 |
+| `prompt_version` | str \| null | 产生 auto_* 的提示词版本（当前 `annotation_service.ANNOTATION_PROMPT_VERSION = "v11-20260709"`，见 `services/annotation_service.py:509`）。 |
 | `eval_set` | bool | 评估集冻结标记；训练导出（split=train）默认排除。 |
 | `notes`, `labeler` | str | |
 | `created_at`, `updated_at` | datetime | |
@@ -89,7 +89,7 @@
 **读取方：** `annotation_service.load_price_windows`、`export_training_jsonl`（JSONL 训练集导出，`GET /api/annotations/export`，候选全量展开；未标=noise，redundant 不当负样本）。
 
 > 注：`load_price_windows` / `list_annotations` 的响应（`PriceWindowSchema` / `AnnotationListItem`）自 2026-06-08 起带一个**计算字段** `references`——「宏观同期对标」列表（`config.ANNOTATION_REFERENCE_ASSETS`，2026-07-02 起 7 项：纳指 NQ=F / 日经225 ^N225 / 原油 CL=F / 黄金 GC=F / 美债2Y US_2Y / 美元指数 DX-Y.NYB / BTC BTC/USDT），每项按窗口端点最近快照算同期变动（容差 10min）：常规品种 `(end−start)/start` 涨跌%，收益率类（config 三元组标 `"bp"`）按基点 `(end−start)×100`；`ReferenceChange.pre_pct` / `pct` / `post_pct` 在 `services/annotation_service.py:98` 分别算窗口前1h / 窗口内 / 窗口后1h，标注品种本身 `is_self=true` 且同样保留这三段涨跌，但不算 `correlation`；其它对标资产带 `ReferenceChange.correlation`（`services/annotation_service.py:135`，窗口 ±1h 的 5min 收益率 Pearson；样本不足则 null）。无数据 `pct=null`。**不落库**，按请求实时算；前端 `fmtRef` 同时渲染前/窗/后涨跌与同步相关（`frontend/src/pages/AnnotationsPage.tsx:40`）；增减对标资产改 config 一行。
-> 自 2026-06-10 起，自动标注（单窗口 + 批量）喂给 reasoner 的 payload 带 `reference_changes`（`{标签: "+x.xx%" / "+x.xbp"}`，标注品种自身不列、无数据 null，`annotation_service._reference_changes_for_annotation`）；自 2026-07-02 起同一 payload 和训练导出 `window` 还带 `reference_change_segments`（前1h / 窗口 / 后1h，包含标注品种本身作为比较基准）与 `correlations`（`annotation_service._window_signals_payload`，`services/annotation_service.py:225`），prompt v10 明确相关性只是同步参考，优先用固定三段方向链判断 BTC/标的是否跟随某类资产，再用新闻含义和其它对标资产交叉验证。
+> 自 2026-06-10 起，自动标注（单窗口 + 批量）喂给 reasoner 的 payload 带 `reference_changes`（`{标签: "+x.xx%" / "+x.xbp"}`，标注品种自身不列、无数据 null，`annotation_service._reference_changes_for_annotation`）；自 2026-07-02 起同一 payload 和训练导出 `window` 还带 `reference_change_segments`（前1h / 窗口 / 后1h，包含标注品种本身作为比较基准）。**自 2026-07-09（prompt v11）起**，payload 与训练导出 `window` 用共振分证据链取代 ±1h Pearson：`s_scores`（`{标签: {s, ess, coverage}}`，s∈[−1,1] 符号只作方向展示、判级用 |S|）、`max_ref`（最强参照）、`sync_ref_count`（|S|≥0.3 参照数）、`machine_class`（S×新闻十字格机器预分类，推理起点可推翻），由 `annotation_service._window_signals_payload` 调 `resonance_score.s_score` 现算；`correlations` 从 payload/导出移除（UI 标注页 `ReferenceChange.correlation` 展示保留）。prompt v11 推理链：先 machine_class/max_ref 定性质 → 围绕最强参照找新闻 → 三段方向链交叉验证；无对照（s_scores 空）≠ 无宏观新闻。
 
 ### `prediction_markets`（`models/prediction.py`）
 
@@ -165,6 +165,28 @@ symbol -> CMC 板块 的多对多映射本地缓存。
 **写入方：** `SectorScanner.scan` `scanners/sector_scanner.py:315`，由 `remote_data_cycle` 在拉到新 pivot 后触发。
 **读取方：** `sector_service.get_leaderboard` `services/sector_service.py:80`（榜单 API 读这张表）。注意：钻取 API `get_sector_tokens` **不读这张表**，而是从 pivot 缓存现算单币涨跌。
 
+### behavior_segments（2026-07-09，价格行为引擎）
+
+| 字段 | 类型 | 备注 |
+|---|---|---|
+| `symbol / start_dt / end_dt / direction` | str / dt / dt / int(±1) | `(symbol, start_dt, end_dt)` 唯一；upsert 按 `(symbol, start_dt, direction)` 匹配（段随数据生长更新同一行） |
+| `tier_idx / tier_max` | int(0/1/2) / float | 触及最高档（BTC 阶梯 0.3/0.5/0.8，参照按 `config.BEHAVIOR_TIERS` 稀有度锚定值） |
+| `net_pct / amp_pct / key_ts` | float / float / dt | 净幅、振幅、段内 \|5min\| 最大 bar（新闻对时锚点） |
+| `classification` | str \| null | `count_only`(0.3档) / `macro_news` / `pure_resonance` / `industry_news` / `sentiment` / `no_ref_news`(无对照×新闻命中) / `no_ref_pending`；null=未 settle（段止+后窗1h+`ANNOTATION_SETTLE_MARGIN_MINUTES`） |
+| `s_scores / news_ids / class_version` | JSON / JSON / str | `{ref: {s, ess, coverage}}`；±30min 大/中新闻 id；分类口径版本（换版可全历史重跑——段是原始数据） |
+
+**写入方：** `behavior_classifier.classify`（APScheduler `behavior_cycle`，5min）。**读取方：** `behavior_views.list_segments`（API）、`aggregate_day`（日汇总）、`annotation_service.load_price_windows`（仅当 `BEHAVIOR_REPLACES_ANNOTATION_WINDOWS=True`，0.5 档以上映射为待标窗口）。
+
+### behavior_daily_summaries（point-in-time 追加表）
+
+| 字段 | 类型 | 备注 |
+|---|---|---|
+| `symbol / utc_date / day_type` | str / "YYYY-MM-DD" / weekday\|weekend | UTC 日界 = 北京 8 点；工作日/周末分桶互比 |
+| `counts / composition / down_net_sum` | JSON / JSON / float | `{tier: {up,down}}`（0.3 档全量计数）；六类构成（0.5 档以上）；跌段净幅合计 |
+| `computed_at` | datetime | **PIT 语义：同日重算=追加新行、绝不覆盖**，读取取最新一条——历史读数永久可回溯（回测校准前提） |
+
+**写入方：** `behavior_classifier.write_daily_summary`（`behavior_daily_summary` job，UTC 00:05 汇总昨日）。**读取方：** `behavior_views.daily_series`（当日无 PIT 行时按同口径现算 `live=true`，不落库）。
+
 ## 内存中的数据契约
 
 扫描器和告警引擎之间传递的记录类型。
@@ -230,6 +252,9 @@ symbol -> CMC 板块 的多对多映射本地缓存。
 | `GET /api/annotations/{id}` | `api/routes.py:` -> `annotation_service.get_annotation_detail` | `AnnotationDetail` |
 | `DELETE /api/annotations/{id}` | `api/routes.py:` -> `annotation_service.delete_annotation`（撤销标注） | `DeleteAnnotationResponse` |
 | `POST /api/annotations/auto` | `api/routes.py:` -> `annotation_service.auto_annotate`（调 DeepSeek v4-pro thinking 模式，不写库；当前 prompt 输出 Phase3a 标签：news_roles + confidence + summary，解析器仍兼容历史 market_reaction_type） | `AutoAnnotateResponse` |
+| `GET /api/behavior/segments` | `api/routes.py` -> `behavior_views.list_segments`（读 `behavior_segments` 表 + 新闻标题 join；0.3 档段 classification=count_only） | `BehaviorSegmentsResponse`（段 + s_scores/ess/coverage/max_abs_s/news/classification） |
+| `GET /api/behavior/daily` | `behavior_views.daily_series`（每日最新 PIT 行优先；当日盘中按 `behavior_classifier.aggregate_day` 同口径现算 `live=true`） | `BehaviorDailyResponse`（counts×tier×dir、六类构成、跌段净幅合计） |
+| `GET /api/behavior/linkage` | `behavior_views.linkage`（compute-on-read：`resonance_score.rolling_s`，30 点拖尾窗；纯展示不触发不分类） | `BehaviorLinkageResponse`（逐参照 S 曲线 + 同步参照数 breadth，None=无对照断线） |
 | `GET /api/annotations/export` | `api/routes.py:299` -> `annotation_service.export_training_jsonl`（JSONL 训练集，spec §4） | NDJSON 下载 |
 | `GET /api/sectors/leaderboard` | `api/routes.py:372` -> `sector_service.get_leaderboard`（读 `sector_returns` 表最新 snapshot） | `SectorLeaderboardResponse` |
 | `GET /api/sectors/{category}/tokens` | `api/routes.py` -> `sector_service.get_sector_tokens`（从 pivot 缓存现算成员币涨跌） | `SectorTokensResponse` |

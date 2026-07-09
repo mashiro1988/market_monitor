@@ -2,6 +2,13 @@
 
 > 最新的放最前。每条 5 行：日期 / 背景 / 决策 / 拒绝的备选 / 影响。
 
+## 2026-07-09 - 价格行为引擎落地：共振分 S 取代相关性判据，prompt v11
+
+- 背景：用户复盘流定案（spec `docs/specs/volume-behavior-engine-discussion.md` v0.4）——判断 BTC 行情由技术面（情绪/庄家）、行业事件、宏观新闻还是纯共振驱动；旧 ±1h Pearson 判据实测判别力≈随机（错位对照 lift≈1.0），量能路线因数据现实整体退出。
+- 决策：三档段（0.3 计数 / 0.5 构成起点 / 0.8 重拳）+ 共振分 `S = Σz_btc²·clip(z_ref·sign(z_btc))/Σz_btc²`（判级 max|S|：0.5/0.3 cutoff，ESS<5 证据薄，覆盖<50% 无对照）+ S×新闻十字格分类（无对照≠无宏观新闻）+ PIT 日汇总；auto-annotate payload/prompt v11 换 S 证据链；标注窗口源开关默认关；校准四件套脚本只建议不改 config；rolling S 30 点曲线纯展示不告警。
+- 拒绝的备选：量能触发+槽位基线（7-8 个自由度、薄市场 z 爆炸）；区间重叠/三刀/时点日历判共振（lift 1.0-2.5 或被用户判反逻辑）；GPT5.5 外部方案原版（窗口内 z-score 尺度归零，null 下 35-49% 高分）；lag 搜索（实测共振基本同步）；必审/抽审机制（未确认段全留存随时审）。
+- 影响：新表 `behavior_segments`/`behavior_daily_summaries`、`/api/behavior/*` 三端点、`/behavior` 页、`behavior_cycle`/`behavior_daily_summary` 两个 job；训练导出 window 契约 `correlations`→`s_scores`；retention 30→90d；CL/^N225/US_2Y 三档待校准脚本首跑后用户拍板（config 置 None=禁用）。
+
 ## 2026-07-02 - 三段方向链补标标的本身，美债对标改 2Y
 
 - 背景：固定三段涨跌只显示大类资产时，BTC 窗口缺少 BTC 自己的前1h / 窗口 / 后1h 基准，人工无法直接比较“BTC 是否跟着某类资产走”；利率预期判断更关注短端，用户不希望标注页继续看美债10Y。

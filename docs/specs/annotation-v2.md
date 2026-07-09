@@ -80,7 +80,7 @@
 
 `GET /api/annotations/export?days=N&split=train|eval|all` 返回 JSONL。每行包含：
 
-- 窗口元数据、`reference_changes`、`reference_change_segments`（前1h / 窗口 / 后1h，包含标注品种本身作为比较基准）和 `correlations`（窗口 ±1h 的 5min 收益率 Pearson）。
+- 窗口元数据、`reference_changes`、`reference_change_segments`（前1h / 窗口 / 后1h，包含标注品种本身作为比较基准）和 `s_scores`（共振分 S 证据：`{标签: {s, ess, coverage}}`；2026-07-09 prompt v11 起取代 `correlations`——±1h Pearson 实测判别力≈随机）。
 - 全量候选新闻，未标的候选导出为 `causal_role = "noise"`。
 - 人工 / LLM 直接标的 `driver` / `redundant` 原样进入 candidates。
 - `redundant` 样本训练时排除，不当作负样本。
