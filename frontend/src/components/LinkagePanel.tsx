@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { EmptyState, ErrorState, LoadingState } from "./StateViews";
-import { buildLinkageFrames, medianOf } from "../pages/behaviorFormat";
+import { buildLinkageFrames } from "../pages/behaviorFormat";
 
 const INK = "#8ea0b6";
 const TEXT = "#dbe7f3";
@@ -52,18 +52,13 @@ export function LinkagePanel({
     () => (linkage.data ? buildLinkageFrames(linkage.data) : { frames: [], symbols: [] }),
     [linkage.data],
   );
-  const centre = useMemo(
-    () => medianOf(link.frames.map((f) => f.maxAbs).filter((v): v is number => typeof v === "number")),
-    [link.frames],
-  );
-
   if (linkage.isLoading) return <LoadingState />;
   if (linkage.error) return <ErrorState error={linkage.error} />;
   if (!link.frames.length) return <EmptyState title="暂无联动数据" />;
 
   return (
     <div className="linkage-panel">
-      <div className="mini-title">联动强度 max|S|（≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立；蓝虚线 = {range ? "窗口±24h" : `${hours}h`} 区间中位中枢）</div>
+      <div className="mini-title">联动强度 max|S|（≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立）</div>
       <ResponsiveContainer width="100%" height={120}>
         <LineChart data={link.frames} syncId={`linkage-${symbol}`} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
           <XAxis dataKey="t" hide />
@@ -74,10 +69,6 @@ export function LinkagePanel({
           ) : null}
           <ReferenceLine y={0.5} strokeDasharray="4 3" stroke={INK} />
           <ReferenceLine y={0.3} strokeDasharray="2 3" stroke={INK} />
-          {centre !== null ? (
-            <ReferenceLine y={centre} stroke="#6e97e8" strokeDasharray="6 4"
-              label={{ value: `中枢 ${centre.toFixed(2)}`, fontSize: 10, position: "right" }} />
-          ) : null}
           <Line dataKey="maxAbs" name="max|S|" stroke={TEXT} strokeWidth={2} dot={false} connectNulls={false} />
         </LineChart>
       </ResponsiveContainer>
@@ -95,7 +86,7 @@ export function LinkagePanel({
           </LineChart>
         </ResponsiveContainer>
       ))}
-      <div className="mini-title">同步参照数（|S| ≥ 0.3 的参照个数：跟单一资产 vs 全市场一起动）</div>
+      <div className="mini-title">同步参照数（|S|≥0.3 的参照个数）</div>
       <ResponsiveContainer width="100%" height={66}>
         <LineChart data={link.frames} syncId={`linkage-${symbol}`} margin={{ top: 2, right: 60, left: 0, bottom: 0 }}>
           <XAxis dataKey="t" tick={{ fontSize: 10 }} minTickGap={60} />

@@ -1398,7 +1398,7 @@ code {
 .evidence-grid { display: flex; flex-direction: column; gap: 2px; }
 .evidence-row {
   display: grid;
-  grid-template-columns: 132px minmax(140px, 1fr) 88px 96px 96px auto;
+  grid-template-columns: 132px minmax(140px, 1fr) 88px 96px 110px;
   gap: 10px;
   align-items: center;
   padding: 5px 8px;
@@ -1414,13 +1414,12 @@ code {
 .evidence-move { text-align: right; font-weight: 600; }
 .evidence-move.ref-neutral { color: var(--muted); }
 
-.s-badge { justify-self: start; font-size: 11.5px; font-weight: 700; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+.s-badge { justify-self: stretch; text-align: center; font-size: 11.5px; font-weight: 700; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
 .s-badge.strong { background: rgba(94, 234, 212, 0.18); color: #5eead4; border: 1px solid rgba(94, 234, 212, 0.45); }
 .s-badge.mid { background: rgba(251, 191, 36, 0.14); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); }
 .s-badge.weak { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid transparent; }
 .s-badge.none { color: var(--muted); opacity: 0.7; }
 .s-badge.selfmark { color: var(--muted); background: transparent; border: 1px dashed var(--line-soft); }
-.strongest-tag { font-size: 11px; color: #5eead4; border: 1px solid rgba(94, 234, 212, 0.4); border-radius: 99px; padding: 0 8px; white-space: nowrap; }
 
 /* 机器预判幽灵徽标：虚线描边、无底色——一眼区别于人工 ✓ 结论，避免"已标注"错觉 */
 .klass.ghost { background: transparent !important; border: 1px dashed var(--line); opacity: 0.75; font-weight: 500; }

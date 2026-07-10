@@ -159,7 +159,7 @@ export function WindowNetValueChart({
       <div className="subsection-head">
         <span className="subsection-title">窗口净值走势</span>
         <div className="window-netvalue-head-controls">
-          <span className="muted-text small">净值归一 1.000 · 美债/美元右副轴(虚线) · 竖线=驱动新闻 · 底部轨道=段内档位演进(0.3→0.5→0.8 加深)</span>
+          <span className="muted-text small">净值归一 1.000 · 低波品种右副轴 · 竖线=驱动新闻 · 底部轨道=段档位演进</span>
           <MultiSelectControl label="对照品种" values={basket} onChange={setBasket} options={symbolOptions} />
         </div>
       </div>
@@ -194,9 +194,7 @@ export function WindowNetValueChart({
               ))}
             </ul>
           ) : (
-            <p className="muted-text small netvalue-marker-empty">
-              尚未选出驱动新闻（在右侧候选新闻里勾选角色后会在此标注）
-            </p>
+            <p className="muted-text small netvalue-marker-empty">尚未选出驱动新闻</p>
           )}
         </>
       )}

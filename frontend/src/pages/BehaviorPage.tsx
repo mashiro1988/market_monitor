@@ -43,7 +43,7 @@ export function BehaviorPage() {
     <div className="page behavior-page">
       <PageHeader
         title="行为面板 · 结论"
-        subtitle="BTC 行情由谁驱动：新闻驱动 · 纯宏观共振 · 情绪/技术面 —— 证据与标注动作在「新闻标注」页"
+        subtitle="新闻驱动 · 纯宏观共振 · 情绪/技术面——证据与标注在「新闻标注」页"
       />
 
       {daily.isLoading ? <LoadingState /> : daily.error ? <ErrorState error={daily.error} /> : !dailyRows.length ? (
@@ -52,9 +52,9 @@ export function BehaviorPage() {
         <>
           {/* ① 日趋势（保留） */}
           <section className="panel">
-            <div className="panel-head"><h2>① 日趋势 · 近 14 个 UTC 日（0.3 档只计数；周末分桶互比）</h2></div>
+            <div className="panel-head"><h2>① 日趋势 · 近 14 个 UTC 日（0.3 档只计数）</h2></div>
             <div className="behavior-daily">
-              <div className="mini-title">0.3档 涨跌发散柱 + 净差线（涨−跌，趋势主读数）</div>
+              <div className="mini-title">0.3档 涨跌发散柱 + 净差线（涨−跌）</div>
               <ResponsiveContainer width="100%" height={120}>
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
@@ -67,7 +67,7 @@ export function BehaviorPage() {
                   <Line dataKey="net" name="净差" stroke={TEXT} strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
-              <div className="mini-title">强度 · 触及 0.5 / 0.8 档段数（档位右移 = 情绪变猛）</div>
+              <div className="mini-title">强度 · 触及 0.5 / 0.8 档段数</div>
               <ResponsiveContainer width="100%" height={80}>
                 <LineChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <XAxis dataKey="date" hide />
@@ -92,7 +92,7 @@ export function BehaviorPage() {
           {/* ② 三类构成结论 */}
           <section className="panel">
             <div className="panel-head">
-              <h2>② 构成结论 · 三类（人工结论优先；构成段 = 0.5 档以上）</h2>
+              <h2>② 构成结论 · 三类（0.5 档以上 · 人工优先）</h2>
             </div>
             {today ? (
               <div className="today-comp-row">
@@ -103,7 +103,7 @@ export function BehaviorPage() {
                 <span className="muted-text small">{today.live ? "盘中现算" : "已固化(PIT)"}</span>
               </div>
             ) : null}
-            <div className="mini-title">14 日构成堆叠（新闻驱动 / 纯共振 / 情绪·技术面）</div>
+            <div className="mini-title">14 日构成堆叠</div>
             <ResponsiveContainer width="100%" height={150}>
               <ComposedChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
@@ -115,7 +115,7 @@ export function BehaviorPage() {
                 <Bar dataKey="st" name="情绪·技术面" stackId="c" fill={C_ST} opacity={0.85} />
               </ComposedChart>
             </ResponsiveContainer>
-            <div className="mini-title">情绪·技术面占比趋势（%；分母&lt;5 的日子断线不读）</div>
+            <div className="mini-title">情绪·技术面占比 %（分母&lt;5 断线）</div>
             <ResponsiveContainer width="100%" height={90}>
               <LineChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <XAxis dataKey="date" tick={{ fontSize: 10 }} />
@@ -124,10 +124,7 @@ export function BehaviorPage() {
                 <Line dataKey="sentRatio" name="情绪占比%" stroke={C_ST} strokeWidth={2} dot={false} connectNulls={false} />
               </LineChart>
             </ResponsiveContainer>
-            <p className="muted-text small">
-              读法：情绪·技术面向下段的数量与占比持续抬升 → 崩盘风险关注（参照 2026 年初、2026-06 无新闻崩盘）。
-              段级证据、rolling S 曲线与三类标注（人工审核）在「新闻标注」页。
-            </p>
+            <p className="muted-text small">情绪·技术面向下段占比持续抬升 → 崩盘风险关注。</p>
           </section>
         </>
       )}

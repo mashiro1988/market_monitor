@@ -79,16 +79,12 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
   const refs = win.references ?? [];
   if (!refs.length) return null;
   const scores = (win.s_scores ?? {}) as Record<string, { s: number; ess: number }>;
-  // 最强参照签只在 |S| ≥ 0.3（至少弱共振）时挂——<0.3 属独立行情，"最强"没有业务含义
-  const strongestEntry = Object.entries(scores).reduce<[string, { s: number }] | null>(
-    (best, cur) => (best === null || Math.abs(cur[1].s) > Math.abs(best[1].s) ? cur : best), null);
-  const strongest = strongestEntry && Math.abs(strongestEntry[1].s) >= 0.3 ? strongestEntry[0] : null;
   const ordered = [...refs].sort((a, b) => Number(b.is_self) - Number(a.is_self));   // 本身置顶作基准
   return (
     <div className="subsection">
       <div className="subsection-head">
         <span className="subsection-title">窗口证据 · 对照 × 共振分</span>
-        <span className="muted-text small">S = 段窗内 rolling 曲线 |S| 峰值（与下方曲线同口径）· ESS = 证据厚度（&lt;5 薄）</span>
+        <span className="muted-text small">S = 段窗 |S| 峰值 · ESS = 证据厚度（&lt;5 薄）</span>
       </div>
       <div className="evidence-grid">
         {ordered.map((ref) => {
@@ -109,7 +105,6 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
               <span className={`evidence-move ${moveCls}`}>{move}</span>
               {badge ? <span className={badge.cls} title={badge.title}>{badge.text}</span> : <span className="s-badge selfmark">基准</span>}
               {ess ? <span className={ess.cls} title="有效样本量：峰值读数背后有几根有效 K 线">{ess.text}</span> : <span />}
-              {!ref.is_self && strongest === ref.symbol ? <span className="strongest-tag">最强参照</span> : <span />}
             </div>
           );
         })}
@@ -713,7 +708,7 @@ export function AnnotationsPage() {
 
   return (
     <section>
-      <PageHeader title="新闻标注" subtitle="价格异动窗口与候选新闻关联（未标注 / 已标注 上下分栏）" />
+      <PageHeader title="新闻标注" subtitle="价格异动窗口 × 候选新闻" />
 
       <div className="annotation-filter">
         <SelectControl label="回溯" value={hours} onChange={setHours} options={hoursOptions} />
@@ -824,7 +819,7 @@ export function AnnotationsPage() {
           {activeWindow.symbol === "BTC/USDT" ? (
             <div className="subsection">
               <div className="subsection-head">
-                <span className="subsection-title">联动证据 · rolling S（青色高亮 = 当前窗口）</span>
+                <span className="subsection-title">联动证据 · rolling S</span>
               </div>
               <LinkagePanel
                 symbol="BTC/USDT"
@@ -847,9 +842,6 @@ export function AnnotationsPage() {
       <section className="panel annotation-block">
         <div className="panel-head">
           <h2>未标注 ({groups.length})</h2>
-          <span className="muted-text small">
-            连续异动会聚合为一个事件，只标第一次。双档窗口（15m 快冲击 / 60m 慢趋势），候选新闻取窗口前 30/60（按档）/ 后 30 分钟。
-          </span>
         </div>
 
         {windowsQuery.isLoading ? <LoadingState /> :
