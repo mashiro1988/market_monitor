@@ -1398,7 +1398,7 @@ code {
 .evidence-grid { display: flex; flex-direction: column; gap: 2px; }
 .evidence-row {
   display: grid;
-  grid-template-columns: 132px minmax(140px, 1fr) 88px 96px 110px;
+  grid-template-columns: 132px minmax(140px, 1fr) 88px 96px;
   gap: 10px;
   align-items: center;
   padding: 5px 8px;
@@ -1424,7 +1424,5 @@ code {
 /* 机器预判幽灵徽标：虚线描边、无底色——一眼区别于人工 ✓ 结论，避免"已标注"错觉 */
 .klass.ghost { background: transparent !important; border: 1px dashed var(--line); opacity: 0.75; font-weight: 500; }
 
-/* ESS 证据厚度列 */
-.ess-cell { font-size: 11.5px; color: var(--muted); white-space: nowrap; justify-self: start; }
-.ess-cell.thin { color: #fbbf24; }
-.ess-cell.none { opacity: 0.6; }
+/* ESS 单值（表头内联）：<5 证据薄标黄 */
+.ess-thin-inline { color: #fbbf24; }

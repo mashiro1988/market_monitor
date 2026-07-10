@@ -202,7 +202,10 @@ BEHAVIOR_S_MID = float(os.getenv("BEHAVIOR_S_MID", "0.3"))
 # ESS（有效样本数 (Σw)²/Σw²）低于此值标"证据薄"——分数靠一两根 bar 撑起，对插针/坏数据敏感。
 BEHAVIOR_ESS_THIN = float(os.getenv("BEHAVIOR_ESS_THIN", "5"))
 # 大窗口内参照覆盖（按 BTC 权重质量算）低于此比例 → 该参照不出分（休市/缺数 = 分数地基不实 → 无对照）。
-BEHAVIOR_COVERAGE_MIN = float(os.getenv("BEHAVIOR_COVERAGE_MIN", "0.5"))
+# 2026-07-10 用户拍板：不足 30 根配对不出数（原 0.5 开盘 ~75min 就出数、午休边界孤立点）。
+# 取 0.95 而非 1.0：15min 涨跌预热让时段型参照（日经半场 2.5h）数学上最多 29/30，
+# 1.0 = 日经参照永久无读数；0.95 = 只容缺预热边缘 1-2 根，连续时段照旧是满 30 根。
+BEHAVIOR_COVERAGE_MIN = float(os.getenv("BEHAVIOR_COVERAGE_MIN", "0.95"))
 # 新闻命中：段窗 ± 分钟内存在 a-priori 量级 ∈ BEHAVIOR_NEWS_MAGNITUDES 的新闻（内容判，不看价格）。
 BEHAVIOR_NEWS_WINDOW_MIN = int(os.getenv("BEHAVIOR_NEWS_WINDOW_MIN", "30"))
 BEHAVIOR_NEWS_MAGNITUDES = ("大", "中")

@@ -1,0 +1,23 @@
+[
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+  "StartLine": 14,
+  "EndLine": 14,
+  "StartColumn": 2,
+  "EndColumn": 45,
+  "Match": "api_key = \"REDACTED\"",
+  "Secret": "REDACTED",
+  "File": "test.py",
+  "SymlinkFile": "",
+  "Commit": "75ab33987b00e8ee68e59afe103dbd532d7b2db0",
+  "Link": "https://github.com/mashiro1988/market_monitor/blob/75ab33987b00e8ee68e59afe103dbd532d7b2db0/test.py#L14",
+  "Entropy": 4.625,
+  "Author": "akis_white",
+  "Email": "mashiro1988@gmail.com",
+  "Date": "2026-04-03T05:15:04Z",
+  "Message": "initial commit",
+  "Tags": [],
+  "Fingerprint": "75ab33987b00e8ee68e59afe103dbd532d7b2db0:test.py:generic-api-key:14"
+ }
+]

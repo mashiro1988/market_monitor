@@ -68,23 +68,21 @@ function sBadge(entry: { s: number; ess: number } | undefined): { text: string; 
   };
 }
 
-// ESS = 证据厚度（有效样本量）：<5 = 峰值读数由极少几根 K 线撑起，标"薄"降权肉眼参考
-function essCell(entry: { s: number; ess: number } | undefined): { text: string; cls: string } {
-  if (!entry) return { text: "—", cls: "ess-cell none" };
-  const thin = entry.ess < 5;
-  return { text: `ESS ${entry.ess.toFixed(1)}${thin ? " 薄⚠" : ""}`, cls: thin ? "ess-cell thin" : "ess-cell" };
-}
-
 function WindowEvidence({ win }: { win: PriceWindow }) {
   const refs = win.references ?? [];
   if (!refs.length) return null;
   const scores = (win.s_scores ?? {}) as Record<string, { s: number; ess: number }>;
+  // ESS 权重来自 BTC 侧，覆盖齐全时各参照相同 → 表头只列一个数（取最薄值，保守口径）
+  const essVals = Object.values(scores).map((v) => v.ess).filter((v) => Number.isFinite(v));
+  const essMin = essVals.length ? Math.min(...essVals) : null;
   const ordered = [...refs].sort((a, b) => Number(b.is_self) - Number(a.is_self));   // 本身置顶作基准
   return (
     <div className="subsection">
       <div className="subsection-head">
         <span className="subsection-title">窗口证据 · 对照 × 共振分</span>
-        <span className="muted-text small">S = 段窗 |S| 峰值 · ESS = 证据厚度（&lt;5 薄）</span>
+        <span className="muted-text small">
+          S = 段窗 |S| 峰值{essMin != null ? <> · ESS <b className={essMin < 5 ? "ess-thin-inline" : undefined} title="证据厚度（各参照读数取最薄值）：BTC 异动能量摊在几根 K 线上，<5 = 证据薄">{essMin.toFixed(1)}{essMin < 5 ? " 薄⚠" : ""}</b></> : null}
+        </span>
       </div>
       <div className="evidence-grid">
         {ordered.map((ref) => {
@@ -93,7 +91,6 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
             ? `${fmtRefPrice(ref.price_start, ref.unit)} → ${fmtRefPrice(ref.price_end, ref.unit)}`
             : "—";
           const badge = ref.is_self ? null : sBadge(scores[ref.symbol]);
-          const ess = ref.is_self ? null : essCell(scores[ref.symbol]);
           const moveCls = ref.pct == null ? "ref-neutral" : ref.pct >= 0 ? "up-text" : "down-text";
           return (
             <div key={ref.symbol} className={`evidence-row${ref.is_self ? " self" : ""}`}>
@@ -104,7 +101,6 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
               <span className="evidence-span">{span}</span>
               <span className={`evidence-move ${moveCls}`}>{move}</span>
               {badge ? <span className={badge.cls} title={badge.title}>{badge.text}</span> : <span className="s-badge selfmark">基准</span>}
-              {ess ? <span className={ess.cls} title="有效样本量：峰值读数背后有几根有效 K 线">{ess.text}</span> : <span />}
             </div>
           );
         })}
