@@ -7,7 +7,6 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -62,28 +61,35 @@ export function BehaviorPage() {
                   <YAxis width={34} tick={{ fontSize: 10 }} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <ReferenceLine y={0} stroke={INK} />
-                  <Bar dataKey="up" name="涨段" stackId="s" fill={UP} opacity={0.65} />
-                  <Bar dataKey={(r: { down: number }) => -r.down} name="跌段" stackId="s" fill={DOWN} opacity={0.65} />
-                  <Line dataKey="net" name="净差" stroke={TEXT} strokeWidth={2} dot={false} />
+                  <Bar isAnimationActive={false} dataKey="up" name="涨段" stackId="s" fill={UP} opacity={0.65} />
+                  <Bar isAnimationActive={false} dataKey={(r: { down: number }) => -r.down} name="跌段" stackId="s" fill={DOWN} opacity={0.65} />
+                  <Line isAnimationActive={false} dataKey="net" name="净差" stroke={TEXT} strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
-              <div className="mini-title">强度 · 触及 0.5 / 0.8 档段数</div>
-              <ResponsiveContainer width="100%" height={80}>
-                <LineChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
+              <div className="mini-title">强度 · 0.5/0.8 档段数（上=涨 下=跌 · 亮色=0.8档）</div>
+              <ResponsiveContainer width="100%" height={100}>
+                <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="date" hide />
                   <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
-                  <Line dataKey="t05" name="0.5档" stroke="#b48a3c" strokeWidth={1.8} dot={false} />
-                  <Line dataKey="t08" name="0.8档" stroke="#fbbf24" strokeWidth={1.8} dot={false} />
-                </LineChart>
+                  <ReferenceLine y={0} stroke={INK} />
+                  <Bar isAnimationActive={false} dataKey="t05Up" name="0.5档涨" stackId="t" fill="#b48a3c" />
+                  <Bar isAnimationActive={false} dataKey="t08Up" name="0.8档涨" stackId="t" fill="#fbbf24" />
+                  <Bar isAnimationActive={false} dataKey={(r: { t05Down: number }) => -r.t05Down} name="0.5档跌" stackId="t" fill="#b48a3c" opacity={0.55} />
+                  <Bar isAnimationActive={false} dataKey={(r: { t08Down: number }) => -r.t08Down} name="0.8档跌" stackId="t" fill="#fbbf24" opacity={0.55} />
+                </ComposedChart>
               </ResponsiveContainer>
-              <div className="mini-title">跌段净幅合计</div>
-              <ResponsiveContainer width="100%" height={90}>
-                <ComposedChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
+              <div className="mini-title">涨/跌段净幅合计（%）</div>
+              <ResponsiveContainer width="100%" height={100}>
+                <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                   <YAxis width={34} tick={{ fontSize: 10 }} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
-                  <Bar dataKey="downSumNeg" name="跌段净幅Σ" fill={DOWN} opacity={0.75} radius={[2, 2, 0, 0]} />
+                  <ReferenceLine y={0} stroke={INK} />
+                  <Bar isAnimationActive={false} dataKey="upSum" name="涨段净幅Σ" stackId="n" fill={UP} opacity={0.75} />
+                  <Bar isAnimationActive={false} dataKey="downSumNeg" name="跌段净幅Σ" stackId="n" fill={DOWN} opacity={0.75} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -110,21 +116,50 @@ export function BehaviorPage() {
                 <XAxis dataKey="date" hide />
                 <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <Bar dataKey="nd" name="新闻驱动" stackId="c" fill={C_ND} opacity={0.85} />
-                <Bar dataKey="pr" name="纯共振" stackId="c" fill={C_PR} opacity={0.85} />
-                <Bar dataKey="st" name="情绪·技术面" stackId="c" fill={C_ST} opacity={0.85} />
+                <Bar isAnimationActive={false} dataKey="nd" name="新闻驱动" stackId="c" fill={C_ND} opacity={0.85} />
+                <Bar isAnimationActive={false} dataKey="pr" name="纯共振" stackId="c" fill={C_PR} opacity={0.85} />
+                <Bar isAnimationActive={false} dataKey="st" name="情绪·技术面" stackId="c" fill={C_ST} opacity={0.85} />
               </ComposedChart>
             </ResponsiveContainer>
-            <div className="mini-title">情绪·技术面占比 %（分母&lt;5 断线）</div>
-            <ResponsiveContainer width="100%" height={90}>
-              <LineChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
-                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                <YAxis width={34} domain={[0, 100]} ticks={[0, 50, 100]} tick={{ fontSize: 10 }} />
+            <div className="mini-title">情绪·技术面 涨/跌段数 + 个数差线</div>
+            <ResponsiveContainer width="100%" height={100}>
+              <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="2 4" vertical={false} />
+                <XAxis dataKey="date" hide />
+                <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <Line dataKey="sentRatio" name="情绪占比%" stroke={C_ST} strokeWidth={2} dot={false} connectNulls={false} />
-              </LineChart>
+                <ReferenceLine y={0} stroke={INK} />
+                <Bar isAnimationActive={false} dataKey="sentUp" name="情绪涨段" stackId="sc" fill={UP} opacity={0.65} />
+                <Bar isAnimationActive={false} dataKey={(r: { sentDown: number }) => -r.sentDown} name="情绪跌段" stackId="sc" fill={DOWN} opacity={0.65} />
+                <Line isAnimationActive={false} dataKey="sentNetCount" name="个数差" stroke={TEXT} strokeWidth={2} dot={false} />
+              </ComposedChart>
             </ResponsiveContainer>
-            <p className="muted-text small">情绪·技术面向下段占比持续抬升 → 崩盘风险关注。</p>
+            <div className="mini-title">情绪·技术面 涨/跌净幅Σ（%）+ 净差线</div>
+            <ResponsiveContainer width="100%" height={100}>
+              <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="2 4" vertical={false} />
+                <XAxis dataKey="date" hide />
+                <YAxis width={34} tick={{ fontSize: 10 }} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <ReferenceLine y={0} stroke={INK} />
+                <Bar isAnimationActive={false} dataKey="sentUpNet" name="情绪涨净幅Σ" stackId="sn" fill={UP} opacity={0.65} />
+                <Bar isAnimationActive={false} dataKey="sentDownNet" name="情绪跌净幅Σ" stackId="sn" fill={DOWN} opacity={0.65} />
+                <Line isAnimationActive={false} dataKey="sentNetAmp" name="净幅差" stroke={TEXT} strokeWidth={2} dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div className="mini-title">情绪·技术面 占比 %（上=涨 下=跌 · 分母&lt;5 空）</div>
+            <ResponsiveContainer width="100%" height={100}>
+              <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="2 4" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                <YAxis width={34} domain={[-100, 100]} ticks={[-50, 0, 50]} tick={{ fontSize: 10 }} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <ReferenceLine y={0} stroke={INK} />
+                <Bar isAnimationActive={false} dataKey="sentUpRatio" name="情绪涨占比%" stackId="sr" fill={UP} opacity={0.65} />
+                <Bar isAnimationActive={false} dataKey={(r: { sentDownRatio: number | null }) => r.sentDownRatio == null ? null : -r.sentDownRatio} name="情绪跌占比%" stackId="sr" fill={DOWN} opacity={0.65} />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <p className="muted-text small">情绪·技术面向下段（个数/占比/净幅）持续抬升 → 崩盘风险关注。</p>
           </section>
         </>
       )}

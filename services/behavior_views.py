@@ -27,7 +27,7 @@ from schemas.behavior import (
     SScoreSchema,
 )
 from schemas.common import TimeFields
-from services.behavior_classifier import _points, aggregate_day, day_type_of, merge_composition, to_window_class
+from services.behavior_classifier import _points, aggregate_day, day_direction_extras, day_type_of, merge_composition, to_window_class
 from services.resonance_score import chg_map, rolling_s
 from services.time_utils import timestamp_pair
 
@@ -89,12 +89,14 @@ def daily_series(session: Session, symbol: str, days: int = 14) -> BehaviorDaily
             .order_by(BehaviorDailySummary.computed_at.desc())
             .first()
         )
+        extras = day_direction_extras(session, symbol, utc_date)
         if row is not None:
             out.append(BehaviorDailySchema(
                 utc_date=utc_date, day_type=row.day_type,
                 counts=json.loads(row.counts),
                 composition=merge_composition(json.loads(row.composition)),   # 历史六类 PIT 行读取归并
                 down_net_sum=row.down_net_sum, computed_at=_tf(row.computed_at), live=False,
+                **extras,
             ))
         else:
             counts, composition, down_sum = aggregate_day(session, symbol, utc_date)
@@ -102,6 +104,7 @@ def daily_series(session: Session, symbol: str, days: int = 14) -> BehaviorDaily
                 utc_date=utc_date, day_type=day_type_of(utc_date),
                 counts=counts, composition=composition,
                 down_net_sum=down_sum, computed_at=_tf(now), live=True,
+                **extras,
             ))
     return BehaviorDailyResponse(symbol=symbol, days=out)
 

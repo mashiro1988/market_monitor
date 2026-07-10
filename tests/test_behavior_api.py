@@ -77,6 +77,9 @@ def test_daily_live_and_linkage_shape(client_session):
     # 种子段在 utcnow-6h~-2h，UTC 午夜后运行会落在昨日——按日找而不是赌 today
     seeded = [d for d in daily["days"] if any(v["up"] or v["down"] for v in d["counts"].values())]
     assert len(seeded) == 1 and seeded[0]["live"] is True
+    # 方向拆分读数（2026-07-10：行为面板重画）——compute-on-read，PIT 行不落这些字段
+    assert seeded[0]["up_net_sum"] > 0                      # 种子段是涨段
+    assert seeded[0]["sent_up"] == 0 and seeded[0]["sent_down"] == 0   # 机器类 pure_resonance
     linkage = client.get("/api/behavior/linkage?hours=6").json()
     assert linkage["rolling_points"] >= 10
     syms = [s["symbol"] for s in linkage["series"]]
@@ -108,6 +111,9 @@ def test_review_confirm_override_and_daily_priority(client_session):
     assert day["composition"]["sentiment_tech"] == 1
     assert day["composition"]["pure_resonance"] == 0
     assert "no_ref" in day["composition"]                       # 无对照注记键恒在
+    # 情绪方向拆分跟随人工改判（人工优先、现算口径）
+    assert day["sent_up"] == 1 and day["sent_down"] == 0
+    assert day["sent_up_net_sum"] > 0
     # 撤销 → 回机器类（归并后仍是 pure_resonance）
     r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": None})
     assert r.status_code == 200 and r.json()["human_class"] is None

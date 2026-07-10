@@ -22,6 +22,16 @@ export type DailyRow = {
   noRef: number;       // 无对照注记（已含在三类内，另计）
   sentRatio: number | null;  // 情绪占比%（分母<5 → null 不读）
   downSumNeg: number;  // 跌段净幅合计（负值，柱图向下）
+  upSum: number;       // 涨段净幅合计（正值）
+  t05Up: number; t05Down: number;    // 0.5 档 涨/跌段数
+  t08Up: number; t08Down: number;
+  sentUp: number; sentDown: number;  // 情绪·技术面 涨/跌段数（0.5 档以上）
+  sentNetCount: number;              // 情绪涨跌个数差
+  sentUpNet: number;                 // 情绪涨段净幅Σ（≥0）
+  sentDownNet: number;               // 情绪跌段净幅Σ（≤0）
+  sentNetAmp: number;                // 情绪涨跌净幅差
+  sentUpRatio: number | null;        // 情绪涨段占构成段 %（分母<5 → null）
+  sentDownRatio: number | null;
 };
 
 export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
@@ -53,6 +63,19 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       noRef,
       sentRatio: comp >= 5 ? Math.round((three.sentiment_tech / comp) * 100) : null,
       downSumNeg: -Math.abs(d.down_net_sum ?? 0),
+      upSum: Math.abs(d.up_net_sum ?? 0),
+      t05Up: d.counts["0.5"]?.up ?? 0,
+      t05Down: d.counts["0.5"]?.down ?? 0,
+      t08Up: d.counts["0.8"]?.up ?? 0,
+      t08Down: d.counts["0.8"]?.down ?? 0,
+      sentUp: d.sent_up ?? 0,
+      sentDown: d.sent_down ?? 0,
+      sentNetCount: (d.sent_up ?? 0) - (d.sent_down ?? 0),
+      sentUpNet: Math.abs(d.sent_up_net_sum ?? 0),
+      sentDownNet: -Math.abs(d.sent_down_net_sum ?? 0),
+      sentNetAmp: Math.round((Math.abs(d.sent_up_net_sum ?? 0) - Math.abs(d.sent_down_net_sum ?? 0)) * 1e4) / 1e4,
+      sentUpRatio: comp >= 5 ? Math.round(((d.sent_up ?? 0) / comp) * 100) : null,
+      sentDownRatio: comp >= 5 ? Math.round(((d.sent_down ?? 0) / comp) * 100) : null,
     };
   });
 }

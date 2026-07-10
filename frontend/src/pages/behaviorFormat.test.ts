@@ -19,12 +19,19 @@ describe("buildDailyRows", () => {
         utc_date: "2026-07-08", day_type: "weekday", live: false,
         counts: { "0.3": { up: 5, down: 8 }, "0.5": { up: 2, down: 3 }, "0.8": { up: 1, down: 1 } },
         composition: { macro_news: 3, pure_resonance: 1, industry_news: 1, sentiment: 2, no_ref_news: 0, no_ref_pending: 0 },
-        down_net_sum: -3.87, computed_at: tf("2026-07-09T00:05:00", "2026-07-09 08:05:00"),
+        down_net_sum: -3.87, up_net_sum: 2.41,
+        sent_up: 1, sent_down: 2, sent_up_net_sum: 0.9, sent_down_net_sum: -1.4,
+        computed_at: tf("2026-07-09T00:05:00", "2026-07-09 08:05:00"),
       }],
     } as any);
     expect(rows[0]).toMatchObject({
       date: "07-08", weekend: false, up: 8, down: 12, net: -4,
       t05: 5, t08: 2, sent: 2, comp: 7, downSumNeg: -3.87,
+      upSum: 2.41,
+      t05Up: 2, t05Down: 3, t08Up: 1, t08Down: 1,
+      sentUp: 1, sentDown: 2, sentNetCount: -1,
+      sentUpNet: 0.9, sentDownNet: -1.4, sentNetAmp: -0.5,
+      sentUpRatio: 14, sentDownRatio: 29,
     });
   });
 });

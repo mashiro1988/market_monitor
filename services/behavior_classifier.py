@@ -218,6 +218,44 @@ def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, d
     return counts, composition, round(down_sum, 4)
 
 
+def day_direction_extras(session: Session, symbol: str, utc_date: str) -> dict:
+    """方向拆分读数（2026-07-10 行为面板重画）：涨段净幅合计 + 情绪·技术面段的
+    涨/跌个数与净幅。**compute-on-read**、不进 PIT——净幅只依赖段原始数据（settle 后不变），
+    情绪归属按"人工优先"的当前结论（人工改判要立刻反映到趋势图，冻结旧结论反而误导）。"""
+    day = datetime.strptime(utc_date, "%Y-%m-%d")
+    rows = (
+        session.query(BehaviorSegment)
+        .filter(BehaviorSegment.symbol == symbol,
+                BehaviorSegment.start_dt >= day,
+                BehaviorSegment.start_dt < day + timedelta(days=1))
+        .all()
+    )
+    up_sum = 0.0
+    sent_up = sent_down = 0
+    sent_up_sum = sent_down_sum = 0.0
+    for r in rows:
+        if r.direction > 0 and r.net_pct is not None:
+            up_sum += r.net_pct
+        if r.tier_idx is None or r.tier_idx < 1:
+            continue                                   # 情绪拆分只看构成段（0.5 档以上）
+        effective = to_window_class(r.human_class) or to_window_class(r.classification)
+        if effective != "sentiment_tech":
+            continue
+        if r.direction > 0:
+            sent_up += 1
+            sent_up_sum += r.net_pct or 0.0
+        else:
+            sent_down += 1
+            sent_down_sum += r.net_pct or 0.0
+    return {
+        "up_net_sum": round(up_sum, 4),
+        "sent_up": sent_up,
+        "sent_down": sent_down,
+        "sent_up_net_sum": round(sent_up_sum, 4),
+        "sent_down_net_sum": round(sent_down_sum, 4),
+    }
+
+
 def day_type_of(utc_date: str) -> str:
     return "weekend" if datetime.strptime(utc_date, "%Y-%m-%d").weekday() >= 5 else "weekday"
 

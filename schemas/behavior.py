@@ -54,6 +54,13 @@ class BehaviorDailySchema(BaseModel):
     counts: dict[str, dict[str, int]]     # {tier: {up, down}}
     composition: dict[str, int]           # 六类构成（0.5 档以上）
     down_net_sum: float | None = None
+    # 方向拆分（2026-07-10 行为面板重画）：compute-on-read 不进 PIT——净幅由段原始数据决定，
+    # 情绪归属按人工优先的当前结论（详见 behavior_classifier.day_direction_extras）
+    up_net_sum: float | None = None
+    sent_up: int | None = None            # 情绪·技术面涨段数（0.5 档以上）
+    sent_down: int | None = None
+    sent_up_net_sum: float | None = None
+    sent_down_net_sum: float | None = None
     computed_at: TimeFields
     live: bool = False                    # True = 无 PIT 行、按需现算（当日盘中）
 

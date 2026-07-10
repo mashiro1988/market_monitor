@@ -200,6 +200,11 @@ export type BehaviorDailySchema = {
   counts: Record<string, Record<string, number>>;
   composition: Record<string, number>;
   down_net_sum: number | null;
+  up_net_sum: number | null;
+  sent_up: number | null;
+  sent_down: number | null;
+  sent_up_net_sum: number | null;
+  sent_down_net_sum: number | null;
   computed_at: TimeFields;
   live: boolean;
 };
