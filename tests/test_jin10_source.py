@@ -37,6 +37,7 @@ def test_jin10_importance_is_flag_not_score():
         ]
     }
     response = MagicMock()
+    response.status_code = 200          # 新契约：非 200 → Jin10ApiError，mock 必须显式给 200
     response.json.return_value = payload
 
     with patch("scanners.sources.jin10_source.requests.get", return_value=response):
@@ -47,6 +48,7 @@ def test_jin10_importance_is_flag_not_score():
 
 def test_fetch_handles_null_data_page():
     response = MagicMock()
+    response.status_code = 200
     response.json.return_value = {"data": None}
 
     with patch("scanners.sources.jin10_source.requests.get", return_value=response):
