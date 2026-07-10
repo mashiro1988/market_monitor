@@ -44,7 +44,7 @@ export function MultiLineChart({
   baseline?: number;
   valueFormatter?: (value: number) => string;
   yDomain?: [number, number];
-  shadedBands?: { x1: string; x2: string; label?: string; fill?: string }[];
+  shadedBands?: { x1: string; x2: string; label?: string; fill?: string; stroke?: string }[];
   secondaryKeys?: string[];   // 放到右侧副轴的线（如美债/美元等低波动品种，自适应各自量程）
 }) {
   if (!data.length || !keys.length) {
@@ -78,7 +78,7 @@ export function MultiLineChart({
           ))}
           {(shadedBands ?? []).map((b) => (
             <ReferenceArea key={`band-${b.x1}-${b.x2}-${b.fill ?? "d"}`} yAxisId="left" x1={b.x1} x2={b.x2}
-              strokeOpacity={0} fill={b.fill ?? "rgba(148,163,184,0.14)"}
+              stroke={b.stroke} strokeOpacity={b.stroke ? 1 : 0} fill={b.fill ?? "rgba(148,163,184,0.14)"}
               label={b.label ? { value: b.label, position: "insideTop", fill: "#94a3b8", fontSize: 11 } : undefined} />
           ))}
           {keys.map((key, index) => (

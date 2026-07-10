@@ -119,9 +119,9 @@ export type SegmentBandInput = {
 export function deriveSegmentBands(
   segments: SegmentBandInput[],
   buckets: { time: string; utcMinute: string }[],
-): { x1: string; x2: string; fill: string }[] {
+): { x1: string; x2: string; fill: string; stroke?: string }[] {
   if (!buckets.length) return [];
-  const out: { x1: string; x2: string; fill: string }[] = [];
+  const out: { x1: string; x2: string; fill: string; stroke?: string }[] = [];
   for (const seg of segments) {
     const s = seg.start.timestamp_utc?.slice(0, 16);
     const e = seg.end.timestamp_utc?.slice(0, 16);
@@ -129,9 +129,16 @@ export function deriveSegmentBands(
     const first = buckets.find((b) => b.utcMinute >= s);
     const last = [...buckets].reverse().find((b) => b.utcMinute <= e);
     if (!first || !last || first.utcMinute > last.utcMinute) continue;   // 段在图域外
-    const opacity = 0.08 + 0.07 * Math.min(seg.tier_idx, 2);
+    // 深底可读：0.10/0.22/0.34 拉开档位差；0.5 档以上加同色描边标出段边界，0.3 档只当簇拥背景
+    const tier = Math.min(seg.tier_idx, 2);
+    const opacity = 0.1 + 0.12 * tier;
     const rgb = seg.direction > 0 ? "94,234,212" : "251,113,133";        // 站内青涨/玫红跌
-    out.push({ x1: first.time, x2: last.time, fill: `rgba(${rgb},${opacity.toFixed(2)})` });
+    out.push({
+      x1: first.time,
+      x2: last.time,
+      fill: `rgba(${rgb},${opacity.toFixed(2)})`,
+      stroke: tier >= 1 ? `rgba(${rgb},0.45)` : undefined,
+    });
   }
   return out;
 }
