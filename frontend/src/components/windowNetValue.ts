@@ -162,26 +162,27 @@ export function deriveSegmentBands(
     const dir: 1 | -1 = seg.direction > 0 ? 1 : -1;
     const rgb = dir > 0 ? "94,234,212" : "251,113,133";                  // 站内青涨/玫红跌
 
-    // 段内档位演进（2026-07-10 用户拍板）：从段起点累计 |涨跌幅|，触及 0.5/0.8 档的
-    // 时点把段切成 0.3→0.5→0.8 的 run，逐档加深（锁存：触及后不因回落降档）。
+    // 段内档位演进：口径与段检测器**同源** = 15min 开收净（close vs 3 桶前 close）
+    // 滚动峰值锁存，触及 0.5/0.8 档的时点把段切成 0.3→0.5→0.8 的 run 逐档加深。
+    // 2026-07-10 实弹修正：此前用"从段起点累计"，与引擎两套尺子——07-09 21:30 段
+    // 13:55 那笔 15min 净 +0.505% 擦线触 0.5 档，累计口径只有 +0.478% → 图 0.3 色、芯片 0.5 档打架。
     // 相邻 run 共享边界桶且按时间序后画深色，色带无缝衔接。
-    let base: number | null = null;
-    for (let i = firstIdx; i <= lastIdx && closes; i++) {
-      const v = closes[i];
-      if (v != null && v !== 0) { base = v; break; }
-    }
-    if (base == null || tierCap === 0) {
+    const hasCloses = !!closes && closes.slice(firstIdx, lastIdx + 1).some((v) => v != null);
+    if (!hasCloses || tierCap === 0) {
       out.push(bandOf(rgb, tierCap, buckets[firstIdx].time, buckets[lastIdx].time, dir));
       continue;
     }
     const reached: number[] = [];
-    let cumMax = 0;
+    let rollMax = 0;
     for (let i = firstIdx; i <= lastIdx; i++) {
-      const v = closes![i];
-      if (v != null) cumMax = Math.max(cumMax, Math.abs(v / base - 1) * 100);
+      const cur = closes![i];
+      const prev = i >= 3 ? closes![i - 3] : null;          // 3 桶 = 15min 开收净（与检测触发原语同款）
+      if (cur != null && prev != null && prev !== 0) {
+        rollMax = Math.max(rollMax, Math.abs(cur / prev - 1) * 100);
+      }
       let r = 0;
       for (let k = BTC_TIERS.length - 1; k >= 1; k--) {
-        if (cumMax >= BTC_TIERS[k]) { r = k; break; }
+        if (rollMax >= BTC_TIERS[k]) { r = k; break; }
       }
       reached.push(Math.min(r, tierCap));
     }
@@ -189,7 +190,10 @@ export function deriveSegmentBands(
     for (let i = 1; i <= reached.length; i++) {
       if (i === reached.length || reached[i] !== reached[runStart]) {
         const endIdx = Math.min(i, reached.length - 1);                   // 延伸到下一 run 的起点桶
-        out.push(bandOf(rgb, reached[runStart], buckets[firstIdx + runStart].time, buckets[firstIdx + endIdx].time, dir));
+        // 末位单桶 run（触档发生在段末最后一桶，如擦线触发）零宽不可见 → 向前借一桶，
+        // 深色按序后画盖住重叠处；15min 开收净本就覆盖到前面的桶，语义不失真
+        const startIdx = runStart === endIdx ? Math.max(0, runStart - 1) : runStart;
+        out.push(bandOf(rgb, reached[runStart], buckets[firstIdx + startIdx].time, buckets[firstIdx + endIdx].time, dir));
         runStart = i;
       }
     }
