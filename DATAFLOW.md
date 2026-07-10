@@ -77,7 +77,7 @@
 | `market_reaction_type` | str \| null | 历史兼容字段（三分类 macro_policy / event_driven / no_news_driver）；前端新保存不再传，prompt 不再要求输出。 |
 | `confidence` | float \| null | **v2**：0-1；新 Phase3a 保存请求（`news_roles` 非空/空字典都算）必填；null 仅表示 v1/legacy 迁移样本（导出时 `schema_version:1` 低保真标记）。 |
 | `auto_news_roles` | str (JSON) \| null | AI 原始标注快照（人改前），与 `news_roles` 的差异 = 人机分歧难例。 |
-| `prompt_version` | str \| null | 产生 auto_* 的提示词版本（当前 `annotation_service.ANNOTATION_PROMPT_VERSION = "v11-20260709"`，见 `services/annotation_service.py:509`）。 |
+| `prompt_version` | str \| null | 产生 auto_* 的提示词版本（当前 `annotation_service.ANNOTATION_PROMPT_VERSION = "v13-20260710"`，见 `services/annotation_service.py:509`）。 |
 | `eval_set` | bool | 评估集冻结标记；训练导出（split=train）默认排除。 |
 | `notes`, `labeler` | str | |
 | `created_at`, `updated_at` | datetime | |
