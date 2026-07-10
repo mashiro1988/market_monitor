@@ -109,7 +109,6 @@ def _reference_changes_for_window(
     window_end: datetime,
     tolerance_minutes: int,
     annotated_symbol: str,
-    correlations_by_symbol: dict[str, float] | None = None,
 ) -> list[ReferenceChange]:
     """按 config.ANNOTATION_REFERENCE_ASSETS 逐个算同期变动；标注品种本身 → is_self（不对标自己）。"""
     out: list[ReferenceChange] = []
@@ -132,7 +131,6 @@ def _reference_changes_for_window(
                 price_end=price_end,
                 pct=pct,
                 post_pct=post_pct,
-                correlation=None,
                 unit=unit,
                 is_self=True,
             ))
@@ -145,31 +143,9 @@ def _reference_changes_for_window(
             price_end=price_end,
             pct=pct,
             post_pct=post_pct,
-            correlation=(correlations_by_symbol or {}).get(sym),
             unit=unit,
         ))
     return out
-
-
-def _reference_correlations_for_window(
-    session: Session,
-    symbol: str,
-    window_start: datetime,
-    window_end: datetime,
-) -> dict[str, float]:
-    """标注品种与各对标在窗口 ±1h 的 5min 收益率 Pearson 相关，按 symbol 返回。"""
-    from services import window_signals
-
-    corr_start = window_start - timedelta(minutes=60)
-    corr_end = window_end + timedelta(minutes=60)
-    correlations: dict[str, float] = {}
-    for ref_symbol, _label, _unit in _iter_reference_assets():
-        if ref_symbol == symbol:
-            continue
-        r = window_signals.pearson_correlation(session, symbol, ref_symbol, corr_start, corr_end)
-        if r is not None:
-            correlations[ref_symbol] = round(r, 2)
-    return correlations
 
 
 def _reference_changes_payload(refs: list[ReferenceChange]) -> dict[str, str | None]:
@@ -814,7 +790,6 @@ def load_price_windows(
                 m["end"],
                 tolerance_minutes,
                 symbol,
-                correlations_by_symbol=_reference_correlations_for_window(session, symbol, m["start"], m["end"]),
             ),
         )))
 
@@ -1137,9 +1112,6 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
                 row.window_end,
                 tolerance_minutes,
                 row.symbol,
-                correlations_by_symbol=_reference_correlations_for_window(
-                    session, row.symbol, row.window_start, row.window_end
-                ),
             ),
             no_clear_news=bool(row.no_clear_news),
             selected_count=len(selected_ids),

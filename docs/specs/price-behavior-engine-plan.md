@@ -1,6 +1,6 @@
 # 价格行为引擎（异动段 + 共振分 S）Implementation Plan
 
-> **状态：已执行（2026-07-09，分支 `codex/price-behavior-engine`，前置合流 + Task 1-10 全部完成，pytest/vitest/build 全绿）。** 遗留：「仅剩待定」三项（T_ref 三档拍板 → 跑 `scripts/behavior_calibrate.py` 后定；retention 值已按 90 落 config；切换开关默认关待验证 runbook）。
+> **状态：已执行（2026-07-09，分支 `codex/price-behavior-engine`，前置合流 + Task 1-10 全部完成，pytest/vitest/build 全绿）。** 遗留三项均已闭环：T_ref 三档按校准首跑拍板（CL/^N225 启用、US_2Y 数据不足禁用，commit ec7196b）；retention 90 已落 config；切换开关 `BEHAVIOR_REPLACES_ANNOTATION_WINDOWS` 于 **Phase 2 退役**（标注窗口源固定段化）。后续演进见 `price-behavior-engine-phase2-plan.md`（2026-07-10 完成：事件窗 `s_score` → `rolling_peak`、分类三类化、同步相关整链删除、prompt v12）。
 
 **Goal:** 把 v0.4 定稿落成可跑系统：BTC 三档异动段检测 → 段落库 → 共振分 S + 新闻命中自动分类（宏观新闻/纯共振/行业事件/情绪候选/无对照×新闻）→ 日面板（段数/档位/构成/联动曲线套装）→ 标注流对接 + 校准工具。总体目的：**判断当前 BTC 行情由技术面（情绪/庄家）、行业事件、宏观新闻还是纯资产共振驱动，并给出对应行动指引。**
 

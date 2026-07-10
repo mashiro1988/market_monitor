@@ -199,7 +199,6 @@ def test_reference_self_for_annotated_symbol(session):
     assert len(wins) == 1
     refs = {r.label: r for r in wins[0].references}
     assert refs["纳指"].is_self is True and refs["纳指"].pct == pytest.approx(1.0, abs=0.01)
-    assert refs["纳指"].correlation is None                            # 本身不算同步相关
     assert refs["原油"].is_self is False and refs["原油"].pct is None   # 无数据
 
 

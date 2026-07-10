@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""标注窗口派生信号（annotation-refinements Part B）：相关性 / 首个触发段 / 窗口前净变动。
+"""标注窗口派生信号（annotation-refinements Part B）：首个触发段 / 窗口前净变动。
 纯 compute-on-read，从 price_snapshots 的 5min 收盘价算，喂给 auto-annotate reasoner 判 driver。"""
 import sys
 import os
@@ -39,29 +39,6 @@ def _from_returns(session, symbol, start, base, returns, step=5):
     for r in returns:
         prices.append(prices[-1] * (1 + r))
     _series(session, symbol, start, prices, step)
-
-
-_RETS = [0.01, -0.02, 0.03, -0.01, 0.02, -0.03, 0.01, -0.02, 0.03, -0.01]  # 10 收益率 → 11 价点
-
-
-def test_pearson_positive(session):
-    _from_returns(session, "A", T0, 100.0, _RETS)
-    _from_returns(session, "B", T0, 200.0, _RETS)                 # 同收益率 → +1
-    r = window_signals.pearson_correlation(session, "A", "B", T0, T0 + timedelta(minutes=60))
-    assert r is not None and r == pytest.approx(1.0, abs=1e-6)
-
-
-def test_pearson_negative(session):
-    _from_returns(session, "A", T0, 100.0, _RETS)
-    _from_returns(session, "B", T0, 200.0, [-x for x in _RETS])   # 反向收益率 → -1
-    r = window_signals.pearson_correlation(session, "A", "B", T0, T0 + timedelta(minutes=60))
-    assert r is not None and r == pytest.approx(-1.0, abs=1e-6)
-
-
-def test_pearson_insufficient_returns_none(session):
-    _series(session, "A", T0, [100, 101, 102])                   # 只有 2 个收益率 < 8
-    _series(session, "B", T0, [200, 201, 202])
-    assert window_signals.pearson_correlation(session, "A", "B", T0, T0 + timedelta(minutes=60)) is None
 
 
 def test_first_trigger_skips_flat_lead(session):

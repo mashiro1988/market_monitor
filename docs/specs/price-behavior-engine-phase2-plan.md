@@ -1,6 +1,6 @@
 # 价格行为引擎 Phase 2 —— 工作台/结论页重组 Implementation Plan
 
-> **状态：设计已对齐（2026-07-09 用户三轮口述 + 答疑），待开工。** Phase 1 = `price-behavior-engine-plan.md`（已上线）。
+> **状态：已完成（2026-07-10 全部 8 个任务落地 main，88811ea…P2-T8 收尾提交）。** 设计对齐于 2026-07-09（用户三轮口述 + 答疑）。Phase 1 = `price-behavior-engine-plan.md`（已上线）。落地与计划的偏差：无（同步相关整链删除含 `window_signals.pearson_correlation`、`ReferenceChange.correlation`、UI/tests 全链；prompt 版本 `v12-20260710`）。
 
 **Goal:** 页面职责重组——**标注页 = 工作台**（0.5+ 段窗口 + 0.3 簇拥上下文 + S 证据 + 窗口三类标注 = 人工审核本身）；**行为面板 = 结论页**（日趋势 + 三类构成）；**S 计算统一为 rolling 一套**（判级读数 = 屏幕曲线的峰值，所见即所判）。
 

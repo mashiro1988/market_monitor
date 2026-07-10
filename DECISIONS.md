@@ -2,6 +2,13 @@
 
 > 最新的放最前。每条 5 行：日期 / 背景 / 决策 / 拒绝的备选 / 影响。
 
+## 2026-07-10 - 行为引擎 Phase 2：标注页=工作台、行为面板=结论页，同步相关退役
+
+- 背景：Phase 1 上线后用户发现两页职责纠缠——标注页与行为面板窗口口径不一致（0.3 基段边界 vs 0.5 独立窗口）、S 有事件窗/rolling 两套算法读数对不上、审核动作和证据（S 曲线）分散在结论页；同步 Pearson 相关自 v11 起已不喂模型，UI 残留只添噪音。
+- 决策：标注页收拢全部证据与动作——窗口源固定为 0.5 档以上行为段（`BEHAVIOR_REPLACES_ANNOTATION_WINDOWS` 开关退役）、0.3 段作簇拥上下文（计数芯片 + 净值图档位色带）、`LinkagePanel`（rolling S 曲线组）迁入、窗口级三类标注（news_driven/pure_resonance/sentiment_tech）保存必选并按重叠≥50% 回写段 `human_class`；行为面板只留结论（日趋势 + 三类构成，人工优先）；S 读数统一 rolling（`rolling_peak` 段窗曲线 |S| 峰值，"所见即所判"，删事件窗 `s_score`）；同步相关整链删除（`pearson_correlation`/`ReferenceChange.correlation`），对标行改「绝对起点 → 终点 (窗口涨跌)」；prompt v12 输出 `window_class` 三类建议。
+- 拒绝的备选：0.3 段也进标注窗口（噪音太多，用户明确只标 0.5+）；保留双 S 算法（读数不一致是主诉）；同步相关仅 UI 降权保留（判别力≈随机，留着误导）；redundant 新闻角色并入三类（多轮 refine 现状可用，不动）。
+- 影响：`human_class` 取值收敛为三类；日汇总构成读取经 `merge_composition` 归并（历史 PIT 六类行兼容）；`PriceWindowSchema` 带段证据（档位/S/机器类/人工类/簇拥数）；训练导出/审计双入口（标注页保存 + 面板 PATCH）同写 `human_class`；prompt `v12-20260710`。
+
 ## 2026-07-09 - 价格行为引擎落地：共振分 S 取代相关性判据，prompt v11
 
 - 背景：用户复盘流定案（spec `docs/specs/volume-behavior-engine-discussion.md` v0.4）——判断 BTC 行情由技术面（情绪/庄家）、行业事件、宏观新闻还是纯共振驱动；旧 ±1h Pearson 判据实测判别力≈随机（错位对照 lift≈1.0），量能路线因数据现实整体退出。

@@ -2,7 +2,6 @@
 """标注窗口的派生信号（news-impact-engine annotation-refinements Part B）。
 
 喂给 auto-annotate 的 reasoner，帮它判 driver：
-- pearson_correlation：本品种在跟哪个对标走（相关性），高相关 → 优先找那品种的新闻。
 - first_trigger_segment：窗口内**第一个显著波动的 5min bar**（真正的加速触发时点），driver 通常在其附近。
 - pre_window_move：窗口前一段的净变动，用来识别情绪反转（前涨后跌 = 情绪挤压、多半无 driver）。
 
@@ -30,29 +29,6 @@ def _closes(session: Session, symbol: str, start: datetime, end: datetime) -> li
         .all()
     )
     return [(t, float(p)) for t, p in rows if p]
-
-
-def pearson_correlation(session: Session, symbol_a: str, symbol_b: str,
-                        start: datetime, end: datetime, min_pairs: int = 8) -> float | None:
-    """两品种在 [start,end] 上 **5min 收益率** 的 Pearson 相关。对齐的收益率对 < min_pairs、
-    或任一方无波动（方差 0）→ None。收益率而非价位：去掉量纲/趋势，衡量"是否一起动"。"""
-    a = dict(_closes(session, symbol_a, start, end))
-    b = dict(_closes(session, symbol_b, start, end))
-    common = sorted(set(a) & set(b))
-    if len(common) < 2:
-        return None
-    ra = [(a[common[i]] - a[common[i - 1]]) / a[common[i - 1]] for i in range(1, len(common))]
-    rb = [(b[common[i]] - b[common[i - 1]]) / b[common[i - 1]] for i in range(1, len(common))]
-    n = len(ra)
-    if n < min_pairs:
-        return None
-    ma, mb = sum(ra) / n, sum(rb) / n
-    cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb))
-    va = sum((x - ma) ** 2 for x in ra)
-    vb = sum((y - mb) ** 2 for y in rb)
-    if va <= 0 or vb <= 0:
-        return None
-    return cov / (va ** 0.5 * vb ** 0.5)
 
 
 def first_trigger_segment(session: Session, symbol: str, window_start: datetime, window_end: datetime,

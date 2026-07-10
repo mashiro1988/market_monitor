@@ -155,7 +155,7 @@ def test_reference_change_schema_carries_unit(session):
     from datetime import timedelta as _td
     ref_rows = _load_reference_rows(session, W_START - _td(minutes=75))
     refs = _reference_changes_for_window(
-        ref_rows, W_START, W_END, 10, "BTC/USDT", correlations_by_symbol={"NQ=F": 0.82}
+        ref_rows, W_START, W_END, 10, "BTC/USDT"
     )
     by_label = {r.label: r for r in refs}
     assert by_label["美债2Y"].unit == "bp"
@@ -164,10 +164,8 @@ def test_reference_change_schema_carries_unit(session):
     assert by_label["纳指"].pre_pct == pytest.approx(0.5025, abs=0.01)
     assert by_label["纳指"].pct == pytest.approx(-1.0)
     assert by_label["纳指"].post_pct == pytest.approx(0.7576, abs=0.01)
-    assert by_label["纳指"].correlation == pytest.approx(0.82)
     assert by_label["BTC"].is_self is True
     assert by_label["BTC"].pct == pytest.approx(-3.0)
-    assert by_label["BTC"].correlation is None
 
 
 def test_prompts_document_reference_changes():

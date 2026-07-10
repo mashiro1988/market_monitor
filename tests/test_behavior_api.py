@@ -73,9 +73,10 @@ def test_daily_live_and_linkage_shape(client_session):
     _seed(session)
     daily = client.get("/api/behavior/daily?days=2").json()
     assert len(daily["days"]) == 2
-    today = daily["days"][-1]
-    assert today["live"] is True                      # 无 PIT 行 → 现算
-    assert any(v["up"] or v["down"] for v in today["counts"].values())
+    assert daily["days"][-1]["live"] is True          # 无 PIT 行 → 现算
+    # 种子段在 utcnow-6h~-2h，UTC 午夜后运行会落在昨日——按日找而不是赌 today
+    seeded = [d for d in daily["days"] if any(v["up"] or v["down"] for v in d["counts"].values())]
+    assert len(seeded) == 1 and seeded[0]["live"] is True
     linkage = client.get("/api/behavior/linkage?hours=6").json()
     assert linkage["rolling_points"] >= 10
     syms = [s["symbol"] for s in linkage["series"]]
@@ -93,18 +94,24 @@ def test_review_confirm_override_and_daily_priority(client_session):
     # 确认（机器六类归并三类写入：pure_resonance → pure_resonance）
     r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": target["classification"]})
     assert r.status_code == 200 and r.json()["human_class"] == "pure_resonance"
+    # 段落在哪个 UTC 日取决于运行时刻（UTC 午夜后 utcnow-6h 落昨日）——按段起点日期取行
+    seg_date = target["start"]["timestamp_utc"][:10]
+
+    def _seg_day():
+        days = client.get("/api/behavior/daily?days=2").json()["days"]
+        return next(d for d in days if d["utc_date"] == seg_date)
+
     # 改判 → 构成聚合优先人工结论（三类口径）
     r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": "sentiment_tech"})
     assert r.status_code == 200
-    today = client.get("/api/behavior/daily?days=1").json()["days"][-1]
-    assert today["composition"]["sentiment_tech"] == 1
-    assert today["composition"]["pure_resonance"] == 0
-    assert "no_ref" in today["composition"]                     # 无对照注记键恒在
+    day = _seg_day()
+    assert day["composition"]["sentiment_tech"] == 1
+    assert day["composition"]["pure_resonance"] == 0
+    assert "no_ref" in day["composition"]                       # 无对照注记键恒在
     # 撤销 → 回机器类（归并后仍是 pure_resonance）
     r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": None})
     assert r.status_code == 200 and r.json()["human_class"] is None
-    today = client.get("/api/behavior/daily?days=1").json()["days"][-1]
-    assert today["composition"]["pure_resonance"] == 1
+    assert _seg_day()["composition"]["pure_resonance"] == 1
     # 非法类别 400 / 不存在 404
     assert client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": "count_only"}).status_code == 400
     assert client.patch("/api/behavior/segments/999999", json={"human_class": "sentiment_tech"}).status_code == 404

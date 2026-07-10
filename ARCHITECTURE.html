@@ -18,7 +18,7 @@
 <body>
 
 <h1>架构地图 - market_monitor</h1>
-<div class="meta">最近一次基于代码扫描确认：2026-07-09（价格行为引擎：behavior_segments/resonance_score/behavior_classifier/behavior_views 服务 + behavior 两表 + /api/behavior/* 三端点 + /behavior 页 + 两个 job；prompt v11 用 s_scores/max_ref/machine_class 取代 ±1h Pearson；标注窗口源开关默认关；retention 90d）· 此 HTML 是 <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> 的可视化伴侣，事实必须与 Markdown 完全一致</div>
+<div class="meta">最近一次基于代码扫描确认：2026-07-10（行为引擎 Phase 2：标注页=工作台（窗口源=0.5 档以上段、0.3 簇拥上下文、LinkagePanel rolling S 曲线迁入、三类标注回写 human_class）、行为面板=结论页（日趋势+三类构成）、S 统一 rolling_peak、同步相关整链删除、prompt v12；承接 07-09 Phase 1：行为引擎五服务 + 两表 + /api/behavior/* + 两个 job + retention 90d）· 此 HTML 是 <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> 的可视化伴侣，事实必须与 Markdown 完全一致</div>
 <div class="nav">
   <a href="ARCHITECTURE.md">📄 查看 Markdown 版本</a>
   <a href="DATAFLOW.html">🔁 数据流地图</a>
@@ -33,7 +33,7 @@
 flowchart TD
     Frontend["React / Vite SPA<br/>frontend/<br/>(含板块轮动页)"]
     API["FastAPI 路由<br/>api/app.py · api/routes.py"]
-    Services["服务层<br/>services/<br/>(annotation Phase3a v10<br/>references: 本身+前/窗/后+同步相关 · sector_service)"]
+    Services["服务层<br/>services/<br/>(annotation Phase3a v12<br/>references: 本身+前/窗/后+绝对起终点<br/>行为引擎: 段检测+rolling S+三类 · sector_service)"]
     Models["ORM<br/>models/ (含 sector)"]
     Scanners["扫描器<br/>scanners/ (含 sector_scanner)"]
     Alerts["告警<br/>alerts/"]

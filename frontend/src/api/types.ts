@@ -459,7 +459,6 @@ export type ReferenceChange = {
   price_end: number | null;
   pct: number | null;
   post_pct: number | null;
-  correlation: number | null;
   unit: string;
   is_self: boolean;
 };
