@@ -192,7 +192,11 @@ def test_prompts_document_reference_changes():
         assert "±1h 的相关系数" not in prompt
         assert "先看 `correlations`" not in prompt
         assert "日经" in prompt
-        assert "最强参照的新闻 + 其它资产验证 + 时间靠近触发段" in prompt
+        assert "最强参照的新闻 + 其它资产验证 + 时间贴合对时锚（窗口起点）" in prompt
+        # v13 守卫：对时锚 = 窗口起点（0.3 档启动点），trigger 滞后不构成排除理由
+        # （2026-07-10 实弹：DeepSeek 因"新闻 09:07 早于 trigger 09:45"纠结半天并压置信度）
+        assert "对时锚 = 窗口起点（0.3 档启动点）" in prompt
+        assert "不构成排除理由" in prompt
         assert "地缘" in prompt        # 跨资产风险事件解读指引
         # 全 null（对标品种集体休市，周末加密窗口的常态）必须有降级指引，
         # 否则模型可能拿"无矛盾"当"签名一致"，借地缘例外条款乱选。
