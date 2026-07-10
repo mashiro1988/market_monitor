@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LineChart, ReferenceArea, ResponsiveContainer, XAxis, YAxis } from "recharts";
+import { LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { api } from "../api/client";
 import type { NewsItem, PriceWindow } from "../api/types";
 import { MultiLineChart } from "./Charts";
@@ -38,9 +38,10 @@ function persistBasket(symbols: string[]) {
   }
 }
 
-// 段档位轨道：主图正下方的窄条，同一批行为段的实色版（方向色 × 档位深浅）。
-// 图内半透明色带负责"段在哪里"，这条负责"一眼分清 0.3/0.5/0.8 与方向"。
-// 复用主图的 data + 轴宽（左 48 / 右 48），保证 x 轴逐像素对齐。
+// 段档位轨道：主图正下方的窄条，同一批行为段的实色版。
+// 双通道编码档位（2026-07-10 用户反馈"深浅仍不够显著"后加高度）：
+//   高度 = 档位（0.3 档 1/3 高、0.5 档 2/3、0.8 档满格，像步进表），深浅同步递进；
+// 换挡点画背景色分隔线，段内 0.3→0.5→0.8 的演进一眼可辨。
 function SegmentTierLane({
   data,
   bands,
@@ -51,9 +52,13 @@ function SegmentTierLane({
   hasSecondary: boolean;
 }) {
   if (!bands.length) return null;
+  // 相邻 run 共享边界桶（演进切分特征）→ 在边界画一根背景色细线标"换挡点"
+  const shifts = bands
+    .filter((b, i) => i > 0 && bands[i - 1].x2 === b.x1 && bands[i - 1].dir === b.dir)
+    .map((b) => b.x1);
   return (
-    <div className="tier-lane" title="段档位轨道：颜色=方向（青涨/玫红跌），深浅=档位（0.3/0.5/0.8）">
-      <ResponsiveContainer width="100%" height={18}>
+    <div className="tier-lane" title="段档位轨道：颜色=方向（青涨/玫红跌），高度+深浅=档位（0.3/0.5/0.8 步进），竖缝=换挡点">
+      <ResponsiveContainer width="100%" height={26}>
         <LineChart data={data} margin={{ left: 0, right: 12, top: 2, bottom: 2 }}>
           <XAxis dataKey="time" hide />
           <YAxis yAxisId="left" domain={[0, 1]} width={48} tick={false} axisLine={false} tickLine={false} />
@@ -62,7 +67,10 @@ function SegmentTierLane({
           ) : null}
           {bands.map((b) => (
             <ReferenceArea key={`lane-${b.x1}-${b.x2}-${b.fill}`} yAxisId="left" x1={b.x1} x2={b.x2}
-              y1={0} y2={1} strokeOpacity={0} fill={laneFill(b)} />
+              y1={0} y2={(b.tier + 1) / 3} strokeOpacity={0} fill={laneFill(b)} />
+          ))}
+          {shifts.map((x, i) => (
+            <ReferenceLine key={`shift-${x}-${i}`} yAxisId="left" x={x} stroke="#090d12" strokeWidth={2} />
           ))}
         </LineChart>
       </ResponsiveContainer>

@@ -664,7 +664,8 @@ def _behavior_segment_events(session: Session, symbol: str, display_cutoff: date
     ) if rows else []
     out = []
     for r in rows:
-        cluster03 = sum(1 for ms, me in minors if ms <= r.end_dt + pad and me >= r.start_dt - pad)
+        # 计数只认窗口区间内重叠的 0.3 段（2026-07-10 拍板）；±1h 邻域的 0.3 段只在净值图画色带
+        cluster03 = sum(1 for ms, me in minors if ms <= r.end_dt and me >= r.start_dt)
         out.append({
             "start": r.start_dt, "end": r.end_dt, "sign": r.direction, "segments": 1,
             "asset_class": asset_class, "name": name,
@@ -674,6 +675,8 @@ def _behavior_segment_events(session: Session, symbol: str, display_cutoff: date
             "s_scores": json.loads(r.s_scores) if r.s_scores else {},
             "machine_class": r.classification, "human_class": r.human_class,
             "cluster03_count": cluster03,
+            # settle 真空档（2026-07-10）：段未 settle 时 S/机器类还没落库，窗口证据不全 → 冻结
+            "settled": r.classification is not None,
         })
     return out
 
@@ -775,7 +778,7 @@ def load_price_windows(
             change_pct=net_pct,
             segment_count=m["segments"],
             annotation_id=_match_annotation(m["start"], m["end"]),
-            annotatable=not (m["end"] == latest_end and m["end"] > live_edge_cutoff),
+            annotatable=(not (m["end"] == latest_end and m["end"] > live_edge_cutoff)) and m.get("settled", True),
             is_primary=True,
             tier_idx=m.get("tier_idx"),
             tier_max=m.get("tier_max"),

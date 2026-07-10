@@ -49,9 +49,9 @@ def _seg_row(session, t0, tier_idx=1, start_min=30, end_min=45):
 def test_windows_read_segments_with_evidence(session):
     t0 = datetime.utcnow().replace(second=0, microsecond=0) - timedelta(hours=5)
     _seed_flat_prices(session, t0)
-    seg = _seg_row(session, t0, tier_idx=1)                              # 0.5 档 → 进待标
-    _seg_row(session, t0, tier_idx=0, start_min=100, end_min=115)        # 0.3 档 → 不进列表
-    _seg_row(session, t0, tier_idx=0, start_min=0, end_min=10)           # 段 ±1h 内簇拥 0.3
+    seg = _seg_row(session, t0, tier_idx=1)                              # 0.5 档 [30,45] → 进待标
+    _seg_row(session, t0, tier_idx=0, start_min=40, end_min=50)          # 0.3 与窗口重叠 → 计数
+    _seg_row(session, t0, tier_idx=0, start_min=0, end_min=10)           # 窗口外（±1h 上下文）→ 不计数
     windows = annotation_service.load_price_windows(session, "BTC/USDT", hours=12)
     assert len(windows) == 1
     w = windows[0]
@@ -62,7 +62,7 @@ def test_windows_read_segments_with_evidence(session):
     assert w.tier_idx == 1 and w.tier_max == 0.5
     assert w.machine_class == "pure_resonance"
     assert w.s_scores["NQ=F"]["s"] == 0.77
-    assert w.cluster03_count == 2                 # 两个 0.3 段都在 ±1h 内
+    assert w.cluster03_count == 1                 # 只计窗口区间内重叠的 0.3 段（2026-07-10 拍板：±1h 只画色带不计数）
     assert w.human_class is None
 
 
@@ -93,3 +93,20 @@ def test_annotation_overlap_matching(session):
     windows = annotation_service.load_price_windows(session, "BTC/USDT", hours=12)
     assert len(windows) == 1
     assert windows[0].annotation_id is not None              # 重叠匹配找回旧标注
+
+
+def test_unsettled_segment_frozen(session):
+    """settle 真空档修复（2026-07-10）：段未 settle（classification 为空 → S/机器类还没落库）
+    时窗口不可标，证据不全就不该放进人工/AI 标注流。"""
+    t0 = datetime.utcnow().replace(second=0, microsecond=0) - timedelta(hours=5)
+    _seed_flat_prices(session, t0)
+    seg = _seg_row(session, t0, tier_idx=1)
+    seg.classification = None                      # 未 settle
+    seg.s_scores = None
+    session.commit()
+    w = annotation_service.load_price_windows(session, "BTC/USDT", hours=12)[0]
+    assert w.annotatable is False                  # 远离生长边缘也不行：等 settle
+    seg.classification = "pure_resonance"          # settle 落库后放开
+    session.commit()
+    w = annotation_service.load_price_windows(session, "BTC/USDT", hours=12)[0]
+    assert w.annotatable is True

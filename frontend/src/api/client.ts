@@ -139,7 +139,7 @@ export const api = {
     request<BehaviorSegmentsResponse>(`/behavior/segments${buildQuery(params)}`),
   behaviorDaily: (params: { symbol?: string; days?: number }) =>
     request<BehaviorDailyResponse>(`/behavior/daily${buildQuery(params)}`),
-  behaviorLinkage: (params: { symbol?: string; hours?: number }) =>
+  behaviorLinkage: (params: { symbol?: string; hours?: number; start_utc?: string; end_utc?: string }) =>
     request<BehaviorLinkageResponse>(`/behavior/linkage${buildQuery(params)}`),
   behaviorReview: (segmentId: number, humanClass: string | null) =>
     request<{ id: number; human_class: string | null }>(`/behavior/segments/${segmentId}`, {

@@ -14,6 +14,7 @@ import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 import { LinkagePanel, REF_COLORS } from "../components/LinkagePanel";
 import { WindowNetValueChart } from "../components/WindowNetValueChart";
 import { classMeta, toWindowClass } from "./behaviorFormat";
+import { shiftUtcIso } from "../components/windowNetValue";
 
 const hoursOptions = [
   { label: "24小时", value: "24" },
@@ -802,7 +803,7 @@ export function AnnotationsPage() {
                 <span className={`tier-chip t${activeWindow.tier_idx}`}>{["0.3档", "0.5档", "0.8档"][activeWindow.tier_idx]}</span>
               ) : null}
               {activeWindow.cluster03_count ? (
-                <span className="muted-text small" title="±1h 内簇拥的 0.3 档段（渐进式共振提示）">+{activeWindow.cluster03_count}×0.3</span>
+                <span className="muted-text small" title="窗口区间内重叠的 0.3 档段（渐进式共振提示；±1h 邻域的 0.3 段只画色带不计数）">+{activeWindow.cluster03_count}×0.3</span>
               ) : null}
               {activeWindow.human_class ? (
                 <span className={`klass ${classMeta(activeWindow.human_class).cls}`} title="人工已审">✓{classMeta(activeWindow.human_class).label}</span>
@@ -828,6 +829,10 @@ export function AnnotationsPage() {
               <LinkagePanel
                 symbol="BTC/USDT"
                 hours={48}
+                range={activeWindow.window_start.timestamp_utc && activeWindow.window_end.timestamp_utc ? {
+                  startUtc: shiftUtcIso(activeWindow.window_start.timestamp_utc, -24 * 60),
+                  endUtc: shiftUtcIso(activeWindow.window_end.timestamp_utc, 24 * 60),
+                } : null}
                 highlight={activeWindow.window_start.timestamp_bj && activeWindow.window_end.timestamp_bj ? {
                   x1: activeWindow.window_start.timestamp_bj.slice(5, 16),
                   x2: activeWindow.window_end.timestamp_bj.slice(5, 16),
@@ -893,7 +898,7 @@ export function AnnotationsPage() {
                                 return vals.length ? <span className="schip max">S {Math.max(...vals).toFixed(2)}</span> : null;
                               })()}
                               {primary.cluster03_count ? (
-                                <span className="muted-text small" title="±1h 内簇拥的 0.3 档段（渐进式共振提示）">+{primary.cluster03_count}×0.3</span>
+                                <span className="muted-text small" title="窗口区间内重叠的 0.3 档段（渐进式共振提示；±1h 邻域的 0.3 段只画色带不计数）">+{primary.cluster03_count}×0.3</span>
                               ) : null}
                               {primary.human_class ? (
                                 <span className={`klass ${classMeta(primary.human_class).cls}`} title="人工已审">✓{classMeta(primary.human_class).label}</span>

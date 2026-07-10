@@ -255,7 +255,7 @@ symbol -> CMC 板块 的多对多映射本地缓存。
 | `POST /api/annotations/auto` | `api/routes.py:` -> `annotation_service.auto_annotate`（调 DeepSeek v4-pro thinking 模式，不写库；当前 prompt 输出 Phase3a 标签：news_roles + confidence + summary，解析器仍兼容历史 market_reaction_type） | `AutoAnnotateResponse` |
 | `GET /api/behavior/segments` | `api/routes.py` -> `behavior_views.list_segments`（读 `behavior_segments` 表 + 新闻标题 join；0.3 档段 classification=count_only） | `BehaviorSegmentsResponse`（段 + s_scores/ess/coverage/max_abs_s/news/classification） |
 | `GET /api/behavior/daily` | `behavior_views.daily_series`（每日最新 PIT 行优先；当日盘中按 `behavior_classifier.aggregate_day` 同口径现算 `live=true`） | `BehaviorDailyResponse`（counts×tier×dir、三类构成（人工优先归并）+ `no_ref` 注记、跌段净幅合计） |
-| `GET /api/behavior/linkage` | `behavior_views.linkage`（compute-on-read：`resonance_score.rolling_s`，30 点拖尾窗；纯展示不触发不分类） | `BehaviorLinkageResponse`（逐参照 S 曲线 + 同步参照数 breadth，None=无对照断线） |
+| `GET /api/behavior/linkage` | `behavior_views.linkage`（compute-on-read：`resonance_score.rolling_s`，30 点拖尾窗；纯展示不触发不分类；可选 `start_utc/end_utc` 按区间算——标注页跟随窗口 ±24h（2026-07-10），end 超出数据贴最新点；缺省贴最新回看 hours） | `BehaviorLinkageResponse`（逐参照 S 曲线 + 同步参照数 breadth，None=无对照断线） |
 | `GET /api/annotations/export` | `api/routes.py:299` -> `annotation_service.export_training_jsonl`（JSONL 训练集，spec §4） | NDJSON 下载 |
 | `GET /api/sectors/leaderboard` | `api/routes.py:372` -> `sector_service.get_leaderboard`（读 `sector_returns` 表最新 snapshot） | `SectorLeaderboardResponse` |
 | `GET /api/sectors/{category}/tokens` | `api/routes.py` -> `sector_service.get_sector_tokens`（从 pivot 缓存现算成员币涨跌） | `SectorTokensResponse` |

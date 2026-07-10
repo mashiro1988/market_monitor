@@ -31,17 +31,21 @@ const TOOLTIP_STYLE = { background: "#0f172a", border: "1px solid #263142", colo
 export function LinkagePanel({
   symbol,
   hours = 48,
+  range,
   highlight,
   refreshMs = 5 * 60_000,
 }: {
   symbol: string;
   hours?: number;
+  range?: { startUtc: string; endUtc: string } | null;   // 跟随标注窗口（±24h）；不传 = 贴最新回看 hours
   highlight?: { x1: string; x2: string } | null;   // 选中窗口区间（bj MM-DD HH:mm）
   refreshMs?: number;
 }) {
   const linkage = useQuery({
-    queryKey: ["behavior-linkage", symbol, hours],
-    queryFn: () => api.behaviorLinkage({ symbol, hours }),
+    queryKey: ["behavior-linkage", symbol, hours, range?.startUtc ?? null, range?.endUtc ?? null],
+    queryFn: () => api.behaviorLinkage(range
+      ? { symbol, hours, start_utc: range.startUtc, end_utc: range.endUtc }
+      : { symbol, hours }),
     refetchInterval: refreshMs,
   });
   const link = useMemo(
@@ -59,7 +63,7 @@ export function LinkagePanel({
 
   return (
     <div className="linkage-panel">
-      <div className="mini-title">联动强度 max|S|（≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立；蓝虚线 = {hours}h 中位中枢）</div>
+      <div className="mini-title">联动强度 max|S|（≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立；蓝虚线 = {range ? "窗口±24h" : `${hours}h`} 区间中位中枢）</div>
       <ResponsiveContainer width="100%" height={120}>
         <LineChart data={link.frames} syncId={`linkage-${symbol}`} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
           <XAxis dataKey="t" hide />

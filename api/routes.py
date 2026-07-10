@@ -302,11 +302,26 @@ def behavior_daily(symbol: str = "BTC/USDT", days: int = Query(14, ge=1, le=90),
     return behavior_views.daily_series(db, symbol, days)
 
 
+def _parse_utc_naive(value: str | None):
+    """ISO 字符串 → naive UTC datetime（DB 时间语义）；带时区先折算，非法返回 None。"""
+    if not value:
+        return None
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        dt = _dt.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.astimezone(_tz.utc).replace(tzinfo=None) if dt.tzinfo else dt
+
+
 @router.get("/behavior/linkage", response_model=BehaviorLinkageResponse)
 def behavior_linkage(symbol: str = "BTC/USDT", hours: int = Query(48, ge=6, le=168),
+                     start_utc: str | None = Query(None), end_utc: str | None = Query(None),
                      db: Session = Depends(get_db)) -> BehaviorLinkageResponse:
-    """rolling S 联动曲线（逐参照）+ 同步参照数。纯展示层，compute-on-read。"""
-    return behavior_views.linkage(db, symbol, hours)
+    """rolling S 联动曲线（逐参照）+ 同步参照数。纯展示层，compute-on-read。
+    start_utc/end_utc（ISO，标注页跟随窗口 ±24h）给定时按区间计算，end 超出数据贴最新点。"""
+    return behavior_views.linkage(db, symbol, hours,
+                                  start=_parse_utc_naive(start_utc), end=_parse_utc_naive(end_utc))
 
 
 @router.patch("/behavior/segments/{segment_id}", response_model=dict)

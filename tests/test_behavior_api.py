@@ -115,3 +115,22 @@ def test_review_confirm_override_and_daily_priority(client_session):
     # 非法类别 400 / 不存在 404
     assert client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": "count_only"}).status_code == 400
     assert client.patch("/api/behavior/segments/999999", json={"human_class": "sentiment_tech"}).status_code == 404
+
+
+def test_linkage_range_follows_window(client_session):
+    """联动曲线跟随标注窗口（2026-07-10 拍板：窗口±24h；超出最新数据则贴到最新点）。"""
+    client, session = client_session
+    _seed(session)
+    t0 = datetime.utcnow() - timedelta(hours=6)
+    t0 = t0.replace(minute=t0.minute - t0.minute % 5, second=0, microsecond=0)
+    start = (t0 + timedelta(minutes=30)).isoformat()
+    end = (t0 + timedelta(minutes=90)).isoformat()
+    body = client.get(f"/api/behavior/linkage?start_utc={start}&end_utc={end}").json()
+    nq = next(s_ for s_ in body["series"] if s_["symbol"] == "NQ=F")
+    assert 0 < len(nq["points"]) <= 13            # 60min/5min + 1，区间被尊重
+    # end 超出最新数据 → 网格贴到最新点收口，不吐一堆空尾巴
+    late_end = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+    body2 = client.get(f"/api/behavior/linkage?start_utc={start}&end_utc={late_end}").json()
+    nq2 = next(s_ for s_ in body2["series"] if s_["symbol"] == "NQ=F")
+    seeded_last = t0 + timedelta(minutes=5 * 44)   # 种子数据最后一根 bar
+    assert len(nq2["points"]) <= ((seeded_last - (t0 + timedelta(minutes=30))).total_seconds() / 300) + 2

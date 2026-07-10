@@ -106,7 +106,10 @@ def daily_series(session: Session, symbol: str, days: int = 14) -> BehaviorDaily
     return BehaviorDailyResponse(symbol=symbol, days=out)
 
 
-def linkage(session: Session, symbol: str, hours: int = 48) -> BehaviorLinkageResponse:
+def linkage(session: Session, symbol: str, hours: int = 48,
+            start: datetime | None = None, end: datetime | None = None) -> BehaviorLinkageResponse:
+    """rolling S 曲线。默认贴最新数据回看 hours；显式 start/end（标注页跟随窗口 ±24h，
+    2026-07-10 拍板）时用请求区间，end 超出最新数据则贴到最新点收口。"""
     tiers = config.BEHAVIOR_TIERS.get(symbol)
     points = int(config.BEHAVIOR_ROLLING_POINTS)
     if not tiers:
@@ -114,14 +117,24 @@ def linkage(session: Session, symbol: str, hours: int = 48) -> BehaviorLinkageRe
                                        series=[], breadth=[])
     now = datetime.utcnow()
     pad = timedelta(minutes=5 * (points - 1) + 15)
-    btc_points = _points(session, symbol, now - timedelta(hours=hours) - pad, now)
+    req_end = end or now
+    req_start = start or (req_end - timedelta(hours=hours))
+    btc_points = _points(session, symbol, req_start - pad, req_end)
     if not btc_points:
         return BehaviorLinkageResponse(symbol=symbol, hours=hours, rolling_points=points,
                                        series=[], breadth=[])
     btc_chg = chg_map(btc_points)
     t_btc = float(tiers[0])
-    end = max(ts for ts, _ in btc_points)
-    start = end - timedelta(hours=hours)
+    data_max = max(ts for ts, _ in btc_points)
+    if start is None and end is None:
+        end = data_max
+        start = end - timedelta(hours=hours)
+    else:
+        end = min(req_end, data_max)
+        start = req_start
+    if start >= end:
+        return BehaviorLinkageResponse(symbol=symbol, hours=hours, rolling_points=points,
+                                       series=[], breadth=[])
     series: list[LinkageSeries] = []
     aligned: list[list[float | None]] = []
     grid: list[datetime] = []
