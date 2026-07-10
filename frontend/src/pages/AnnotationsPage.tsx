@@ -58,13 +58,20 @@ function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
 function sBadge(entry: { s: number; ess: number } | undefined): { text: string; cls: string; title: string } {
   if (!entry) return { text: "S —", cls: "s-badge none", title: "无对照（休市/数据缺）" };
   const a = Math.abs(entry.s);
-  const thin = entry.ess < 5;
   const cls = a >= 0.5 ? "s-badge strong" : a >= 0.3 ? "s-badge mid" : "s-badge weak";
+  const sTxt = a < 0.005 ? "0.00" : `${entry.s > 0 ? "+" : ""}${entry.s.toFixed(2)}`;
   return {
-    text: `S ${entry.s > 0 ? "+" : ""}${entry.s.toFixed(2)}${thin ? " ⚠" : ""}`,
+    text: `S ${sTxt}`,
     cls,
-    title: `段窗内 rolling |S| 峰值读数${thin ? "（ESS<5 证据薄）" : ""}·≥0.5 共振 / 0.3–0.5 弱 / <0.3 独立`,
+    title: "段窗内 rolling |S| 峰值读数 · ≥0.5 共振 / 0.3–0.5 弱 / <0.3 独立",
   };
+}
+
+// ESS = 证据厚度（有效样本量）：<5 = 峰值读数由极少几根 K 线撑起，标"薄"降权肉眼参考
+function essCell(entry: { s: number; ess: number } | undefined): { text: string; cls: string } {
+  if (!entry) return { text: "—", cls: "ess-cell none" };
+  const thin = entry.ess < 5;
+  return { text: `ESS ${entry.ess.toFixed(1)}${thin ? " 薄⚠" : ""}`, cls: thin ? "ess-cell thin" : "ess-cell" };
 }
 
 function WindowEvidence({ win }: { win: PriceWindow }) {
@@ -80,7 +87,7 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
     <div className="subsection">
       <div className="subsection-head">
         <span className="subsection-title">窗口证据 · 对照 × 共振分</span>
-        <span className="muted-text small">S = 段窗内 rolling 曲线 |S| 峰值（与下方曲线同口径）· ⚠ = 证据薄</span>
+        <span className="muted-text small">S = 段窗内 rolling 曲线 |S| 峰值（与下方曲线同口径）· ESS = 证据厚度（&lt;5 薄）</span>
       </div>
       <div className="evidence-grid">
         {ordered.map((ref) => {
@@ -89,6 +96,7 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
             ? `${fmtRefPrice(ref.price_start, ref.unit)} → ${fmtRefPrice(ref.price_end, ref.unit)}`
             : "—";
           const badge = ref.is_self ? null : sBadge(scores[ref.symbol]);
+          const ess = ref.is_self ? null : essCell(scores[ref.symbol]);
           const moveCls = ref.pct == null ? "ref-neutral" : ref.pct >= 0 ? "up-text" : "down-text";
           return (
             <div key={ref.symbol} className={`evidence-row${ref.is_self ? " self" : ""}`}>
@@ -99,6 +107,7 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
               <span className="evidence-span">{span}</span>
               <span className={`evidence-move ${moveCls}`}>{move}</span>
               {badge ? <span className={badge.cls} title={badge.title}>{badge.text}</span> : <span className="s-badge selfmark">基准</span>}
+              {ess ? <span className={ess.cls} title="有效样本量：峰值读数背后有几根有效 K 线">{ess.text}</span> : <span />}
               {!ref.is_self && strongest === ref.symbol ? <span className="strongest-tag">最强参照</span> : <span />}
             </div>
           );
@@ -798,7 +807,7 @@ export function AnnotationsPage() {
               {activeWindow.human_class ? (
                 <span className={`klass ${classMeta(activeWindow.human_class).cls}`} title="人工已审">✓{classMeta(activeWindow.human_class).label}</span>
               ) : toWindowClass(activeWindow.machine_class) ? (
-                <span className={`klass ${classMeta(toWindowClass(activeWindow.machine_class)!).cls}`} title="机器预分类（未审）">{classMeta(toWindowClass(activeWindow.machine_class)!).label}</span>
+                <span className={`klass ghost ${classMeta(toWindowClass(activeWindow.machine_class)!).cls}`} title="机器预判（本地分类 job，非 AI 标注、不花 token；仅供推理起点，可推翻）">预判·{classMeta(toWindowClass(activeWindow.machine_class)!).label}</span>
               ) : null}
             </div>
           </div>
@@ -889,7 +898,7 @@ export function AnnotationsPage() {
                               {primary.human_class ? (
                                 <span className={`klass ${classMeta(primary.human_class).cls}`} title="人工已审">✓{classMeta(primary.human_class).label}</span>
                               ) : toWindowClass(primary.machine_class) ? (
-                                <span className={`klass ${classMeta(toWindowClass(primary.machine_class)!).cls}`} title="机器预分类（未审）">{classMeta(toWindowClass(primary.machine_class)!).label}</span>
+                                <span className={`klass ghost ${classMeta(toWindowClass(primary.machine_class)!).cls}`} title="机器预判（本地分类 job，非 AI 标注、不花 token；仅供推理起点，可推翻）">预判·{classMeta(toWindowClass(primary.machine_class)!).label}</span>
                               ) : null}
                               {locked ? <span className="window-item-lock" title="尚未 settle">⏳</span> : null}
                             </span>

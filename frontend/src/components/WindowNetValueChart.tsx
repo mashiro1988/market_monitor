@@ -120,7 +120,13 @@ export function WindowNetValueChart({
     [candidateNews, newsRoles, buckets]
   );
 
-  const segmentBands = useMemo(() => deriveSegmentBands(segments, buckets), [segments, buckets]);
+  // 标注品种净值序列驱动段内档位演进切分（0.3→0.5→0.8 触及时点逐档加深）
+  const segmentBands = useMemo(() => {
+    const closes = highlightKey
+      ? data.map((row) => (typeof row[highlightKey] === "number" ? (row[highlightKey] as number) : null))
+      : undefined;
+    return deriveSegmentBands(segments, buckets, closes);
+  }, [segments, buckets, data, highlightKey]);
 
   // 美债/美元等低波动品种放右副轴（自适应各自量程，否则被 BTC/股指压成平线）。
   const secondaryKeys = useMemo(
@@ -145,7 +151,7 @@ export function WindowNetValueChart({
       <div className="subsection-head">
         <span className="subsection-title">窗口净值走势</span>
         <div className="window-netvalue-head-controls">
-          <span className="muted-text small">净值归一 1.000 · 美债/美元右副轴(虚线) · 竖线=驱动新闻 · 底部轨道=段档位</span>
+          <span className="muted-text small">净值归一 1.000 · 美债/美元右副轴(虚线) · 竖线=驱动新闻 · 底部轨道=段内档位演进(0.3→0.5→0.8 加深)</span>
           <MultiSelectControl label="对照品种" values={basket} onChange={setBasket} options={symbolOptions} />
         </div>
       </div>

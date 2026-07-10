@@ -157,4 +157,34 @@ describe("deriveSegmentBands", () => {
     expect(bands[0].stroke).toBeUndefined();          // 0.3 档不描边，避免噪音
     expect(laneFill(bands[0])).toContain("0.50");     // 轨道实色：0.3 档最浅
   });
+  it("splits a 0.8-tier segment into escalation runs by cumulative move", () => {
+    // 段内档位演进（2026-07-10 用户拍板）：0.8 段里 0.3→0.5→0.8 各阶段分强度上色。
+    // 净值序列：起点后累计 |涨幅| 0.10% → 0.55% → 0.85% → 0.92%，
+    // 触及 0.5 档于 b2、0.8 档于 b3（触及后不回落 = 演进锁存）。
+    const bks = [
+      { time: "t0", utcMinute: "2026-07-08T13:20" },
+      { time: "t1", utcMinute: "2026-07-08T13:25" },
+      { time: "t2", utcMinute: "2026-07-08T13:30" },
+      { time: "t3", utcMinute: "2026-07-08T13:35" },
+      { time: "t4", utcMinute: "2026-07-08T13:40" },
+    ];
+    const closes = [1.0, 1.001, 1.0055, 1.0085, 1.0092];
+    const bands = deriveSegmentBands([
+      { start: { timestamp_utc: "2026-07-08T13:20:00" }, end: { timestamp_utc: "2026-07-08T13:40:00" }, direction: 1, tier_idx: 2 },
+    ], bks, closes);
+    expect(bands.map((b) => [b.x1, b.x2, b.tier])).toEqual([
+      ["t0", "t2", 0],   // 起段~触及0.5前：0.3 档色
+      ["t2", "t3", 1],   // 触及 0.5 档
+      ["t3", "t4", 2],   // 触及 0.8 档
+    ]);
+    expect(laneFill(bands[2])).toContain("0.94");
+    // 相邻 run 共享边界桶（后画的深色盖住重叠处），保证无缝
+  });
+  it("keeps uniform band when closes are unavailable", () => {
+    const bands = deriveSegmentBands([
+      { start: { timestamp_utc: "2026-07-08T13:24:00" }, end: { timestamp_utc: "2026-07-08T13:32:00" }, direction: 1, tier_idx: 2 },
+    ], buckets, [null, null, null, null]);
+    expect(bands).toHaveLength(1);
+    expect(bands[0].tier).toBe(2);
+  });
 });

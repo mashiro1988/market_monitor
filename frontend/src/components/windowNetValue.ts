@@ -125,9 +125,26 @@ export type SegmentBand = {
   dir: 1 | -1;
 };
 
+// BTC 档位阶梯（%）。色带只对 BTC 段渲染（segments 只在 BTC 窗口下发），
+// 后端阶梯在 config.BEHAVIOR_TIERS；这里只用于段内演进的视觉切分，改档需两处同步。
+const BTC_TIERS = [0.3, 0.5, 0.8];
+
+function bandOf(rgb: string, tier: number, x1: string, x2: string, dir: 1 | -1): SegmentBand {
+  // 图内色带只做弱背景（0.12/0.26/0.40 + 0.5档以上描边）；高对比读数交给下方档位轨道
+  return {
+    x1,
+    x2,
+    fill: `rgba(${rgb},${(0.12 + 0.14 * tier).toFixed(2)})`,
+    stroke: tier >= 1 ? `rgba(${rgb},0.45)` : undefined,
+    tier,
+    dir,
+  };
+}
+
 export function deriveSegmentBands(
   segments: SegmentBandInput[],
   buckets: { time: string; utcMinute: string }[],
+  closes?: (number | null)[],   // 标注品种在各桶的净值/价格（同刻度即可），驱动段内档位演进切分
 ): SegmentBand[] {
   if (!buckets.length) return [];
   const out: SegmentBand[] = [];
@@ -135,21 +152,47 @@ export function deriveSegmentBands(
     const s = seg.start.timestamp_utc?.slice(0, 16);
     const e = seg.end.timestamp_utc?.slice(0, 16);
     if (!s || !e) continue;
-    const first = buckets.find((b) => b.utcMinute >= s);
-    const last = [...buckets].reverse().find((b) => b.utcMinute <= e);
-    if (!first || !last || first.utcMinute > last.utcMinute) continue;   // 段在图域外
-    // 图内色带只做弱背景（0.12/0.26/0.40 + 0.5档以上描边）；高对比读数交给下方档位轨道
-    const tier = Math.min(seg.tier_idx, 2);
-    const opacity = 0.12 + 0.14 * tier;
-    const rgb = seg.direction > 0 ? "94,234,212" : "251,113,133";        // 站内青涨/玫红跌
-    out.push({
-      x1: first.time,
-      x2: last.time,
-      fill: `rgba(${rgb},${opacity.toFixed(2)})`,
-      stroke: tier >= 1 ? `rgba(${rgb},0.45)` : undefined,
-      tier,
-      dir: seg.direction > 0 ? 1 : -1,
-    });
+    const firstIdx = buckets.findIndex((b) => b.utcMinute >= s);
+    let lastIdx = -1;
+    for (let i = buckets.length - 1; i >= 0; i--) {
+      if (buckets[i].utcMinute <= e) { lastIdx = i; break; }
+    }
+    if (firstIdx < 0 || lastIdx < 0 || firstIdx > lastIdx) continue;     // 段在图域外
+    const tierCap = Math.min(seg.tier_idx, 2);
+    const dir: 1 | -1 = seg.direction > 0 ? 1 : -1;
+    const rgb = dir > 0 ? "94,234,212" : "251,113,133";                  // 站内青涨/玫红跌
+
+    // 段内档位演进（2026-07-10 用户拍板）：从段起点累计 |涨跌幅|，触及 0.5/0.8 档的
+    // 时点把段切成 0.3→0.5→0.8 的 run，逐档加深（锁存：触及后不因回落降档）。
+    // 相邻 run 共享边界桶且按时间序后画深色，色带无缝衔接。
+    let base: number | null = null;
+    for (let i = firstIdx; i <= lastIdx && closes; i++) {
+      const v = closes[i];
+      if (v != null && v !== 0) { base = v; break; }
+    }
+    if (base == null || tierCap === 0) {
+      out.push(bandOf(rgb, tierCap, buckets[firstIdx].time, buckets[lastIdx].time, dir));
+      continue;
+    }
+    const reached: number[] = [];
+    let cumMax = 0;
+    for (let i = firstIdx; i <= lastIdx; i++) {
+      const v = closes![i];
+      if (v != null) cumMax = Math.max(cumMax, Math.abs(v / base - 1) * 100);
+      let r = 0;
+      for (let k = BTC_TIERS.length - 1; k >= 1; k--) {
+        if (cumMax >= BTC_TIERS[k]) { r = k; break; }
+      }
+      reached.push(Math.min(r, tierCap));
+    }
+    let runStart = 0;
+    for (let i = 1; i <= reached.length; i++) {
+      if (i === reached.length || reached[i] !== reached[runStart]) {
+        const endIdx = Math.min(i, reached.length - 1);                   // 延伸到下一 run 的起点桶
+        out.push(bandOf(rgb, reached[runStart], buckets[firstIdx + runStart].time, buckets[firstIdx + endIdx].time, dir));
+        runStart = i;
+      }
+    }
   }
   return out;
 }
