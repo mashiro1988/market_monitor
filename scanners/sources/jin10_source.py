@@ -181,7 +181,9 @@ class Jin10Source(BaseSource):
         )
         if r.status_code != 200:
             raise RuntimeError(f"flash 页 HTTP {r.status_code}")
-        return self._parse_flash_html(r.text)
+        # 页面是 UTF-8，但响应头不带 charset 时 requests 的 .text 会按 Latin-1 解码出 mojibake
+        # （2026-07-10 事故二：兜底首日中文全乱码入库），必须从原始字节显式解码。
+        return self._parse_flash_html(r.content.decode("utf-8", errors="replace"))
 
     @classmethod
     def _parse_flash_html(cls, page_html: str) -> list[NewsRecord]:

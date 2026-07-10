@@ -45,7 +45,10 @@ FLASH_HTML = """
 class _Resp:
     def __init__(self, status_code=200, text="", payload=None):
         self.status_code = status_code
-        self.text = text
+        # 模拟 requests 真实行为：flash 页响应头不带 charset 时 .text 按 Latin-1 解码
+        # （2026-07-10 事故二：兜底上线后中文全变 mojibake 入库），.content 才是原始字节。
+        self.content = text.encode("utf-8")
+        self.text = self.content.decode("latin-1")
         self._payload = payload
 
     def json(self):
@@ -105,6 +108,9 @@ def test_fetch_falls_back_to_flash_page_on_403(monkeypatch):
     records = src.fetch()
     assert [r.source_id for r in records] == ["20260710132213682800", "20260710132134276800"]
     assert any("flash.jin10.com" in u for u in calls)
+    # 解码必须走 content+UTF-8，不能信 .text 的默认 Latin-1（否则中文变 å¾·å½ 式乱码）
+    assert records[0].title.startswith("野村")
+    assert "维持长飞光纤" in records[0].title
 
 
 def test_fetch_api_ok_does_not_touch_flash_page(monkeypatch):
