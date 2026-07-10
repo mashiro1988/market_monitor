@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "vitest";
 import type { MarketHistoryResponse, NewsItem } from "../api/types";
-import { buildNetValueChart, deriveSegmentBands, computeNetValueDomain, deriveMarkers, shiftUtcIso } from "./windowNetValue";
+import { buildNetValueChart, deriveSegmentBands, computeNetValueDomain, deriveMarkers, laneFill, shiftUtcIso } from "./windowNetValue";
 
 function pt(symbol: string, name: string, price: number, utc: string, bj: string) {
   return { symbol, name, price, normalized_pct: 0, source: "test", timestamp_utc: utc, timestamp_bj: bj };
@@ -140,8 +140,11 @@ describe("deriveSegmentBands", () => {
     expect(bands[0].x1).toBe("07-08 21:25");
     expect(bands[0].x2).toBe("07-08 21:30");
     expect(bands[0].fill).toContain("94,234,212");   // 涨 = 站内青
-    expect(bands[0].fill).toContain("0.34");          // 0.8 档不透明度（深底可读版）
+    expect(bands[0].fill).toContain("0.40");          // 0.8 档不透明度（图内弱背景版）
     expect(bands[0].stroke).toContain("94,234,212"); // 0.5+ 档带同色描边，档位边界可读
+    expect(bands[0].tier).toBe(2);
+    expect(bands[0].dir).toBe(1);
+    expect(laneFill(bands[0])).toContain("0.94");     // 轨道实色：0.8 档最深
   });
   it("clips segment spilling out of the domain", () => {
     const bands = deriveSegmentBands([
@@ -150,7 +153,8 @@ describe("deriveSegmentBands", () => {
     expect(bands[0].x1).toBe("07-08 21:20");
     expect(bands[0].x2).toBe("07-08 21:25");
     expect(bands[0].fill).toContain("251,113,133");  // 跌 = 站内玫红
-    expect(bands[0].fill).toContain("0.10");          // 0.3 档：只当簇拥背景
+    expect(bands[0].fill).toContain("0.12");          // 0.3 档：只当簇拥背景
     expect(bands[0].stroke).toBeUndefined();          // 0.3 档不描边，避免噪音
+    expect(laneFill(bands[0])).toContain("0.50");     // 轨道实色：0.3 档最浅
   });
 });

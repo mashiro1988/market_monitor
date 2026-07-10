@@ -18,7 +18,7 @@ import { buildLinkageFrames, medianOf } from "../pages/behaviorFormat";
 
 const INK = "#8ea0b6";
 const TEXT = "#dbe7f3";
-const REF_COLORS: Record<string, string> = {
+export const REF_COLORS: Record<string, string> = {
   "NQ=F": "#5E86E0",
   "^N225": "#4F9CCB",
   "GC=F": "#C89B3C",

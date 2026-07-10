@@ -11,7 +11,7 @@ const AUTO_BATCH_CHUNK = 3;
 import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
-import { LinkagePanel } from "../components/LinkagePanel";
+import { LinkagePanel, REF_COLORS } from "../components/LinkagePanel";
 import { WindowNetValueChart } from "../components/WindowNetValueChart";
 import { classMeta, toWindowClass } from "./behaviorFormat";
 
@@ -50,6 +50,62 @@ function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
   const text = `${ref.label}${ref.is_self ? "(本身)" : ""} ${span}(${fmtRefMove(ref.pct, ref.unit)})`;
   if (ref.pct == null) return { text, cls: "ref-neutral" };
   return { text, cls: ref.pct >= 0 ? "up-text" : "down-text" };
+}
+
+// 窗口证据面板（2026-07-10 特别设计）：对照品种 × 共振分 S 合并成一张证据表——
+// 每行 = 参照的绝对起终点 + 窗口涨跌 + 该参照的 rolling |S| 峰值读数（ESS<5 标证据薄），
+// 最强参照高亮。这是 DeepSeek 判 driver 用的同一套证据，人工审核所见即所判。
+function sBadge(entry: { s: number; ess: number } | undefined): { text: string; cls: string; title: string } {
+  if (!entry) return { text: "S —", cls: "s-badge none", title: "无对照（休市/数据缺）" };
+  const a = Math.abs(entry.s);
+  const thin = entry.ess < 5;
+  const cls = a >= 0.5 ? "s-badge strong" : a >= 0.3 ? "s-badge mid" : "s-badge weak";
+  return {
+    text: `S ${entry.s > 0 ? "+" : ""}${entry.s.toFixed(2)}${thin ? " ⚠" : ""}`,
+    cls,
+    title: `段窗内 rolling |S| 峰值读数${thin ? "（ESS<5 证据薄）" : ""}·≥0.5 共振 / 0.3–0.5 弱 / <0.3 独立`,
+  };
+}
+
+function WindowEvidence({ win }: { win: PriceWindow }) {
+  const refs = win.references ?? [];
+  if (!refs.length) return null;
+  const scores = (win.s_scores ?? {}) as Record<string, { s: number; ess: number }>;
+  // 最强参照签只在 |S| ≥ 0.3（至少弱共振）时挂——<0.3 属独立行情，"最强"没有业务含义
+  const strongestEntry = Object.entries(scores).reduce<[string, { s: number }] | null>(
+    (best, cur) => (best === null || Math.abs(cur[1].s) > Math.abs(best[1].s) ? cur : best), null);
+  const strongest = strongestEntry && Math.abs(strongestEntry[1].s) >= 0.3 ? strongestEntry[0] : null;
+  const ordered = [...refs].sort((a, b) => Number(b.is_self) - Number(a.is_self));   // 本身置顶作基准
+  return (
+    <div className="subsection">
+      <div className="subsection-head">
+        <span className="subsection-title">窗口证据 · 对照 × 共振分</span>
+        <span className="muted-text small">S = 段窗内 rolling 曲线 |S| 峰值（与下方曲线同口径）· ⚠ = 证据薄</span>
+      </div>
+      <div className="evidence-grid">
+        {ordered.map((ref) => {
+          const move = fmtRefMove(ref.pct, ref.unit);
+          const span = ref.price_start != null && ref.price_end != null
+            ? `${fmtRefPrice(ref.price_start, ref.unit)} → ${fmtRefPrice(ref.price_end, ref.unit)}`
+            : "—";
+          const badge = ref.is_self ? null : sBadge(scores[ref.symbol]);
+          const moveCls = ref.pct == null ? "ref-neutral" : ref.pct >= 0 ? "up-text" : "down-text";
+          return (
+            <div key={ref.symbol} className={`evidence-row${ref.is_self ? " self" : ""}`}>
+              <span className="evidence-label">
+                <i className="ref-dot" style={{ background: REF_COLORS[ref.symbol] ?? "#8ea0b6" }} />
+                {ref.label}{ref.is_self ? "（本身）" : ""}
+              </span>
+              <span className="evidence-span">{span}</span>
+              <span className={`evidence-move ${moveCls}`}>{move}</span>
+              {badge ? <span className={badge.cls} title={badge.title}>{badge.text}</span> : <span className="s-badge selfmark">基准</span>}
+              {!ref.is_self && strongest === ref.symbol ? <span className="strongest-tag">最强参照</span> : <span />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（角色/反应类型/notes）
@@ -720,7 +776,60 @@ export function AnnotationsPage() {
         {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
       </section>
 
-      {/* Section 2: 未标注 —— 左右对称（待标注列表 + 候选新闻），下方表单 */}
+      {/* Section 2: 当前窗口 · 证据台（2026-07-10 特别设计）——选中窗口的全部证据集中在此：
+          净值图 + 段档位轨道 → 对照×S 证据表 → rolling S 曲线组。列表行只留一行摘要。 */}
+      {activeWindow ? (
+        <section className="panel annotation-block workbench-block">
+          <div className="panel-head">
+            <h2>当前窗口 · 证据台</h2>
+            <div className="workbench-head-meta">
+              <span className="workbench-time">
+                {activeWindow.window_start.timestamp_bj?.slice(5, 16)} → {activeWindow.window_end.timestamp_bj?.slice(11, 16)}
+              </span>
+              <span className={`workbench-pct ${activeWindow.change_pct >= 0 ? "up-text" : "down-text"}`}>
+                {activeWindow.change_pct > 0 ? "+" : ""}{activeWindow.change_pct.toFixed(2)}%
+              </span>
+              {activeWindow.tier_idx != null ? (
+                <span className={`tier-chip t${activeWindow.tier_idx}`}>{["0.3档", "0.5档", "0.8档"][activeWindow.tier_idx]}</span>
+              ) : null}
+              {activeWindow.cluster03_count ? (
+                <span className="muted-text small" title="±1h 内簇拥的 0.3 档段（渐进式共振提示）">+{activeWindow.cluster03_count}×0.3</span>
+              ) : null}
+              {activeWindow.human_class ? (
+                <span className={`klass ${classMeta(activeWindow.human_class).cls}`} title="人工已审">✓{classMeta(activeWindow.human_class).label}</span>
+              ) : toWindowClass(activeWindow.machine_class) ? (
+                <span className={`klass ${classMeta(toWindowClass(activeWindow.machine_class)!).cls}`} title="机器预分类（未审）">{classMeta(toWindowClass(activeWindow.machine_class)!).label}</span>
+              ) : null}
+            </div>
+          </div>
+          <WindowNetValueChart
+            activeWindow={activeWindow}
+            preMinutes={activePre}
+            postMinutes={60}
+            candidateNews={contextNews.data?.items ?? []}
+            newsRoles={newsRoles}
+            segments={activeWindow.symbol === "BTC/USDT" ? (behaviorSegs.data?.segments ?? []) : []}
+          />
+          <WindowEvidence win={activeWindow} />
+          {activeWindow.symbol === "BTC/USDT" ? (
+            <div className="subsection">
+              <div className="subsection-head">
+                <span className="subsection-title">联动证据 · rolling S（青色高亮 = 当前窗口）</span>
+              </div>
+              <LinkagePanel
+                symbol="BTC/USDT"
+                hours={48}
+                highlight={activeWindow.window_start.timestamp_bj && activeWindow.window_end.timestamp_bj ? {
+                  x1: activeWindow.window_start.timestamp_bj.slice(5, 16),
+                  x2: activeWindow.window_end.timestamp_bj.slice(5, 16),
+                } : null}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* Section 3: 未标注 —— 左右对称（待标注列表 + 候选新闻），下方表单 */}
       <section className="panel annotation-block">
         <div className="panel-head">
           <h2>未标注 ({groups.length})</h2>
@@ -733,33 +842,6 @@ export function AnnotationsPage() {
          windowsQuery.error ? <ErrorState error={windowsQuery.error} /> :
          !groups.length ? <EmptyState title="该回溯期内没有未标注的价格异动事件" /> : (
           <>
-            {activeWindow ? (
-              <>
-                <WindowNetValueChart
-                  activeWindow={activeWindow}
-                  preMinutes={activePre}
-                  postMinutes={60}
-                  candidateNews={contextNews.data?.items ?? []}
-                  newsRoles={newsRoles}
-                  segments={activeWindow.symbol === "BTC/USDT" ? (behaviorSegs.data?.segments ?? []) : []}
-                />
-                {activeWindow.symbol === "BTC/USDT" ? (
-                  <section className="panel annotation-block">
-                    <div className="panel-head">
-                      <h2>联动证据 · rolling S（青色高亮 = 当前窗口）</h2>
-                    </div>
-                    <LinkagePanel
-                      symbol="BTC/USDT"
-                      hours={48}
-                      highlight={activeWindow.window_start.timestamp_bj && activeWindow.window_end.timestamp_bj ? {
-                        x1: activeWindow.window_start.timestamp_bj.slice(5, 16),
-                        x2: activeWindow.window_end.timestamp_bj.slice(5, 16),
-                      } : null}
-                    />
-                  </section>
-                ) : null}
-              </>
-            ) : null}
             <div className="annotation-pair-grid">
               <section className="annotation-pair-panel">
                 <header className="annotation-pair-panel-head">
@@ -790,33 +872,27 @@ export function AnnotationsPage() {
                             <span className="window-item-time">
                               {primary.window_start.timestamp_bj?.slice(5, 16)} → {primary.window_end.timestamp_bj?.slice(11, 16)}
                             </span>
-                            <span className="window-item-pct">
-                              {sign}{primary.change_pct.toFixed(2)}%
-                            </span>
-                            {primary.tier_idx != null ? (
-                              <span className={`tier-chip t${primary.tier_idx}`}>{["0.3档", "0.5档", "0.8档"][primary.tier_idx]}</span>
-                            ) : null}
-                            {(() => {
-                              const vals = Object.values(primary.s_scores ?? {}).map((v) => Math.abs((v as { s: number }).s));
-                              return vals.length ? <span className="schip max">S {Math.max(...vals).toFixed(2)}</span> : null;
-                            })()}
-                            {primary.cluster03_count ? (
-                              <span className="muted-text small" title="±1h 内簇拥的 0.3 档段（渐进式共振提示）">+{primary.cluster03_count}×0.3</span>
-                            ) : null}
-                            {primary.human_class ? (
-                              <span className={`klass ${classMeta(primary.human_class).cls}`} title="人工已审">✓{classMeta(primary.human_class).label}</span>
-                            ) : toWindowClass(primary.machine_class) ? (
-                              <span className={`klass ${classMeta(toWindowClass(primary.machine_class)!).cls}`} title="机器预分类（未审）">{classMeta(toWindowClass(primary.machine_class)!).label}</span>
-                            ) : null}
-                            {locked ? <span className="window-item-lock" title="尚未 settle">⏳</span> : null}
-                            {primary.references?.length ? (
-                              <span className="window-item-refs" title="同期宏观对标（纳指/原油/黄金）">
-                                {primary.references.map((ref) => {
-                                  const f = fmtRef(ref);
-                                  return <span key={ref.symbol} className={f.cls}>{f.text}</span>;
-                                })}
+                            <span className="window-item-meta">
+                              <span className="window-item-pct">
+                                {sign}{primary.change_pct.toFixed(2)}%
                               </span>
-                            ) : null}
+                              {primary.tier_idx != null ? (
+                                <span className={`tier-chip t${primary.tier_idx}`}>{["0.3", "0.5", "0.8"][primary.tier_idx]}</span>
+                              ) : null}
+                              {(() => {
+                                const vals = Object.values(primary.s_scores ?? {}).map((v) => Math.abs((v as { s: number }).s));
+                                return vals.length ? <span className="schip max">S {Math.max(...vals).toFixed(2)}</span> : null;
+                              })()}
+                              {primary.cluster03_count ? (
+                                <span className="muted-text small" title="±1h 内簇拥的 0.3 档段（渐进式共振提示）">+{primary.cluster03_count}×0.3</span>
+                              ) : null}
+                              {primary.human_class ? (
+                                <span className={`klass ${classMeta(primary.human_class).cls}`} title="人工已审">✓{classMeta(primary.human_class).label}</span>
+                              ) : toWindowClass(primary.machine_class) ? (
+                                <span className={`klass ${classMeta(toWindowClass(primary.machine_class)!).cls}`} title="机器预分类（未审）">{classMeta(toWindowClass(primary.machine_class)!).label}</span>
+                              ) : null}
+                              {locked ? <span className="window-item-lock" title="尚未 settle">⏳</span> : null}
+                            </span>
                           </button>
                         </li>
                       );

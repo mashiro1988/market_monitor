@@ -809,16 +809,13 @@ code {
   color: var(--down);
 }
 
-/* 待标注事件行第二行：宏观同期对标（占满整行，缩进对齐时间） */
-.window-item-refs {
-  grid-column: 1 / -1;
+/* 待标注事件行右侧元数据（单行：涨跌 + 档位 + S + 簇拥 + 类别 + 锁） */
+.window-item-meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 3px;
-  padding-left: 22px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex: none;
 }
 
 /* 已标注表「宏观对标」单元格：多项内联 */
@@ -1374,3 +1371,53 @@ code {
 .link-btn { font-size: 11px; background: none; border: none; color: var(--muted); text-decoration: underline; cursor: pointer; }
 .today-comp-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 4px 4px 8px; }
 .today-comp-row .num-big { font-size: 20px; margin-left: 4px; }
+
+/* ── 当前窗口 · 证据台（2026-07-10 特别设计：证据集中一节，列表只留摘要） ── */
+.workbench-block { border-color: rgba(94, 234, 212, 0.22); }
+.workbench-head-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.workbench-time { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.workbench-pct { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+.subsection { margin-top: 14px; }
+.subsection + .subsection, .subsection ~ .subsection { border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.subsection-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+.subsection-title { font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: 0.02em; }
+
+/* 段档位轨道：与主图 .chart-shell 同款左右内边距+边框（SVG 宽度逐像素对齐），
+   上收 6px 盖住主图卡下圆角 → 视觉上与主图连成一张卡、轨道贴在 x 轴正下方 */
+.tier-lane {
+  padding: 2px 10px;
+  border: 1px solid var(--line-soft);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  background: var(--panel);
+  margin-top: -6px;
+}
+
+/* 窗口证据表：对照品种 × 共振分 */
+.evidence-grid { display: flex; flex-direction: column; gap: 2px; }
+.evidence-row {
+  display: grid;
+  grid-template-columns: 132px minmax(140px, 1fr) 88px 108px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.evidence-row:nth-child(even) { background: rgba(148, 163, 184, 0.05); }
+.evidence-row.self { background: rgba(94, 234, 212, 0.06); }
+.evidence-label { display: flex; align-items: center; gap: 7px; color: var(--text); }
+.ref-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.evidence-span { color: var(--muted); }
+.evidence-move { text-align: right; font-weight: 600; }
+.evidence-move.ref-neutral { color: var(--muted); }
+
+.s-badge { justify-self: start; font-size: 11.5px; font-weight: 700; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+.s-badge.strong { background: rgba(94, 234, 212, 0.18); color: #5eead4; border: 1px solid rgba(94, 234, 212, 0.45); }
+.s-badge.mid { background: rgba(251, 191, 36, 0.14); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); }
+.s-badge.weak { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid transparent; }
+.s-badge.none { color: var(--muted); opacity: 0.7; }
+.s-badge.selfmark { color: var(--muted); background: transparent; border: 1px dashed var(--line-soft); }
+.strongest-tag { font-size: 11px; color: #5eead4; border: 1px solid rgba(94, 234, 212, 0.4); border-radius: 99px; padding: 0 8px; white-space: nowrap; }

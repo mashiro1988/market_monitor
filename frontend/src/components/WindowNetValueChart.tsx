@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { LineChart, ReferenceArea, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { api } from "../api/client";
 import type { NewsItem, PriceWindow } from "../api/types";
 import { MultiLineChart } from "./Charts";
 import { MultiSelectControl, type MultiOption } from "./Controls";
 import { ErrorState, LoadingState } from "./StateViews";
-import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveSegmentBands, shiftUtcIso } from "./windowNetValue";
-import type { SegmentBandInput } from "./windowNetValue";
+import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveSegmentBands, laneFill, shiftUtcIso } from "./windowNetValue";
+import type { SegmentBand, SegmentBandInput } from "./windowNetValue";
 
 // 默认篮子（含美债10Y/美元指数——低波动，走右副轴）；独立持久化，与 MarketPage 互不影响。
 const DEFAULT_BASKET = ["YM=F", "NQ=F", "000001.SS", "^N225", "^KS11", "GC=F", "CL=F", "BTC/USDT", "US_10Y", "DX-Y.NYB"];
@@ -35,6 +36,38 @@ function persistBasket(symbols: string[]) {
   } catch {
     // ignore quota / privacy-mode errors
   }
+}
+
+// 段档位轨道：主图正下方的窄条，同一批行为段的实色版（方向色 × 档位深浅）。
+// 图内半透明色带负责"段在哪里"，这条负责"一眼分清 0.3/0.5/0.8 与方向"。
+// 复用主图的 data + 轴宽（左 48 / 右 48），保证 x 轴逐像素对齐。
+function SegmentTierLane({
+  data,
+  bands,
+  hasSecondary,
+}: {
+  data: { time: string }[];
+  bands: SegmentBand[];
+  hasSecondary: boolean;
+}) {
+  if (!bands.length) return null;
+  return (
+    <div className="tier-lane" title="段档位轨道：颜色=方向（青涨/玫红跌），深浅=档位（0.3/0.5/0.8）">
+      <ResponsiveContainer width="100%" height={18}>
+        <LineChart data={data} margin={{ left: 0, right: 12, top: 2, bottom: 2 }}>
+          <XAxis dataKey="time" hide />
+          <YAxis yAxisId="left" domain={[0, 1]} width={48} tick={false} axisLine={false} tickLine={false} />
+          {hasSecondary ? (
+            <YAxis yAxisId="right" orientation="right" domain={[0, 1]} width={48} tick={false} axisLine={false} tickLine={false} />
+          ) : null}
+          {bands.map((b) => (
+            <ReferenceArea key={`lane-${b.x1}-${b.x2}-${b.fill}`} yAxisId="left" x1={b.x1} x2={b.x2}
+              y1={0} y2={1} strokeOpacity={0} fill={laneFill(b)} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
 }
 
 export function WindowNetValueChart({
@@ -108,11 +141,11 @@ export function WindowNetValueChart({
   }, [symbolsList.data]);
 
   return (
-    <section className="panel annotation-block window-netvalue-block">
-      <div className="panel-head">
-        <h2>窗口净值走势</h2>
+    <div className="subsection window-netvalue-block">
+      <div className="subsection-head">
+        <span className="subsection-title">窗口净值走势</span>
         <div className="window-netvalue-head-controls">
-          <span className="muted-text small">区间内净值归一为 1.000 · 美债/美元走右副轴(虚线·自适应量程) · 竖线为驱动新闻</span>
+          <span className="muted-text small">净值归一 1.000 · 美债/美元右副轴(虚线) · 竖线=驱动新闻 · 底部轨道=段档位</span>
           <MultiSelectControl label="对照品种" values={basket} onChange={setBasket} options={symbolOptions} />
         </div>
       </div>
@@ -135,6 +168,7 @@ export function WindowNetValueChart({
             secondaryKeys={secondaryKeys}
             shadedBands={segmentBands}
           />
+          <SegmentTierLane data={data} bands={segmentBands} hasSecondary={secondaryKeys.length > 0} />
           {markers.length ? (
             <ul className="netvalue-marker-list">
               {markers.map((marker, index) => (
@@ -152,6 +186,6 @@ export function WindowNetValueChart({
           )}
         </>
       )}
-    </section>
+    </div>
   );
 }
