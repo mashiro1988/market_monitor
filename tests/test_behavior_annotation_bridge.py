@@ -110,3 +110,32 @@ def test_unsettled_segment_frozen(session):
     session.commit()
     w = annotation_service.load_price_windows(session, "BTC/USDT", hours=12)[0]
     assert w.annotatable is True
+
+
+def test_overlapping_same_direction_windows_collapse(session):
+    """稀释回退会吐出一串同向嵌套段（2026-07-09 实弹：01:10/01:20/01:30/01:35/01:40→02:00
+    五个重叠跌窗全进待标列表）。待标窗口源折叠：同向重叠≥50%（短边分母）只留最长者；
+    反向重叠（V 型顶底交叠）保留。"""
+    t0 = datetime.utcnow().replace(second=0, microsecond=0) - timedelta(hours=6)
+    _seed_flat_prices(session, t0, n=80)
+    _seg_row(session, t0, tier_idx=1, start_min=30, end_min=80)    # 主跌窗（最长）
+    for sm in (40, 50, 55):                                        # 嵌套的稀释回退段
+        seg = _seg_row(session, t0, tier_idx=1, start_min=sm, end_min=80)
+        seg.direction = 1
+        session.commit()
+    # 上面三个与主窗同向——先都改成同向再改主窗方向，保证语义明确
+    rows = session.query(BehaviorSegment).all()
+    for r in rows:
+        r.direction = -1 if r.start_dt == t0 + timedelta(minutes=30) or r.end_dt == t0 + timedelta(minutes=80) else r.direction
+    session.commit()
+    # 反向段：与主窗头部交叠（V 型），必须保留
+    up = _seg_row(session, t0, tier_idx=1, start_min=25, end_min=40)
+    up.direction = 1
+    session.commit()
+    windows = annotation_service.load_price_windows(session, "BTC/USDT", hours=12)
+    downs = [w for w in windows if w.change_pct <= 0]
+    ups = [w for w in windows if w.change_pct > 0]
+    spans = sorted((w.window_start.timestamp_utc, w.window_end.timestamp_utc) for w in windows)
+    # 平价种子下 change_pct 全为 0，用窗口边界判断：只应剩 2 个窗口（最长跌窗 + 反向涨窗）
+    assert len(windows) == 2, spans
+    assert (t0 + timedelta(minutes=30)).isoformat()[:16] in spans[1][0] or (t0 + timedelta(minutes=30)).isoformat()[:16] in spans[0][0]

@@ -6,7 +6,7 @@ import type { NewsItem, PriceWindow } from "../api/types";
 import { MultiLineChart } from "./Charts";
 import { MultiSelectControl, type MultiOption } from "./Controls";
 import { ErrorState, LoadingState } from "./StateViews";
-import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveSegmentBands, laneFill, shiftUtcIso } from "./windowNetValue";
+import { buildNetValueChart, computeNetValueDomain, deriveLaneBands, deriveMarkers, deriveSegmentBands, laneFill, shiftUtcIso } from "./windowNetValue";
 import type { SegmentBand, SegmentBandInput } from "./windowNetValue";
 
 // 默认篮子（含美债10Y/美元指数——低波动，走右副轴）；独立持久化，与 MarketPage 互不影响。
@@ -128,12 +128,13 @@ export function WindowNetValueChart({
     [candidateNews, newsRoles, buckets]
   );
 
-  // 标注品种净值序列驱动段内档位演进切分（0.3→0.5→0.8 触及时点逐档加深）
-  const segmentBands = useMemo(() => {
+  // 主图：整段单色（2026-07-11 拍板）；轨道：净值序列驱动段内档位演进切分
+  const segmentBands = useMemo(() => deriveSegmentBands(segments, buckets), [segments, buckets]);
+  const laneBands = useMemo(() => {
     const closes = highlightKey
       ? data.map((row) => (typeof row[highlightKey] === "number" ? (row[highlightKey] as number) : null))
       : undefined;
-    return deriveSegmentBands(segments, buckets, closes);
+    return deriveLaneBands(segments, buckets, closes);
   }, [segments, buckets, data, highlightKey]);
 
   // 美债/美元等低波动品种放右副轴（自适应各自量程，否则被 BTC/股指压成平线）。
@@ -182,7 +183,7 @@ export function WindowNetValueChart({
             secondaryKeys={secondaryKeys}
             shadedBands={segmentBands}
           />
-          <SegmentTierLane data={data} bands={segmentBands} hasSecondary={secondaryKeys.length > 0} />
+          <SegmentTierLane data={data} bands={laneBands} hasSecondary={secondaryKeys.length > 0} />
           {markers.length ? (
             <ul className="netvalue-marker-list">
               {markers.map((marker, index) => (

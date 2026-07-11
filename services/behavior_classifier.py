@@ -173,7 +173,8 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
             for ref, (rchg, t_ref) in ref_chgs.items():
                 r = rolling_peak(btc_chg, rchg, t_btc, t_ref, row.start_dt, row.end_dt,
                                  tail_min=BIG_WINDOW_MINUTES, points=roll_points,
-                                 coverage_min=config.BEHAVIOR_COVERAGE_MIN)
+                                 coverage_min=config.BEHAVIOR_COVERAGE_MIN,
+                                 ess_min=config.BEHAVIOR_ESS_THIN)
                 if r is not None:
                     scores[ref] = {"s": round(r[0], 4), "ess": round(r[1], 2), "coverage": round(r[2], 3)}
             ids = _news_ids(session, row.start_dt, row.end_dt)

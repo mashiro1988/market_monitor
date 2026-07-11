@@ -1426,3 +1426,12 @@ code {
 
 /* ESS 单值（表头内联）：<5 证据薄标黄 */
 .ess-thin-inline { color: #fbbf24; }
+
+/* 联动曲线 ±N 档位切换（2026-07-11） */
+.linkage-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pad-switch { display: inline-flex; gap: 4px; }
+.pad-btn {
+  font: inherit; font-size: 11px; padding: 1px 8px; border-radius: 4px; cursor: pointer;
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--line-soft);
+}
+.pad-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(94, 234, 212, 0.10); }

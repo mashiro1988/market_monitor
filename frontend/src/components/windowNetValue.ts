@@ -141,32 +141,57 @@ function bandOf(rgb: string, tier: number, x1: string, x2: string, dir: 1 | -1):
   };
 }
 
+function segmentSpan(seg: SegmentBandInput, buckets: { time: string; utcMinute: string }[]): [number, number] | null {
+  const s = seg.start.timestamp_utc?.slice(0, 16);
+  const e = seg.end.timestamp_utc?.slice(0, 16);
+  if (!s || !e) return null;
+  const firstIdx = buckets.findIndex((b) => b.utcMinute >= s);
+  let lastIdx = -1;
+  for (let i = buckets.length - 1; i >= 0; i--) {
+    if (buckets[i].utcMinute <= e) { lastIdx = i; break; }
+  }
+  if (firstIdx < 0 || lastIdx < 0 || firstIdx > lastIdx) return null;    // 段在图域外
+  return [firstIdx, lastIdx];
+}
+
+// 主图色带（2026-07-11 用户拍板：整段单色，不做段内切分——嵌套段透明度叠加会糊成渐变）：
+// 一段一带，按段的最高档位定深浅，方向定色。段内演进只在下方档位轨道呈现。
 export function deriveSegmentBands(
   segments: SegmentBandInput[],
   buckets: { time: string; utcMinute: string }[],
-  closes?: (number | null)[],   // 标注品种在各桶的净值/价格（同刻度即可），驱动段内档位演进切分
 ): SegmentBand[] {
   if (!buckets.length) return [];
   const out: SegmentBand[] = [];
   for (const seg of segments) {
-    const s = seg.start.timestamp_utc?.slice(0, 16);
-    const e = seg.end.timestamp_utc?.slice(0, 16);
-    if (!s || !e) continue;
-    const firstIdx = buckets.findIndex((b) => b.utcMinute >= s);
-    let lastIdx = -1;
-    for (let i = buckets.length - 1; i >= 0; i--) {
-      if (buckets[i].utcMinute <= e) { lastIdx = i; break; }
-    }
-    if (firstIdx < 0 || lastIdx < 0 || firstIdx > lastIdx) continue;     // 段在图域外
-    const tierCap = Math.min(seg.tier_idx, 2);
+    const span = segmentSpan(seg, buckets);
+    if (!span) continue;
+    const tier = Math.min(seg.tier_idx, 2);
     const dir: 1 | -1 = seg.direction > 0 ? 1 : -1;
     const rgb = dir > 0 ? "94,234,212" : "251,113,133";                  // 站内青涨/玫红跌
+    out.push(bandOf(rgb, tier, buckets[span[0]].time, buckets[span[1]].time, dir));
+  }
+  return out;
+}
 
-    // 段内档位演进：口径与段检测器**同源** = 15min 开收净（close vs 3 桶前 close）
-    // 滚动峰值锁存，触及 0.5/0.8 档的时点把段切成 0.3→0.5→0.8 的 run 逐档加深。
-    // 2026-07-10 实弹修正：此前用"从段起点累计"，与引擎两套尺子——07-09 21:30 段
-    // 13:55 那笔 15min 净 +0.505% 擦线触 0.5 档，累计口径只有 +0.478% → 图 0.3 色、芯片 0.5 档打架。
-    // 相邻 run 共享边界桶且按时间序后画深色，色带无缝衔接。
+// 档位轨道色带：段内档位演进，口径与段检测器同源 = 15min 开收净（close vs 3 桶前 close）
+// 滚动峰值锁存，触及 0.5/0.8 档的时点切 run（0.3 最低、0.5 高、0.8 最高，高度+深浅双通道）。
+// 相邻 run 共享边界桶且按时间序后画深色；末位单桶 run 向前借一桶保证可见（擦线触发常在段末）。
+export function deriveLaneBands(
+  segments: SegmentBandInput[],
+  buckets: { time: string; utcMinute: string }[],
+  closes?: (number | null)[],   // 标注品种在各桶的净值/价格（同刻度即可）
+): SegmentBand[] {
+  if (!buckets.length) return [];
+  const out: SegmentBand[] = [];
+  for (const seg of segments) {
+    const span = segmentSpan(seg, buckets);
+    if (!span) continue;
+    const firstIdx = span[0];
+    const lastIdx = span[1];
+    const tierCap = Math.min(seg.tier_idx, 2);
+    const dir: 1 | -1 = seg.direction > 0 ? 1 : -1;
+    const rgb = dir > 0 ? "94,234,212" : "251,113,133";
+
     const hasCloses = !!closes && closes.slice(firstIdx, lastIdx + 1).some((v) => v != null);
     if (!hasCloses || tierCap === 0) {
       out.push(bandOf(rgb, tierCap, buckets[firstIdx].time, buckets[lastIdx].time, dir));
@@ -190,8 +215,6 @@ export function deriveSegmentBands(
     for (let i = 1; i <= reached.length; i++) {
       if (i === reached.length || reached[i] !== reached[runStart]) {
         const endIdx = Math.min(i, reached.length - 1);                   // 延伸到下一 run 的起点桶
-        // 末位单桶 run（触档发生在段末最后一桶，如擦线触发）零宽不可见 → 向前借一桶，
-        // 深色按序后画盖住重叠处；15min 开收净本就覆盖到前面的桶，语义不失真
         const startIdx = runStart === endIdx ? Math.max(0, runStart - 1) : runStart;
         out.push(bandOf(rgb, reached[runStart], buckets[firstIdx + startIdx].time, buckets[firstIdx + endIdx].time, dir));
         runStart = i;

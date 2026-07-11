@@ -67,22 +67,31 @@ def rolling_peak(btc_chg: dict[datetime, float], ref_chg: dict[datetime, float],
                  seg_start: datetime, seg_end: datetime,
                  tail_min: int = BIG_WINDOW_MINUTES,
                  points: int = 30,
-                 coverage_min: float = 0.5) -> tuple[float, float, float] | None:
+                 coverage_min: float = 0.5,
+                 ess_min: float = 0.0) -> tuple[float, float, float] | None:
     """段的联动读数（Phase 2 统一口径，2026-07-09 用户拍板"所见即所判"）：
     在"段起 → 段止 + tail"的每个 5min 时点上求拖尾 rolling S（与展示曲线同一算法、同一窗口），
     取 |S| 峰值点，返回该点的 (S, ESS, coverage)。曲线爬多高，机器判多强——判级数与
     屏幕上那条 rolling 曲线是同一个数。拖尾窗只看过去 → 数据齐备条件仍是"到 段止+tail"，
-    settle 门槛不变。取代旧的事件窗 s_score（段前1h+段+段后1h 单独开窗，已删）。"""
+    settle 门槛不变。取代旧的事件窗 s_score（段前1h+段+段后1h 单独开窗，已删）。
+
+    ess_min（2026-07-11）：峰值只在 ESS ≥ ess_min 的时点里取——否则段前死平期的
+    单根 K 线退化窗口（ESS≈1、|S|=1）会抢峰，读数与曲线肉眼峰值对不上；
+    全部时点都不达标时退回无门槛峰值（调用侧靠 ESS 徽标提示证据薄）。"""
     span = STEP * (points - 1)
-    best: tuple[float, float, float] | None = None
+    best_any: tuple[float, float, float] | None = None
+    best_thick: tuple[float, float, float] | None = None
     t = seg_start
     end = seg_end + timedelta(minutes=tail_min)
     while t <= end:
         r = _weighted_follow(btc_chg, ref_chg, t_btc, t_ref, t - span, t, coverage_min)
-        if r is not None and (best is None or abs(r[0]) > abs(best[0])):
-            best = r
+        if r is not None:
+            if best_any is None or abs(r[0]) > abs(best_any[0]):
+                best_any = r
+            if r[1] >= ess_min and (best_thick is None or abs(r[0]) > abs(best_thick[0])):
+                best_thick = r
         t += STEP
-    return best
+    return best_thick if best_thick is not None else best_any
 
 
 def rolling_s(btc_chg: dict[datetime, float], ref_chg: dict[datetime, float],

@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "vitest";
 import type { MarketHistoryResponse, NewsItem } from "../api/types";
-import { buildNetValueChart, deriveSegmentBands, computeNetValueDomain, deriveMarkers, laneFill, shiftUtcIso } from "./windowNetValue";
+import { buildNetValueChart, deriveLaneBands, deriveSegmentBands, computeNetValueDomain, deriveMarkers, laneFill, shiftUtcIso } from "./windowNetValue";
 
 function pt(symbol: string, name: string, price: number, utc: string, bj: string) {
   return { symbol, name, price, normalized_pct: 0, source: "test", timestamp_utc: utc, timestamp_bj: bj };
@@ -157,7 +157,7 @@ describe("deriveSegmentBands", () => {
     expect(bands[0].stroke).toBeUndefined();          // 0.3 档不描边，避免噪音
     expect(laneFill(bands[0])).toContain("0.50");     // 轨道实色：0.3 档最浅
   });
-  it("splits a 0.8-tier segment into escalation runs by rolling 15min net", () => {
+  it("lane splits a 0.8-tier segment into escalation runs by rolling 15min net", () => {
     // 段内档位演进：口径与段检测器同源 = **15min 开收净**（close vs 3 桶前 close）滚动峰值锁存，
     // 不是从段起点累计（2026-07-10 实弹：累计口径漏掉了 13:55 擦线 0.505% 的 0.5 档触发）。
     // p0-p2 为段前上下文；段内 b2 的 15min 净 +0.55% 触 0.5 档、b3 的 +0.85% 触 0.8 档。
@@ -172,7 +172,7 @@ describe("deriveSegmentBands", () => {
       { time: "t4", utcMinute: "2026-07-08T13:40" },
     ];
     const closes = [1.0, 1.0, 1.0, 1.0, 1.001, 1.0055, 1.0085, 1.0092];
-    const bands = deriveSegmentBands([
+    const bands = deriveLaneBands([
       { start: { timestamp_utc: "2026-07-08T13:20:00" }, end: { timestamp_utc: "2026-07-08T13:40:00" }, direction: 1, tier_idx: 2 },
     ], bks, closes);
     expect(bands.map((b) => [b.x1, b.x2, b.tier])).toEqual([
@@ -191,7 +191,7 @@ describe("deriveSegmentBands", () => {
     ));
     // 15min 净：t3=+0.1% t4=+0.2% t5=+0.55%（只在最后一桶触 0.5 档）
     const closes = [1.0, 1.0, 1.0, 1.001, 1.002, 1.0055];
-    const bands = deriveSegmentBands([
+    const bands = deriveLaneBands([
       { start: { timestamp_utc: "2026-07-08T13:20:00" }, end: { timestamp_utc: "2026-07-08T13:30:00" }, direction: 1, tier_idx: 1 },
     ], bks, closes);
     expect(bands.map((b) => [b.x1, b.x2, b.tier])).toEqual([
@@ -199,11 +199,19 @@ describe("deriveSegmentBands", () => {
       ["t4", "t5", 1],   // 末桶触发：向前借一桶，深色后画盖住重叠处
     ]);
   });
-  it("keeps uniform band when closes are unavailable", () => {
-    const bands = deriveSegmentBands([
+  it("lane keeps uniform band when closes are unavailable", () => {
+    const bands = deriveLaneBands([
       { start: { timestamp_utc: "2026-07-08T13:24:00" }, end: { timestamp_utc: "2026-07-08T13:32:00" }, direction: 1, tier_idx: 2 },
     ], buckets, [null, null, null, null]);
     expect(bands).toHaveLength(1);
     expect(bands[0].tier).toBe(2);
+  });
+  it("main-chart bands stay uniform per segment (2026-07-11 拍板：整段单色)", () => {
+    const bands = deriveSegmentBands([
+      { start: { timestamp_utc: "2026-07-08T13:24:00" }, end: { timestamp_utc: "2026-07-08T13:32:00" }, direction: 1, tier_idx: 2 },
+    ], buckets);
+    expect(bands).toHaveLength(1);          // 不做段内切分
+    expect(bands[0].tier).toBe(2);
+    expect(bands[0].fill).toContain("0.40");
   });
 });

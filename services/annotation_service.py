@@ -240,6 +240,7 @@ def _window_signals_payload(session: Session, symbol: str,
                 chg_map(_points(session, ref, window_start - pre_pad, window_end + post_pad)),
                 float(tiers[0]), float(ref_tiers[0]), window_start, window_end,
                 points=roll_points, coverage_min=config.BEHAVIOR_COVERAGE_MIN,
+                ess_min=config.BEHAVIOR_ESS_THIN,
             )
             if r is not None:
                 s_scores[labels_by_symbol.get(ref, ref)] = {
@@ -678,7 +679,24 @@ def _behavior_segment_events(session: Session, symbol: str, display_cutoff: date
             # settle 真空档（2026-07-10）：段未 settle 时 S/机器类还没落库，窗口证据不全 → 冻结
             "settled": r.classification is not None,
         })
-    return out
+    # 同向重叠折叠（2026-07-11 用户实弹：稀释回退吐出 01:10/01:20/01:30/01:35/01:40→02:00
+    # 五个嵌套跌窗全进待标列表）：同向且重叠≥50%（短边分母）只留最长者——标注本就按
+    # 重叠≥50% 回写/匹配，留一个就够；反向重叠（V 型顶底交叠）保留。色带仍画全部段。
+    kept: list[dict] = []
+    for m in sorted(out, key=lambda m: m["end"] - m["start"], reverse=True):
+        dur_m = (m["end"] - m["start"]).total_seconds() or 1.0
+        dominated = False
+        for k in kept:
+            if k["sign"] != m["sign"]:
+                continue
+            overlap = (min(k["end"], m["end"]) - max(k["start"], m["start"])).total_seconds()
+            if overlap > 0 and overlap / min(dur_m, (k["end"] - k["start"]).total_seconds() or 1.0) >= 0.5:
+                dominated = True
+                break
+        if not dominated:
+            kept.append(m)
+    kept.sort(key=lambda m: m["start"])
+    return kept
 
 
 def load_price_windows(

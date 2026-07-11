@@ -14,7 +14,6 @@ import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 import { LinkagePanel, REF_COLORS } from "../components/LinkagePanel";
 import { WindowNetValueChart } from "../components/WindowNetValueChart";
 import { classMeta, toWindowClass } from "./behaviorFormat";
-import { shiftUtcIso } from "../components/windowNetValue";
 
 const hoursOptions = [
   { label: "24小时", value: "24" },
@@ -820,9 +819,9 @@ export function AnnotationsPage() {
               <LinkagePanel
                 symbol="BTC/USDT"
                 hours={48}
-                range={activeWindow.window_start.timestamp_utc && activeWindow.window_end.timestamp_utc ? {
-                  startUtc: shiftUtcIso(activeWindow.window_start.timestamp_utc, -24 * 60),
-                  endUtc: shiftUtcIso(activeWindow.window_end.timestamp_utc, 24 * 60),
+                windowUtc={activeWindow.window_start.timestamp_utc && activeWindow.window_end.timestamp_utc ? {
+                  startUtc: activeWindow.window_start.timestamp_utc,
+                  endUtc: activeWindow.window_end.timestamp_utc,
                 } : null}
                 highlight={activeWindow.window_start.timestamp_bj && activeWindow.window_end.timestamp_bj ? {
                   x1: activeWindow.window_start.timestamp_bj.slice(5, 16),
@@ -927,7 +926,7 @@ export function AnnotationsPage() {
             {activeWindow ? (
               <div className="annotation-save-block">
                 <div className="field">
-                  <span>窗口驱动类型（三类 = 人工审核，保存后回写行为段）</span>
+                  <span>窗口驱动类型</span>
                   <div className="confidence-tiers">
                     {WINDOW_CLASS_OPTIONS.map((opt) => (
                       <button
@@ -1009,7 +1008,6 @@ export function AnnotationsPage() {
       <section className="panel annotation-block">
         <div className="panel-head">
           <h2>已标注 ({annotatedListQuery.data?.length ?? 0})</h2>
-          <span className="muted-text small">点击「撤销」可移除标注，对应窗口会回到上方未标注列表</span>
         </div>
 
         {annotatedListQuery.isLoading ? <LoadingState /> :

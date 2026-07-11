@@ -85,3 +85,25 @@ def test_rolling_s_gap_when_ref_missing():
                        start=BASE + timedelta(minutes=5 * 24), end=BASE + timedelta(minutes=5 * 24),
                        points=25)
     assert series == [(BASE + timedelta(minutes=120), None)]
+
+
+def test_rolling_peak_ess_floor_skips_degenerate_points():
+    """ESS 地板（2026-07-11 用户实弹：某窗口 ESS 1.0、S=-1.00——峰值被"单根 K 线撑起的
+    退化读数"抢走，与联动曲线肉眼峰值对不上）：ess_min 给定时，峰值只在证据厚度达标的
+    时点里取；全部不达标才退回无门槛峰值。"""
+    from datetime import datetime, timedelta
+    t0 = datetime(2026, 7, 9, 1, 0)
+    step = timedelta(minutes=5)
+    # BTC：前段死平（单根 spike → 早期窗口 ESS≈1），后段持续波动（ESS 高）
+    btc, nq = {}, {}
+    moves = [0.0] * 9 + [0.9] + [0.0] * 10 + [0.5, -0.4, 0.6, -0.5, 0.45, -0.35, 0.55, -0.45, 0.4, -0.3]
+    for i, m in enumerate(moves):
+        btc[t0 + step * i] = m
+        # 前段 NQ 与 spike 完全反向（把退化点推到 |S|=1）；后段同向跟随（真实共振但 |S|<1）
+        nq[t0 + step * i] = (-m if i <= 19 else m * 0.8)
+    seg = (t0 + step * 9, t0 + step * 29)
+    unfloored = rolling_peak(btc, nq, 0.3, 0.23, seg[0], seg[1], tail_min=0, points=10, coverage_min=0.0)
+    floored = rolling_peak(btc, nq, 0.3, 0.23, seg[0], seg[1], tail_min=0, points=10, coverage_min=0.0, ess_min=5.0)
+    assert unfloored is not None and floored is not None
+    assert unfloored[1] < 5.0 and unfloored[0] < 0     # 无地板：单根反向 spike 抢峰，ESS 薄
+    assert floored[1] >= 5.0 and floored[0] > 0        # 有地板：取证据厚的正向共振峰
