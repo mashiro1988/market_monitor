@@ -67,3 +67,6 @@ PENDING.md
 Thumbs.db
 .DS_Store
 .tmp_*
+
+# 审计工作产物默认不入库（公开仓库；要公开哪份由所有者显式 git add -f）
+audit/
