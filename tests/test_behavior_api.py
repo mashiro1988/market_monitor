@@ -159,3 +159,29 @@ def test_edge_started_segments_not_upserted(client_session):
     rows = session.query(BehaviorSegment).filter(
         BehaviorSegment.start_dt < t0 + timedelta(minutes=30)).all()
     assert rows == [], [(r.start_dt, r.tier_idx) for r in rows]   # 边缘 30min 内起步的一律不入库
+
+
+def test_contained_fragment_not_inserted(client_session):
+    """48h 边缘第三道闸（2026-07-12 用户追问'2小时段+段内喘息'暴露）：切片内重新起跑
+    的尾巴段若被已有同向行完整包含 → 不插入（原行是完整数据轮次的真相）。
+    稀释回退的兄弟段互不包含，不受影响。"""
+    client, session = client_session
+    from models.behavior import BehaviorSegment
+    t0 = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - timedelta(hours=8)
+    # 完整数据轮次写下的原行：2 小时长段（起点在本轮切片之外）
+    session.add(BehaviorSegment(
+        symbol="BTC/USDT", start_dt=t0 - timedelta(minutes=60), end_dt=t0 + timedelta(minutes=150),
+        direction=-1, tier_idx=1, tier_max=0.5, net_pct=-0.9, amp_pct=1.0,
+        key_ts=t0, classification="pure_resonance", class_version="v2"))
+    session.commit()
+    # 本轮切片：数据从 t0 开始，前 45min 喘息（平），之后段内下跌重新起跑——
+    # 首个触发的基线落在 t0+35（≥ 闸二的 30min 线），若无第三道闸就会插入尾巴碎片
+    prices = [100000.0] * 9 + [100000.0 * (1 - 0.0015 * i) for i in range(1, 19)]
+    for i, p in enumerate(prices):
+        session.add(PriceSnapshot(timestamp=t0 + timedelta(minutes=5 * i), asset_class="crypto",
+                                  symbol="BTC/USDT", name="BTC", price=p, source="test"))
+    session.commit()
+    bc.classify(session, "BTC/USDT", now=t0 + timedelta(minutes=5 * len(prices) + 160))
+    rows = session.query(BehaviorSegment).filter(BehaviorSegment.direction == -1).all()
+    assert len(rows) == 1, [(r.start_dt, r.end_dt) for r in rows]   # 只剩原行，尾巴碎片没进来
+    assert rows[0].start_dt == t0 - timedelta(minutes=60)

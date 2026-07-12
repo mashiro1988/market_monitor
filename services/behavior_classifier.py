@@ -114,7 +114,7 @@ def _settled(seg_end: datetime, now: datetime) -> bool:
     return seg_end + timedelta(minutes=margin) <= now
 
 
-def _upsert_segment(session: Session, symbol: str, seg: Segment) -> BehaviorSegment:
+def _upsert_segment(session: Session, symbol: str, seg: Segment) -> BehaviorSegment | None:
     """按 (symbol, start_dt, direction) 匹配：段随数据生长时更新同一行，不重复建段。"""
     row = (
         session.query(BehaviorSegment)
@@ -122,6 +122,20 @@ def _upsert_segment(session: Session, symbol: str, seg: Segment) -> BehaviorSegm
         .one_or_none()
     )
     if row is None:
+        # 边缘第三道闸（2026-07-12）：新段若被已有同向行**完整包含** → 不插入。
+        # 场景：48h 切片切进带内部喘息（触发间隔可达 20min 仍成链）的长段，切片内
+        # "重新起跑"的尾巴绕过 30min 边缘闸，但它必然 ⊂ 完整数据轮次写下的原行。
+        # 稀释回退的兄弟段互相只部分重叠、不包含，不受影响。
+        contained = (
+            session.query(BehaviorSegment)
+            .filter(BehaviorSegment.symbol == symbol,
+                    BehaviorSegment.direction == seg.direction,
+                    BehaviorSegment.start_dt <= seg.start_dt,
+                    BehaviorSegment.end_dt >= seg.end_dt)
+            .first()
+        )
+        if contained is not None and (contained.start_dt, contained.end_dt) != (seg.start_dt, seg.end_dt):
+            return None
         row = BehaviorSegment(symbol=symbol, start_dt=seg.start_dt, direction=seg.direction,
                               end_dt=seg.end_dt, tier_idx=seg.tier_idx, tier_max=seg.tier_max,
                               net_pct=seg.net_pct, amp_pct=seg.amp_pct, key_ts=seg.key_ts)
@@ -148,7 +162,7 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
     if btc_points:
         edge_cutoff = btc_points[0][0] + timedelta(minutes=30)
         segments = [s for s in segments if s.start_dt >= edge_cutoff]
-    rows = [_upsert_segment(session, symbol, s) for s in segments]
+    rows = [r for r in (_upsert_segment(session, symbol, s) for s in segments) if r is not None]
     session.flush()
 
     # 0.3 档：只计数
