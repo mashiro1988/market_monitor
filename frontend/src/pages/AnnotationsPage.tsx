@@ -252,11 +252,6 @@ export function AnnotationsPage() {
   const rule = rules.data?.find((item) => item.symbol === currentSymbol);
 
   // Phase 2：行为段（含 0.3 档簇拥）→ 净值图档位色带；只取近 3 天，随窗口列表同刷。
-  const behaviorSegs = useQuery({
-    queryKey: ["behavior-segments", "annot", "BTC/USDT"],
-    queryFn: () => api.behaviorSegments({ symbol: "BTC/USDT", days: 3 }),
-    refetchInterval: 5 * 60_000,
-  });
 
   const windowsQuery = useQuery({
     queryKey: ["annotation-windows", currentSymbol, hours],
@@ -808,7 +803,6 @@ export function AnnotationsPage() {
             postMinutes={60}
             candidateNews={contextNews.data?.items ?? []}
             newsRoles={newsRoles}
-            segments={activeWindow.symbol === "BTC/USDT" ? (behaviorSegs.data?.segments ?? []) : []}
           />
           <WindowEvidence win={activeWindow} />
           {activeWindow.symbol === "BTC/USDT" ? (

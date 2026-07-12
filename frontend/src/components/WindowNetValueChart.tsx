@@ -6,8 +6,8 @@ import type { NewsItem, PriceWindow } from "../api/types";
 import { MultiLineChart } from "./Charts";
 import { MultiSelectControl, type MultiOption } from "./Controls";
 import { ErrorState, LoadingState } from "./StateViews";
-import { buildNetValueChart, computeNetValueDomain, deriveLaneBands, deriveMarkers, deriveSegmentBands, laneFill, shiftUtcIso } from "./windowNetValue";
-import type { SegmentBand, SegmentBandInput } from "./windowNetValue";
+import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveTierLanes, shiftUtcIso } from "./windowNetValue";
+import type { TierLaneBand } from "./windowNetValue";
 
 // 默认篮子（含美债10Y/美元指数——低波动，走右副轴）；独立持久化，与 MarketPage 互不影响。
 const DEFAULT_BASKET = ["YM=F", "NQ=F", "000001.SS", "^N225", "^KS11", "GC=F", "CL=F", "BTC/USDT", "US_10Y", "DX-Y.NYB"];
@@ -38,27 +38,28 @@ function persistBasket(symbols: string[]) {
   }
 }
 
-// 段档位轨道：主图正下方的窄条，同一批行为段的实色版。
-// 双通道编码档位（2026-07-10 用户反馈"深浅仍不够显著"后加高度）：
-//   高度 = 档位（0.3 档 1/3 高、0.5 档 2/3、0.8 档满格，像步进表），深浅同步递进；
-// 换挡点画背景色分隔线，段内 0.3→0.5→0.8 的演进一眼可辨。
-function SegmentTierLane({
+// 三行档位速度带（2026-07-12 用户白板拍板）：0.3 上 / 0.5 中 / 0.8 下，各行独占一条轨道，
+// 任一时刻的读数只落在最高触及档那一行——不存在跨档区域，也不受段检测嵌套段影响。
+// 与主图复用同款轴宽+边距，SVG 逐像素对齐。
+const LANE_LABELS = ["0.3", "0.5", "0.8"];
+
+function TierLaneRow({
   data,
   bands,
+  label,
   hasSecondary,
+  last,
 }: {
   data: { time: string }[];
-  bands: SegmentBand[];
+  bands: TierLaneBand[];
+  label: string;
   hasSecondary: boolean;
+  last: boolean;
 }) {
-  if (!bands.length) return null;
-  // 相邻 run 共享边界桶（演进切分特征）→ 在边界画一根背景色细线标"换挡点"
-  const shifts = bands
-    .filter((b, i) => i > 0 && bands[i - 1].x2 === b.x1 && bands[i - 1].dir === b.dir)
-    .map((b) => b.x1);
   return (
-    <div className="tier-lane" title="段档位轨道：颜色=方向（青涨/玫红跌），高度+深浅=档位（0.3/0.5/0.8 步进），竖缝=换挡点">
-      <ResponsiveContainer width="100%" height={26}>
+    <div className={`tier-lane-row${last ? " last" : ""}`}>
+      <span className="tier-lane-label">{label}</span>
+      <ResponsiveContainer width="100%" height={16}>
         <LineChart data={data} margin={{ left: 0, right: 12, top: 2, bottom: 2 }}>
           <XAxis dataKey="time" hide />
           <YAxis yAxisId="left" domain={[0, 1]} width={48} tick={false} axisLine={false} tickLine={false} />
@@ -66,14 +67,31 @@ function SegmentTierLane({
             <YAxis yAxisId="right" orientation="right" domain={[0, 1]} width={48} tick={false} axisLine={false} tickLine={false} />
           ) : null}
           {bands.map((b) => (
-            <ReferenceArea key={`lane-${b.x1}-${b.x2}-${b.fill}`} yAxisId="left" x1={b.x1} x2={b.x2}
-              y1={0} y2={(b.tier + 1) / 3} strokeOpacity={0} fill={laneFill(b)} />
-          ))}
-          {shifts.map((x, i) => (
-            <ReferenceLine key={`shift-${x}-${i}`} yAxisId="left" x={x} stroke="#090d12" strokeWidth={2} />
+            <ReferenceArea key={`ln-${b.x1}-${b.x2}-${b.fill}`} yAxisId="left" x1={b.x1} x2={b.x2}
+              y1={0} y2={1} strokeOpacity={0} fill={b.fill} />
           ))}
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+function TierLanes({
+  data,
+  lanes,
+  hasSecondary,
+}: {
+  data: { time: string }[];
+  lanes: TierLaneBand[][];
+  hasSecondary: boolean;
+}) {
+  if (!lanes.some((l) => l.length)) return null;
+  return (
+    <div className="tier-lane" title="档位速度带：每 5 分钟的即时 15min 开收净落在最高触及档那一行；颜色=方向（青涨/玫红跌）">
+      {lanes.map((bands, tier) => (
+        <TierLaneRow key={tier} data={data} bands={bands} label={LANE_LABELS[tier]}
+          hasSecondary={hasSecondary} last={tier === lanes.length - 1} />
+      ))}
     </div>
   );
 }
@@ -83,15 +101,13 @@ export function WindowNetValueChart({
   preMinutes,
   postMinutes,
   candidateNews,
-  newsRoles,
-  segments = []
+  newsRoles
 }: {
   activeWindow: PriceWindow;
   preMinutes: number;
   postMinutes: number;
   candidateNews: NewsItem[];
   newsRoles: Record<number, string>;
-  segments?: SegmentBandInput[];   // 行为段（含 0.3 簇拥）→ 档位色带
 }) {
   const [basket, setBasketState] = useState<string[]>(loadBasket);
   const setBasket = (next: string[]) => {
@@ -128,14 +144,13 @@ export function WindowNetValueChart({
     [candidateNews, newsRoles, buckets]
   );
 
-  // 主图：整段单色（2026-07-11 拍板）；轨道：净值序列驱动段内档位演进切分
-  const segmentBands = useMemo(() => deriveSegmentBands(segments, buckets), [segments, buckets]);
-  const laneBands = useMemo(() => {
-    const closes = highlightKey
+  // 2026-07-12 拍板：主图无色带；下方三行速度带由标注品种净值序列逐桶现算
+  const tierLanes = useMemo(() => {
+    const closes = highlightKey && activeWindow.symbol === "BTC/USDT"
       ? data.map((row) => (typeof row[highlightKey] === "number" ? (row[highlightKey] as number) : null))
       : undefined;
-    return deriveLaneBands(segments, buckets, closes);
-  }, [segments, buckets, data, highlightKey]);
+    return deriveTierLanes(buckets, closes);
+  }, [buckets, data, highlightKey, activeWindow.symbol]);
 
   // 美债/美元等低波动品种放右副轴（自适应各自量程，否则被 BTC/股指压成平线）。
   const secondaryKeys = useMemo(
@@ -160,7 +175,7 @@ export function WindowNetValueChart({
       <div className="subsection-head">
         <span className="subsection-title">窗口净值走势</span>
         <div className="window-netvalue-head-controls">
-          <span className="muted-text small">净值归一 1.000 · 低波品种右副轴 · 竖线=驱动新闻 · 底部轨道=段档位演进</span>
+          <span className="muted-text small">净值归一 1.000 · 低波品种右副轴 · 竖线=驱动新闻 · 下方三行=0.3/0.5/0.8 档速度带</span>
           <MultiSelectControl label="对照品种" values={basket} onChange={setBasket} options={symbolOptions} />
         </div>
       </div>
@@ -181,9 +196,8 @@ export function WindowNetValueChart({
             markers={markers}
             highlightKey={highlightKey ?? undefined}
             secondaryKeys={secondaryKeys}
-            shadedBands={segmentBands}
           />
-          <SegmentTierLane data={data} bands={laneBands} hasSecondary={secondaryKeys.length > 0} />
+          <TierLanes data={data} lanes={tierLanes} hasSecondary={secondaryKeys.length > 0} />
           {markers.length ? (
             <ul className="netvalue-marker-list">
               {markers.map((marker, index) => (

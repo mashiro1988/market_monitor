@@ -108,124 +108,59 @@ export function computeNetValueDomain(
 }
 
 
-// Phase 2：行为段（含 0.3 档簇拥）映射为净值图色带——方向色 × 档位深浅，呈现"小推→爆发"的渐进式共振。
-export type SegmentBandInput = {
-  start: { timestamp_utc: string | null };
-  end: { timestamp_utc: string | null };
-  direction: number;
-  tier_idx: number;
-};
-
-export type SegmentBand = {
+// 三行档位速度带（2026-07-12 用户白板拍板）：主图不画段色带；下方 0.3/0.5/0.8 三行，
+// 每个 5min 桶算**即时 15min 开收净**（close vs 3 桶前 close，与段检测触发原语同款），
+// 落在最高触及档那一行（分区、无锁存——降档可见），方向定色（青涨/玫红跌）、行位定档。
+// 与段检测内部产物（稀释回退嵌套段等）解耦：这是纯速度仪表，段/窗口语义只在列表与证据台。
+export type TierLaneBand = {
   x1: string;
   x2: string;
   fill: string;
-  stroke?: string;
-  tier: number;        // 0/1/2 = 0.3/0.5/0.8 档（档位轨道用它配实色）
+  tier: number;        // 0/1/2 = 0.3/0.5/0.8 行
   dir: 1 | -1;
 };
 
-// BTC 档位阶梯（%）。色带只对 BTC 段渲染（segments 只在 BTC 窗口下发），
-// 后端阶梯在 config.BEHAVIOR_TIERS；这里只用于段内演进的视觉切分，改档需两处同步。
+// BTC 档位阶梯（%）。速度带只对 BTC 窗口渲染；后端阶梯在 config.BEHAVIOR_TIERS，改档两处同步。
 const BTC_TIERS = [0.3, 0.5, 0.8];
 
-function bandOf(rgb: string, tier: number, x1: string, x2: string, dir: 1 | -1): SegmentBand {
-  // 图内色带只做弱背景（0.12/0.26/0.40 + 0.5档以上描边）；高对比读数交给下方档位轨道
-  return {
-    x1,
-    x2,
-    fill: `rgba(${rgb},${(0.12 + 0.14 * tier).toFixed(2)})`,
-    stroke: tier >= 1 ? `rgba(${rgb},0.45)` : undefined,
-    tier,
-    dir,
-  };
-}
-
-function segmentSpan(seg: SegmentBandInput, buckets: { time: string; utcMinute: string }[]): [number, number] | null {
-  const s = seg.start.timestamp_utc?.slice(0, 16);
-  const e = seg.end.timestamp_utc?.slice(0, 16);
-  if (!s || !e) return null;
-  const firstIdx = buckets.findIndex((b) => b.utcMinute >= s);
-  let lastIdx = -1;
-  for (let i = buckets.length - 1; i >= 0; i--) {
-    if (buckets[i].utcMinute <= e) { lastIdx = i; break; }
-  }
-  if (firstIdx < 0 || lastIdx < 0 || firstIdx > lastIdx) return null;    // 段在图域外
-  return [firstIdx, lastIdx];
-}
-
-// 主图色带（2026-07-11 用户拍板：整段单色，不做段内切分——嵌套段透明度叠加会糊成渐变）：
-// 一段一带，按段的最高档位定深浅，方向定色。段内演进只在下方档位轨道呈现。
-export function deriveSegmentBands(
-  segments: SegmentBandInput[],
-  buckets: { time: string; utcMinute: string }[],
-): SegmentBand[] {
-  if (!buckets.length) return [];
-  const out: SegmentBand[] = [];
-  for (const seg of segments) {
-    const span = segmentSpan(seg, buckets);
-    if (!span) continue;
-    const tier = Math.min(seg.tier_idx, 2);
-    const dir: 1 | -1 = seg.direction > 0 ? 1 : -1;
-    const rgb = dir > 0 ? "94,234,212" : "251,113,133";                  // 站内青涨/玫红跌
-    out.push(bandOf(rgb, tier, buckets[span[0]].time, buckets[span[1]].time, dir));
-  }
-  return out;
-}
-
-// 档位轨道色带：段内档位演进，口径与段检测器同源 = 15min 开收净（close vs 3 桶前 close）
-// 滚动峰值锁存，触及 0.5/0.8 档的时点切 run（0.3 最低、0.5 高、0.8 最高，高度+深浅双通道）。
-// 相邻 run 共享边界桶且按时间序后画深色；末位单桶 run 向前借一桶保证可见（擦线触发常在段末）。
-export function deriveLaneBands(
-  segments: SegmentBandInput[],
+export function deriveTierLanes(
   buckets: { time: string; utcMinute: string }[],
   closes?: (number | null)[],   // 标注品种在各桶的净值/价格（同刻度即可）
-): SegmentBand[] {
-  if (!buckets.length) return [];
-  const out: SegmentBand[] = [];
-  for (const seg of segments) {
-    const span = segmentSpan(seg, buckets);
-    if (!span) continue;
-    const firstIdx = span[0];
-    const lastIdx = span[1];
-    const tierCap = Math.min(seg.tier_idx, 2);
-    const dir: 1 | -1 = seg.direction > 0 ? 1 : -1;
-    const rgb = dir > 0 ? "94,234,212" : "251,113,133";
-
-    const hasCloses = !!closes && closes.slice(firstIdx, lastIdx + 1).some((v) => v != null);
-    if (!hasCloses || tierCap === 0) {
-      out.push(bandOf(rgb, tierCap, buckets[firstIdx].time, buckets[lastIdx].time, dir));
-      continue;
+): TierLaneBand[][] {
+  const lanes: TierLaneBand[][] = [[], [], []];
+  if (!buckets.length || !closes) return lanes;
+  const marks: ({ tier: number; dir: 1 | -1 } | null)[] = buckets.map((_, i) => {
+    const cur = closes[i];
+    const prev = i >= 3 ? closes[i - 3] : null;               // 3 桶 = 15min 开收净
+    if (cur == null || prev == null || prev === 0) return null;
+    const chg = (cur / prev - 1) * 100;
+    const a = Math.abs(chg);
+    let tier = -1;
+    for (let k = BTC_TIERS.length - 1; k >= 0; k--) {
+      if (a >= BTC_TIERS[k]) { tier = k; break; }
     }
-    const reached: number[] = [];
-    let rollMax = 0;
-    for (let i = firstIdx; i <= lastIdx; i++) {
-      const cur = closes![i];
-      const prev = i >= 3 ? closes![i - 3] : null;          // 3 桶 = 15min 开收净（与检测触发原语同款）
-      if (cur != null && prev != null && prev !== 0) {
-        rollMax = Math.max(rollMax, Math.abs(cur / prev - 1) * 100);
-      }
-      let r = 0;
-      for (let k = BTC_TIERS.length - 1; k >= 1; k--) {
-        if (rollMax >= BTC_TIERS[k]) { r = k; break; }
-      }
-      reached.push(Math.min(r, tierCap));
+    if (tier < 0) return null;
+    return { tier, dir: chg >= 0 ? 1 : -1 };
+  });
+  let i = 0;
+  while (i < marks.length) {
+    const m = marks[i];
+    if (!m) { i += 1; continue; }
+    let j = i;
+    while (j + 1 < marks.length) {
+      const n = marks[j + 1];
+      if (!n || n.tier !== m.tier || n.dir !== m.dir) break;
+      j += 1;
     }
-    let runStart = 0;
-    for (let i = 1; i <= reached.length; i++) {
-      if (i === reached.length || reached[i] !== reached[runStart]) {
-        const endIdx = Math.min(i, reached.length - 1);                   // 延伸到下一 run 的起点桶
-        const startIdx = runStart === endIdx ? Math.max(0, runStart - 1) : runStart;
-        out.push(bandOf(rgb, reached[runStart], buckets[firstIdx + startIdx].time, buckets[firstIdx + endIdx].time, dir));
-        runStart = i;
-      }
-    }
+    // 15min 净覆盖到前 3 桶，条带统一向前借一桶起笔：单桶读数也可见，且相邻 run 无缝
+    lanes[m.tier].push({
+      x1: buckets[Math.max(0, i - 1)].time,
+      x2: buckets[j].time,
+      tier: m.tier,
+      dir: m.dir,
+      fill: `rgba(${m.dir > 0 ? "94,234,212" : "251,113,133"},${(0.5 + 0.22 * m.tier).toFixed(2)})`,
+    });
+    i = j + 1;
   }
-  return out;
-}
-
-// 档位轨道：同一批段的实色版（方向色 × 深浅 0.50/0.72/0.94），画在主图正下方的窄条里。
-export function laneFill(band: SegmentBand): string {
-  const rgb = band.dir > 0 ? "94,234,212" : "251,113,133";
-  return `rgba(${rgb},${(0.5 + 0.22 * band.tier).toFixed(2)})`;
+  return lanes;
 }

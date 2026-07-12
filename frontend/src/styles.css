@@ -1435,3 +1435,11 @@ code {
   background: var(--panel-2); color: var(--muted); border: 1px solid var(--line-soft);
 }
 .pad-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(94, 234, 212, 0.10); }
+
+/* 三行档位速度带（2026-07-12 白板拍板）：行位=档位，0.3 上 / 0.5 中 / 0.8 下 */
+.tier-lane-row { position: relative; }
+.tier-lane-row + .tier-lane-row { border-top: 1px dashed rgba(148, 163, 184, 0.16); }
+.tier-lane-label {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; z-index: 1;
+}
