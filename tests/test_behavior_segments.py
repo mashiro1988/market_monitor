@@ -73,3 +73,21 @@ def test_data_hole_no_baseline_no_trigger():
 def test_below_base_tier_no_segment():
     prices = [100.00, 100.05, 100.10, 100.15, 100.20, 100.25]
     assert detect_segments(_series(prices), TIERS) == []
+
+
+def test_no_trigger_when_lookback_target_precedes_data(): 
+    """48h 滑动边界 bug（2026-07-12 实弹，段 07-09 12:40）：数据被切片后，触发器的
+    15min 基线目标落在数据起点之前，±10min 容差把基线滑到更近的点——10 分钟变动被
+    当成 15 分钟净（-0.567% 假触发 0.5 档），48 小时后幽灵覆写正确的段。
+    修复：回看目标早于数据首点 → 不成触发。"""
+    from datetime import datetime, timedelta
+    t0 = datetime(2026, 7, 9, 12, 40)
+    step = timedelta(minutes=5)
+    # 切片后的数据：从 12:40 开始（12:25-12:35 被边界切掉），12:50 相对 12:40 -0.567%
+    prices = [62900.0, 62586.1, 62543.6, 62614.9]      # 12:40 12:45 12:50 12:55
+    pts = [(t0 + step * i, p) for i, p in enumerate(prices)]
+    segs = detect_segments(pts, [0.3, 0.5, 0.8])
+    # 12:50/12:55 的回看目标（12:35/12:40）：12:35 在数据外 → 12:50 不得成触发；
+    # 12:55 目标 12:40 = 数据首点 → 合法触发（净 -0.453% → 0.3 档）
+    assert all(s.tier_idx == 0 for s in segs), [(s.start_dt, s.tier_idx) for s in segs]
+    assert all(abs(s.net_pct) < 0.5 for s in segs)

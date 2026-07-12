@@ -62,8 +62,14 @@ def detect_segments(points: list[tuple[datetime, float]], tiers: list[float],
     merge_gap = timedelta(minutes=merge_gap_min)
 
     # —— 触发扫描（每个点回看 15min 开收净）——
+    # 边界防护（2026-07-12 实弹修复）：回看目标早于数据首点时不成触发——否则 48h 滑动
+    # 切片让 ±tol 容差把基线滑到更近的点，10min 变动被当成 15min 净（假触发高档，
+    # 事发 48h 后幽灵覆写正确 tier；见 tests::test_no_trigger_when_lookback_target_precedes_data）。
     triggers: list[dict] = []
+    data_start = pts[0][0]
     for ts, price in pts:
+        if ts - wm < data_start:
+            continue
         baseline = _nearest(pts, ts - wm, ts, tol)
         if baseline is None or not baseline[1]:
             continue
