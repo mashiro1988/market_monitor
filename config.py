@@ -258,6 +258,9 @@ PRICE_SOURCES = {
         "S&P500期货": "ES=F",
         "纳指期货": "NQ=F",
         "道指期货": "YM=F",
+        # CME 日经225期货（Globex ~23h/日）：行为引擎日经参照的替代源（^N225 现货只有东京时段），
+        # 2026-07-12 用户拍板；^N225 保留用于市场概览展示。
+        "日经期货": "NIY=F",
     },
     # 亚洲指数
     "asian_indices": {
@@ -302,7 +305,10 @@ ONCHAIN_GAPFILL = {
 }
 GAPFILL_SOURCE = "okx_gapfill"   # 合成点 source 哨兵；后端一律引用本常量
 GAPFILL_ENABLED = os.getenv("GAPFILL_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
-GAPFILL_STALENESS_MINUTES = int(os.getenv("GAPFILL_STALENESS_MINUTES", "60"))   # 真实 bar 超此分钟数判休市
+# 2026-07-12 用户拍板 60→20：每日 CME 1h 维护段原来恰好躲过补点判定（判定生效时市场已重开），
+# 联动曲线每天北京 05-06 点留洞；降到 20min 后洞缩到 ~20min。误判风险可控：真实 bar 一回来
+# 就按 source-aware UPDATE 覆盖同槽代理点。
+GAPFILL_STALENESS_MINUTES = int(os.getenv("GAPFILL_STALENESS_MINUTES", "20"))   # 真实 bar 超此分钟数判休市
 GAPFILL_PERP_FRESH_MINUTES = int(os.getenv("GAPFILL_PERP_FRESH_MINUTES", "12")) # perp 自身新鲜度
 GAPFILL_STEP_PCT = float(os.getenv("GAPFILL_STEP_PCT", "0.05"))   # 单根 5m 跳变上限（抓坏价）
 GAPFILL_SEAM_PCT = float(os.getenv("GAPFILL_SEAM_PCT", "0.15"))   # 补点段首点 seam 上限（抓坏锚点）
