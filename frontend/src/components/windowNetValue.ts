@@ -129,19 +129,27 @@ export function deriveTierLanes(
 ): TierLaneBand[][] {
   const lanes: TierLaneBand[][] = [[], [], []];
   if (!buckets.length || !closes) return lanes;
-  const marks: ({ tier: number; dir: 1 | -1 } | null)[] = buckets.map((_, i) => {
+  // 退档滞回（2026-07-12 实弹修正：23:40 段 -0.535/-0.495/-0.520 中间桶 5‰ 擦线掉档，
+  // 连贯下冲被切成 0.5/0.3/0.5 三明治）：进档按原阈值（触及即升，与检测器同语义），
+  // 同向连续时退档需跌破 档位×0.9；变向或断读即重置。
+  const marks: ({ tier: number; dir: 1 | -1 } | null)[] = [];
+  let last: { tier: number; dir: 1 | -1 } | null = null;
+  for (let i = 0; i < buckets.length; i++) {
     const cur = closes[i];
     const prev = i >= 3 ? closes[i - 3] : null;               // 3 桶 = 15min 开收净
-    if (cur == null || prev == null || prev === 0) return null;
+    if (cur == null || prev == null || prev === 0) { marks.push(null); last = null; continue; }
     const chg = (cur / prev - 1) * 100;
     const a = Math.abs(chg);
+    const dir: 1 | -1 = chg >= 0 ? 1 : -1;
     let tier = -1;
     for (let k = BTC_TIERS.length - 1; k >= 0; k--) {
-      if (a >= BTC_TIERS[k]) { tier = k; break; }
+      const bar = last && last.dir === dir && k <= last.tier ? BTC_TIERS[k] * 0.9 : BTC_TIERS[k];
+      if (a >= bar) { tier = k; break; }
     }
-    if (tier < 0) return null;
-    return { tier, dir: chg >= 0 ? 1 : -1 };
-  });
+    if (tier < 0) { marks.push(null); last = null; continue; }
+    last = { tier, dir };
+    marks.push(last);
+  }
   let i = 0;
   while (i < marks.length) {
     const m = marks[i];
