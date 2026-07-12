@@ -326,7 +326,11 @@ def test_list_annotations_needs_review(session):
     """Phase3b A策略③：已标 (start,end) 对不上当前重算窗口 → needs_review=True；对得上 → False。"""
     now = annotation_service.utc_now_naive().replace(second=0, microsecond=0)
     # BTC 15min 窗口（config scale wm15/threshold0.5）：-2% 急跌
-    for mago, p in [(40, 100000.0), (35, 100000.0), (30, 100000.0), (25, 100000.0),
+    # 平场引导拉长到 70min：边缘第二道闸（2026-07-12）不入库"切片左缘 30min 内起步"的段，
+    # 夹具数据首点即切片首点，异动必须离首点 ≥30min 才能成段
+    for mago, p in [(70, 100000.0), (65, 100000.0), (60, 100000.0), (55, 100000.0),
+                    (50, 100000.0), (45, 100000.0),
+                    (40, 100000.0), (35, 100000.0), (30, 100000.0), (25, 100000.0),
                     (20, 99000.0), (15, 98000.0), (10, 98000.0), (5, 98000.0)]:
         session.add(PriceSnapshot(timestamp=now - timedelta(minutes=mago),
                                   asset_class="crypto", symbol="BTC/USDT", name="BTC/USDT", price=p, source="t"))

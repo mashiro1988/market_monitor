@@ -142,6 +142,12 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
     pad = timedelta(minutes=BIG_WINDOW_MINUTES + 15)
     btc_points = _points(session, symbol, now - timedelta(hours=DETECT_LOOKBACK_HOURS) - pad, now)
     segments = detect_segments(btc_points, tiers)
+    # 边缘第二道闸（2026-07-12）：起步落在数据切片左缘 30min（15 基线+10 容差+5 合并隙）内的
+    # 检测结果不入库——切片拦腰扫过长段时会以段中起点检出"尾巴碎片"（键对不上原行 → 幽灵新行）。
+    # 边缘外的行本轮不碰（保留完整数据轮次写下的正确值），live 右缘不受影响。
+    if btc_points:
+        edge_cutoff = btc_points[0][0] + timedelta(minutes=30)
+        segments = [s for s in segments if s.start_dt >= edge_cutoff]
     rows = [_upsert_segment(session, symbol, s) for s in segments]
     session.flush()
 

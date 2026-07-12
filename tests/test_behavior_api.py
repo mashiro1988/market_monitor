@@ -140,3 +140,22 @@ def test_linkage_range_follows_window(client_session):
     nq2 = next(s_ for s_ in body2["series"] if s_["symbol"] == "NQ=F")
     seeded_last = t0 + timedelta(minutes=5 * 44)   # 种子数据最后一根 bar
     assert len(nq2["points"]) <= ((seeded_last - (t0 + timedelta(minutes=30))).total_seconds() / 300) + 2
+
+
+def test_edge_started_segments_not_upserted(client_session):
+    """48h 边缘第二道闸（2026-07-12 用户追问'段有 1 小时呢'暴露）：起步落在数据切片
+    左缘 30min 内的检测结果不入库——否则长段被边缘拦腰扫过时会以段中起点插入
+    "尾巴碎片"新行（tier 虽正确但重复计数）。"""
+    client, session = client_session
+    t0 = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - timedelta(hours=6)
+    # 数据从 t0 才有（模拟切片左缘），前 20min 就是一波大涨的"后半截"
+    btc = [100.0, 100.4, 100.8, 101.0] + [101.0] * 26
+    for i, p in enumerate(btc):
+        session.add(PriceSnapshot(timestamp=t0 + timedelta(minutes=5 * i), asset_class="crypto",
+                                  symbol="BTC/USDT", name="BTC", price=p, source="test"))
+    session.commit()
+    bc.classify(session, "BTC/USDT", now=t0 + timedelta(minutes=5 * len(btc) + 160))
+    from models.behavior import BehaviorSegment
+    rows = session.query(BehaviorSegment).filter(
+        BehaviorSegment.start_dt < t0 + timedelta(minutes=30)).all()
+    assert rows == [], [(r.start_dt, r.tier_idx) for r in rows]   # 边缘 30min 内起步的一律不入库
