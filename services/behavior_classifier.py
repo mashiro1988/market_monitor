@@ -23,7 +23,7 @@ from models.price import PriceSnapshot
 from services.behavior_segments import Segment, detect_segments
 from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, rolling_peak
 
-CLASS_VERSION = "v1"
+CLASS_VERSION = "v2"   # v2 = ESS 地板 + coverage 0.5 定稿口径（2026-07-12）；换版可全历史重跑
 DETECT_LOOKBACK_HOURS = 48
 COUNT_ONLY = "count_only"
 COMPOSITION_CLASSES = (
