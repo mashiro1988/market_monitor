@@ -24,7 +24,8 @@ from services.behavior_segments import Segment, detect_segments
 from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, rolling_peak
 
 CLASS_VERSION = "v2"   # v2 = ESS 地板 + coverage 0.5 定稿口径（2026-07-12）；换版可全历史重跑
-DETECT_LOOKBACK_HOURS = 48
+DETECT_LOOKBACK_HOURS = 48       # 上下文水库：保证 WRITE_HORIZON 内结束的段起点上下文必然完整
+WRITE_HORIZON_HOURS = 6          # settle 写保护（R2）：只写结束时间在此之内的段；历史只读
 COUNT_ONLY = "count_only"
 COMPOSITION_CLASSES = (
     "macro_news", "pure_resonance", "industry_news", "sentiment",
@@ -114,7 +115,7 @@ def _settled(seg_end: datetime, now: datetime) -> bool:
     return seg_end + timedelta(minutes=margin) <= now
 
 
-def _upsert_segment(session: Session, symbol: str, seg: Segment) -> BehaviorSegment | None:
+def _upsert_segment(session: Session, symbol: str, seg: Segment) -> BehaviorSegment:
     """按 (symbol, start_dt, direction) 匹配：段随数据生长时更新同一行，不重复建段。"""
     row = (
         session.query(BehaviorSegment)
@@ -122,20 +123,6 @@ def _upsert_segment(session: Session, symbol: str, seg: Segment) -> BehaviorSegm
         .one_or_none()
     )
     if row is None:
-        # 边缘第三道闸（2026-07-12）：新段若被已有同向行**完整包含** → 不插入。
-        # 场景：48h 切片切进带内部喘息（触发间隔可达 20min 仍成链）的长段，切片内
-        # "重新起跑"的尾巴绕过 30min 边缘闸，但它必然 ⊂ 完整数据轮次写下的原行。
-        # 稀释回退的兄弟段互相只部分重叠、不包含，不受影响。
-        contained = (
-            session.query(BehaviorSegment)
-            .filter(BehaviorSegment.symbol == symbol,
-                    BehaviorSegment.direction == seg.direction,
-                    BehaviorSegment.start_dt <= seg.start_dt,
-                    BehaviorSegment.end_dt >= seg.end_dt)
-            .first()
-        )
-        if contained is not None and (contained.start_dt, contained.end_dt) != (seg.start_dt, seg.end_dt):
-            return None
         row = BehaviorSegment(symbol=symbol, start_dt=seg.start_dt, direction=seg.direction,
                               end_dt=seg.end_dt, tier_idx=seg.tier_idx, tier_max=seg.tier_max,
                               net_pct=seg.net_pct, amp_pct=seg.amp_pct, key_ts=seg.key_ts)
@@ -156,13 +143,21 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
     pad = timedelta(minutes=BIG_WINDOW_MINUTES + 15)
     btc_points = _points(session, symbol, now - timedelta(hours=DETECT_LOOKBACK_HOURS) - pad, now)
     segments = detect_segments(btc_points, tiers)
-    # 边缘第二道闸（2026-07-12）：起步落在数据切片左缘 30min（15 基线+10 容差+5 合并隙）内的
-    # 检测结果不入库——切片拦腰扫过长段时会以段中起点检出"尾巴碎片"（键对不上原行 → 幽灵新行）。
-    # 边缘外的行本轮不碰（保留完整数据轮次写下的正确值），live 右缘不受影响。
-    if btc_points:
-        edge_cutoff = btc_points[0][0] + timedelta(minutes=30)
-        segments = [s for s in segments if s.start_dt >= edge_cutoff]
-    rows = [r for r in (_upsert_segment(session, symbol, s) for s in segments) if r is not None]
+    # settle 写保护（2026-07-12 架构简化 R2，用户拍板"实时判断 + settle 后冻结"）：
+    # 只登记「结束时间在 WRITE_HORIZON 内」的段（实时/生长中的，右缘数据天然完整），
+    # 外加已存在但未 settle 的行（停机恢复后需要补 settle）。更早的历史一律只读——
+    # 48h 扫描对旧数据爱检出什么都行，它没有笔；空洞/边缘从此与历史行无关。
+    # 数据补洞后的历史修正走显式重算（scripts/一次性），不靠扫描顺手改。
+    write_cutoff = now - timedelta(hours=WRITE_HORIZON_HOURS)
+    unsettled_keys = {
+        (r.start_dt, r.direction)
+        for r in session.query(BehaviorSegment.start_dt, BehaviorSegment.direction)
+        .filter(BehaviorSegment.symbol == symbol, BehaviorSegment.classification.is_(None))
+        .all()
+    }
+    segments = [s for s in segments
+                if s.end_dt >= write_cutoff or (s.start_dt, s.direction) in unsettled_keys]
+    rows = [_upsert_segment(session, symbol, s) for s in segments]
     session.flush()
 
     # 0.3 档：只计数

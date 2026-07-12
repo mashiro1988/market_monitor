@@ -142,46 +142,65 @@ def test_linkage_range_follows_window(client_session):
     assert len(nq2["points"]) <= ((seeded_last - (t0 + timedelta(minutes=30))).total_seconds() / 300) + 2
 
 
-def test_edge_started_segments_not_upserted(client_session):
-    """48h 边缘第二道闸（2026-07-12 用户追问'段有 1 小时呢'暴露）：起步落在数据切片
-    左缘 30min 内的检测结果不入库——否则长段被边缘拦腰扫过时会以段中起点插入
-    "尾巴碎片"新行（tier 虽正确但重复计数）。"""
+def test_settled_history_is_read_only(client_session):
+    """settle 写保护（2026-07-12 架构简化 R2）：结束时间超出 WRITE_HORIZON 的历史区，
+    不管切片把数据切成什么样，检测结果一律不入库——历史行只读，空洞/边缘与它无关。"""
     client, session = client_session
-    t0 = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - timedelta(hours=6)
-    # 数据从 t0 才有（模拟切片左缘），前 20min 就是一波大涨的"后半截"
+    now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    t0 = now - timedelta(hours=10)          # 历史区（超出 6h 写入域）
+    # 模拟被切得七零八落的历史数据：只剩一波大涨的"后半截"
     btc = [100.0, 100.4, 100.8, 101.0] + [101.0] * 26
     for i, p in enumerate(btc):
         session.add(PriceSnapshot(timestamp=t0 + timedelta(minutes=5 * i), asset_class="crypto",
                                   symbol="BTC/USDT", name="BTC", price=p, source="test"))
     session.commit()
-    bc.classify(session, "BTC/USDT", now=t0 + timedelta(minutes=5 * len(btc) + 160))
+    bc.classify(session, "BTC/USDT", now=now)
     from models.behavior import BehaviorSegment
-    rows = session.query(BehaviorSegment).filter(
-        BehaviorSegment.start_dt < t0 + timedelta(minutes=30)).all()
-    assert rows == [], [(r.start_dt, r.tier_idx) for r in rows]   # 边缘 30min 内起步的一律不入库
+    rows = session.query(BehaviorSegment).all()
+    assert rows == [], [(r.start_dt, r.tier_idx) for r in rows]   # 历史区什么都不许写
 
 
-def test_contained_fragment_not_inserted(client_session):
-    """48h 边缘第三道闸（2026-07-12 用户追问'2小时段+段内喘息'暴露）：切片内重新起跑
-    的尾巴段若被已有同向行完整包含 → 不插入（原行是完整数据轮次的真相）。
-    稀释回退的兄弟段互不包含，不受影响。"""
+def test_settled_long_segment_untouched_by_lull_slice(client_session):
+    """写保护覆盖'2小时段+段内喘息被切片拦腰'场景（原第三道闸的反例）：已 settle 的
+    长段行原样保留，切片内检出的尾巴碎片因结束时间在历史区而不入库。"""
     client, session = client_session
     from models.behavior import BehaviorSegment
-    t0 = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - timedelta(hours=8)
-    # 完整数据轮次写下的原行：2 小时长段（起点在本轮切片之外）
+    now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    t0 = now - timedelta(hours=12)          # 历史区
     session.add(BehaviorSegment(
         symbol="BTC/USDT", start_dt=t0 - timedelta(minutes=60), end_dt=t0 + timedelta(minutes=150),
         direction=-1, tier_idx=1, tier_max=0.5, net_pct=-0.9, amp_pct=1.0,
         key_ts=t0, classification="pure_resonance", class_version="v2"))
     session.commit()
-    # 本轮切片：数据从 t0 开始，前 45min 喘息（平），之后段内下跌重新起跑——
-    # 首个触发的基线落在 t0+35（≥ 闸二的 30min 线），若无第三道闸就会插入尾巴碎片
+    # 切片视角：前 45min 喘息（平），之后段内下跌"重新起跑"
     prices = [100000.0] * 9 + [100000.0 * (1 - 0.0015 * i) for i in range(1, 19)]
     for i, p in enumerate(prices):
         session.add(PriceSnapshot(timestamp=t0 + timedelta(minutes=5 * i), asset_class="crypto",
                                   symbol="BTC/USDT", name="BTC", price=p, source="test"))
     session.commit()
-    bc.classify(session, "BTC/USDT", now=t0 + timedelta(minutes=5 * len(prices) + 160))
+    bc.classify(session, "BTC/USDT", now=now)
     rows = session.query(BehaviorSegment).filter(BehaviorSegment.direction == -1).all()
-    assert len(rows) == 1, [(r.start_dt, r.end_dt) for r in rows]   # 只剩原行，尾巴碎片没进来
+    assert len(rows) == 1, [(r.start_dt, r.end_dt) for r in rows]   # 只剩原行
     assert rows[0].start_dt == t0 - timedelta(minutes=60)
+    assert rows[0].tier_idx == 1                                    # 原行未被改写
+
+
+def test_unsettled_row_still_settles_after_downtime(client_session):
+    """写保护的例外：已存在但未 settle 的行（如停机 >6h 后恢复），即使结束时间落在
+    历史区，也允许本轮补写 settle——不能让它永远卡在'未 settle 不可标'。"""
+    client, session = client_session
+    from models.behavior import BehaviorSegment
+    now = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    t0 = now - timedelta(hours=9)
+    # 造一个当时实时检出、但停机没来得及 settle 的行 + 完整价格上下文
+    btc = [100.0] * 18 + [100.2, 100.4, 100.6] + [100.6] * 10
+    for i, p in enumerate(btc):
+        session.add(PriceSnapshot(timestamp=t0 + timedelta(minutes=5 * i), asset_class="crypto",
+                                  symbol="BTC/USDT", name="BTC", price=p, source="test"))
+    session.commit()
+    bc.classify(session, "BTC/USDT", now=t0 + timedelta(minutes=5 * 21))   # 段刚结束就检出（未到 settle）
+    row = session.query(BehaviorSegment).filter(BehaviorSegment.tier_idx >= 1).one()
+    assert row.classification is None                              # 未 settle
+    bc.classify(session, "BTC/USDT", now=now)                      # 9 小时后恢复
+    session.refresh(row)
+    assert row.classification is not None                          # 补 settle 成功

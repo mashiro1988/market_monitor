@@ -30,13 +30,20 @@ class Segment:
 
 def _nearest(points: list[tuple[datetime, float]], target: datetime,
              not_after: datetime, tolerance: timedelta) -> tuple[datetime, float] | None:
-    """target ±tolerance 内、且不晚于 not_after 的最近点（同距取更早）。"""
+    """target 或更早、tolerance 内的最近点。
+
+    只往早取（2026-07-12 架构简化 R1）：基线晚于目标 = 分母时距变短 = 读数虚高——
+    这正是切片边缘/数据空洞把 10 分钟变动读成"15 分钟净"的根源。只往早取后，
+    任何边缘/空洞只会拉长分母（读数保守、触发变钝），永不虚高，无需再区分
+    "边缘"与"空洞"。"""
     best: tuple[datetime, float] | None = None
     best_gap: timedelta | None = None
     for ts, price in points:
         if ts > not_after:
             break
-        gap = abs(ts - target)
+        if ts > target:
+            continue
+        gap = target - ts
         if gap > tolerance:
             continue
         if best_gap is None or gap < best_gap:
@@ -61,15 +68,9 @@ def detect_segments(points: list[tuple[datetime, float]], tiers: list[float],
     tol = timedelta(minutes=tolerance_min)
     merge_gap = timedelta(minutes=merge_gap_min)
 
-    # —— 触发扫描（每个点回看 15min 开收净）——
-    # 边界防护（2026-07-12 实弹修复）：回看目标早于数据首点时不成触发——否则 48h 滑动
-    # 切片让 ±tol 容差把基线滑到更近的点，10min 变动被当成 15min 净（假触发高档，
-    # 事发 48h 后幽灵覆写正确 tier；见 tests::test_no_trigger_when_lookback_target_precedes_data）。
+    # —— 触发扫描（每个点回看 15min 开收净；基线只往早取，见 _nearest R1 注释）——
     triggers: list[dict] = []
-    data_start = pts[0][0]
     for ts, price in pts:
-        if ts - wm < data_start:
-            continue
         baseline = _nearest(pts, ts - wm, ts, tol)
         if baseline is None or not baseline[1]:
             continue
