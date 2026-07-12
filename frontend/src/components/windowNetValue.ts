@@ -131,7 +131,7 @@ export function deriveTierLanes(
   if (!buckets.length || !closes) return lanes;
   // 退档滞回（2026-07-12 实弹修正：23:40 段 -0.535/-0.495/-0.520 中间桶 5‰ 擦线掉档，
   // 连贯下冲被切成 0.5/0.3/0.5 三明治）：进档按原阈值（触及即升，与检测器同语义），
-  // 同向连续时退档需跌破 档位×0.9；变向或断读即重置。
+  // 同向连续时退档需跌破 档位×0.95（2026-07-12 用户定参）；变向或断读即重置。
   const marks: ({ tier: number; dir: 1 | -1 } | null)[] = [];
   let last: { tier: number; dir: 1 | -1 } | null = null;
   for (let i = 0; i < buckets.length; i++) {
@@ -143,7 +143,7 @@ export function deriveTierLanes(
     const dir: 1 | -1 = chg >= 0 ? 1 : -1;
     let tier = -1;
     for (let k = BTC_TIERS.length - 1; k >= 0; k--) {
-      const bar = last && last.dir === dir && k <= last.tier ? BTC_TIERS[k] * 0.9 : BTC_TIERS[k];
+      const bar = last && last.dir === dir && k <= last.tier ? BTC_TIERS[k] * 0.95 : BTC_TIERS[k];
       if (a >= bar) { tier = k; break; }
     }
     if (tier < 0) { marks.push(null); last = null; continue; }

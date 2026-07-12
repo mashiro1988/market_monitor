@@ -132,8 +132,8 @@ describe("deriveTierLanes", () => {
   ));
   it("routes each bucket to its highest touched tier lane (with de-escalation)", () => {
     // 15min 净（closes[i]/closes[i-3]−1）：t3 +0.35% → 0.3 行；t4 +0.55% → 0.5 行；
-    // t5 +0.85% → 0.8 行；t6 +0.40% → 回落 0.3 行（低于 0.5 档滞回线 0.45，真降档可见）；
-    // t7 +0.20% → 无带（低于 0.3 档滞回线 0.27）
+    // t5 +0.85% → 0.8 行；t6 +0.40% → 回落 0.3 行（低于 0.5 档滞回线 0.475，真降档可见）；
+    // t7 +0.20% → 无带（低于 0.3 档滞回线 0.285）
     const closes = [1.0, 1.0, 1.0, 1.0035, 1.0055, 1.0085, 1.00752, 1.0075];
     const lanes = deriveTierLanes(bks, closes);
     expect(lanes[0].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t2", "t3", 1], ["t5", "t6", 1]]);
@@ -142,9 +142,9 @@ describe("deriveTierLanes", () => {
   });
   it("hysteresis keeps a grazing run in one lane (2026-07-11 23:40 实弹)", () => {
     // 实弹：-0.535% / -0.495% / -0.520%——中间一桶以 5‰ 之差跌破 0.5 被切成 0.5/0.3/0.5 三明治。
-    // 滞回：进档按原阈值，退档需 < 档位×0.9（0.5 档滞回线 0.45）→ 三桶合成一条 0.5 带。
+    // 滞回：进档按原阈值，退档需 < 档位×0.95（0.5 档滞回线 0.475）→ 三桶合成一条 0.5 带。
     const closes = [1.0, 1.0, 1.0, 0.99465, 0.99520, 0.99480, 0.9950, 0.9952];
-    // t3: -0.535%；t4: -0.480%（≥0.45 滞回保持）；t5: -0.520%；t6/t7 停在低位（15min 净≈0，无带）
+    // t3: -0.535%；t4: -0.480%（≥0.475 滞回保持）；t5: -0.520%；t6/t7 停在低位（15min 净≈0，无带）
     const lanes = deriveTierLanes(bks, closes);
     expect(lanes[1].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t2", "t5", -1]]);
     expect(lanes[0].filter((b) => b.dir === -1)).toEqual([]);   // 中间桶不再掉进 0.3 行
