@@ -20,7 +20,8 @@ const INK = "#8ea0b6";
 const TEXT = "#dbe7f3";
 export const REF_COLORS: Record<string, string> = {
   "NQ=F": "#5E86E0",
-  "^N225": "#4F9CCB",
+  "NIY=F": "#4F9CCB",
+  "^N225": "#4F9CCB",   // 旧段存量 s_scores 键，显示兼容
   "GC=F": "#C89B3C",
   "US_2Y": "#93691A",
   "DX-Y.NYB": "#9873CC",

@@ -168,7 +168,7 @@ ANNOTATION_WINDOW_SCALES = {
 # 七个对标 = 风险资产 / 亚洲风险资产 / 地缘供给 / 避险 / 利率 / 美元流动性 / 加密贝塔。
 ANNOTATION_REFERENCE_ASSETS = [
     ("NQ=F", "纳指"),
-    ("^N225", "日经225"),
+    ("NIY=F", "日经225"),   # 2026-07-12 起 CME 日经期货（Globex ~23h）；^N225 现货只有东京时段，退役出参照
     ("CL=F", "原油"),
     ("GC=F", "黄金"),
     ("US_2Y", "美债2Y", "bp"),
@@ -189,13 +189,14 @@ BEHAVIOR_TIERS: dict[str, list[float] | None] = {
     "GC=F": [0.23, 0.39, 0.61],     # 复核吻合（偏差9.1%）
     "DX-Y.NYB": [0.043, 0.069, 0.102],  # 复核吻合（偏差7.8%）
     "CL=F": [0.38, 0.63, 0.94],     # 2026-07-09 校准首跑定档（双锚偏差6.0%，6379 bars）
-    "^N225": [0.42, 0.68, 1.16],    # 2026-07-09 定档（偏差11.5%；仅JST盘中1364 bars，休市由覆盖闸兜底）
+    # ^N225 现货参照已退役（2026-07-12，旧档 [0.42,0.68,1.16] 供追溯）——只有东京时段、样本薄
+    "NIY=F": [0.32, 0.52, 0.83],    # 2026-07-12 定档：CME 日经期货 30d 5206 bars，双锚偏差 3.9%（rarity/volratio 中点）
     # US_2Y：2026-07-09 校准首跑 30d 仅 3 个有效 15min 样本——CNBC 债券快照撑不起 5min 严格网格，
     # S 不可用，维持禁用；标注页 reference_changes/三段展示走容差取点、不受影响。数据源修好后再校准。
     "US_2Y": None,
 }
 # 共振参照资产（有序 = 展示/S 计算顺序）；与 ANNOTATION_REFERENCE_ASSETS 同源，BTC 是主品种不进参照。
-BEHAVIOR_REF_SYMBOLS = ["NQ=F", "^N225", "GC=F", "US_2Y", "DX-Y.NYB", "CL=F"]
+BEHAVIOR_REF_SYMBOLS = ["NQ=F", "NIY=F", "GC=F", "US_2Y", "DX-Y.NYB", "CL=F"]
 # 共振分 S 判级 cutoff（回放校准项）：max|S| ≥ HI 共振；MID~HI 弱共振（仅展示证据）；< MID 独立。
 BEHAVIOR_S_HI = float(os.getenv("BEHAVIOR_S_HI", "0.5"))
 BEHAVIOR_S_MID = float(os.getenv("BEHAVIOR_S_MID", "0.3"))

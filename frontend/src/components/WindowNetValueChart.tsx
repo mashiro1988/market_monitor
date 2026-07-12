@@ -10,7 +10,7 @@ import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveTierLan
 import type { TierLaneBand } from "./windowNetValue";
 
 // 默认篮子（含美债10Y/美元指数——低波动，走右副轴）；独立持久化，与 MarketPage 互不影响。
-const DEFAULT_BASKET = ["YM=F", "NQ=F", "000001.SS", "^N225", "^KS11", "GC=F", "CL=F", "BTC/USDT", "US_10Y", "DX-Y.NYB"];
+const DEFAULT_BASKET = ["YM=F", "NQ=F", "000001.SS", "NIY=F", "^KS11", "GC=F", "CL=F", "BTC/USDT", "US_10Y", "DX-Y.NYB"];
 const BASKET_STORAGE_KEY = "annotation-chart-symbols";
 // 这些品种波动比 BTC/股指小一个量级，放净值左轴会被压成平线 → 走右侧自适应副轴（虚线）。
 const SECONDARY_AXIS_SYMBOLS = new Set(["US_10Y", "US_2Y", "JP_10Y", "JP_2Y", "DX-Y.NYB"]);
