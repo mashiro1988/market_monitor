@@ -142,14 +142,14 @@ class PriceScanner(SourceHealthMixin):
         inserted_yfinance = self._save_records(yfinance_records, end_time)
         all_records.extend(yfinance_records)
         logger.info(
-            f"[PriceBackfill] yfinance 返回 {len(yfinance_records)} 条，新增 {inserted_yfinance} 条"
+            f"[PriceBackfill] yfinance 返回 {len(yfinance_records)} 条，新增 {len(inserted_yfinance)} 条"
         )
 
         okx_records = self.okx.fetch_history(start_time, end_time)
         inserted_okx = self._save_records(okx_records, end_time)
         all_records.extend(okx_records)
         logger.info(
-            f"[PriceBackfill] OKX 返回 {len(okx_records)} 条，新增 {inserted_okx} 条"
+            f"[PriceBackfill] OKX 返回 {len(okx_records)} 条，新增 {len(inserted_okx)} 条"
         )
 
         logger.info(
@@ -170,13 +170,14 @@ class PriceScanner(SourceHealthMixin):
             logger.error(f"[PriceScanner] {source.name} 采集失败: {e}")
             return []
 
-    def _save_records(self, records: list[PriceRecord], scan_time: datetime) -> int:
-        """将价格记录写入数据库；重复 (symbol, timestamp) 记录则跳过"""
+    def _save_records(self, records: list[PriceRecord], scan_time: datetime) -> list[PriceRecord]:
+        """将价格记录写入数据库；重复 (symbol, timestamp) 跳过。
+        返回本轮实际插入（含真实覆盖合成）的记录。"""
         if not records:
-            return 0
+            return []
 
         session = get_session()
-        inserted = 0
+        inserted: list[PriceRecord] = []
         try:
             grouped: dict[str, list[tuple[PriceRecord, datetime]]] = defaultdict(list)
             for r in records:
@@ -232,7 +233,7 @@ class PriceScanner(SourceHealthMixin):
                                 row.source = r.source
                                 existing_meta[snap_ts] = (r.price, r.source)
                                 last_price = r.price          # 链推进到真实价
-                                inserted += 1
+                                inserted.append(r)
                             continue
                         # 既有真实 / 入库为合成 → 维持原跳过逻辑
                         if ex_price is not None:
@@ -260,13 +261,13 @@ class PriceScanner(SourceHealthMixin):
                     session.add(snapshot)
                     existing_timestamps.add(snap_ts)
                     last_price = r.price
-                    inserted += 1
+                    inserted.append(r)
 
             session.commit()
             return inserted
         except Exception as e:
             session.rollback()
             logger.error(f"[PriceScanner] 保存失败: {e}")
-            return 0
+            return []
         finally:
             session.close()

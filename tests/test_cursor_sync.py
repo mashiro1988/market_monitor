@@ -47,6 +47,30 @@ def test_empty_symbol_seeds_full_cap():
     assert sync_window_start(latest, NOW, cap_hours=72) == NOW - timedelta(hours=72)
 
 
+# ---------- 幂等写入返回 ----------
+
+from scanners.base import PriceRecord
+import scanners.price_scanner as ps_module
+from scanners.price_scanner import PriceScanner
+
+
+def _rec(ts, symbol="NQ=F", price=100.0, source="yfinance"):
+    return PriceRecord(asset_class="futures", symbol=symbol, name="纳指期货",
+                       price=price, source=source, timestamp=ts)
+
+
+def test_save_records_returns_only_inserted(make_session, monkeypatch):
+    monkeypatch.setattr(ps_module, "get_session", make_session)
+    scanner = PriceScanner()
+    t1, t2 = NOW - timedelta(minutes=10), NOW - timedelta(minutes=5)
+    first = scanner._save_records([_rec(t1)], NOW)
+    assert [r.timestamp for r in first] == [t1]
+    second = scanner._save_records([_rec(t1), _rec(t2)], NOW)   # t1 已存在
+    assert [r.timestamp for r in second] == [t2]
+    third = scanner._save_records([_rec(t1), _rec(t2)], NOW)    # 全部已存在 → 幂等
+    assert third == []
+
+
 # ---------- 游标查询 ----------
 
 def test_latest_by_symbol_reads_max_ts_and_none_for_missing(make_session):
