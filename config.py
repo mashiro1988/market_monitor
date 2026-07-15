@@ -478,29 +478,6 @@ ANNOTATION_EVENT_MERGE_GAP_MINUTES = int(os.getenv("ANNOTATION_EVENT_MERGE_GAP_M
 ANNOTATION_SETTLE_MARGIN_MINUTES = int(os.getenv("ANNOTATION_SETTLE_MARGIN_MINUTES", "30"))
 
 # ============================================================
-# Dune Analytics 休眠配置：当前 app/API 不加载，仅保留给旧查询脚本手动试验。
-# ============================================================
-DUNE_API_KEY = os.getenv("DUNE_API_KEY", "")
-DUNE_QUERY_ID_ETH_TOP100_NETFLOW = os.getenv("DUNE_QUERY_ID_ETH_TOP100_NETFLOW", "")
-DUNE_QUERY_ID_ETH_DAILY_STATS = os.getenv("DUNE_QUERY_ID_ETH_DAILY_STATS", "")
-DUNE_QUERY_ID_ETH_MONTHLY_TX_COUNT = os.getenv("DUNE_QUERY_ID_ETH_MONTHLY_TX_COUNT", "")
-DUNE_QUERY_ID_ETH_CEX_DAILY_INOUT = os.getenv("DUNE_QUERY_ID_ETH_CEX_DAILY_INOUT", "")
-
-# ============================================================
-# 旧版兼容（供旧数据采集代码引用）
-# ============================================================
-DATA_SOURCES = {
-    "stock_symbols": PRICE_SOURCES["us_indices"],
-    "bond_symbols": {
-        "US_10Y": "171.US10Y",
-        "US_2Y": "171.US2Y",
-        "JP_10Y": "171.JP10Y",
-        "JP_2Y": "171.JP2Y",
-    },
-    "crypto_symbols": PRICE_SOURCES["crypto"],
-}
-
-# ============================================================
 # 远程数据源（BMAC SFTP）配置
 # ============================================================
 # 仅声明默认值，实际值从 .env 读取。具体含义见 docs/specs/remote_data_integration.md §5。
