@@ -17,7 +17,8 @@ class YFinancePriceSource(BaseSource):
 
     # K 线粒度：对齐到"最近已收盘的 5 分钟"
     INTERVAL = "5m"
-    PERIOD = "7d"  # 覆盖周末/假期后仍能找到最近的有效 K 线
+    # 同步窗口封顶（小时）：yahoo 5m 数据可得范围内留裕量；窗口起点由 PriceScanner 按游标公式计算。
+    CAP_HOURS = 168
 
     def __init__(self):
         self.symbol_groups = {
@@ -167,7 +168,7 @@ class YFinancePriceSource(BaseSource):
         try:
             df = yf.download(
                 ticker_list,
-                period=self.PERIOD,
+                period="7d",
                 interval=self.INTERVAL,
                 prepost=False,
                 auto_adjust=True,
@@ -230,9 +231,11 @@ class YFinancePriceSource(BaseSource):
         ticker_list = list(tickers)
 
         try:
+            # yfinance 对 naive datetime 按本地时区解释，必须传 tz-aware UTC（游标同步 2026-07-14）
             df = yf.download(
                 ticker_list,
-                period=self.PERIOD,
+                start=start_ts.replace(tzinfo=timezone.utc),
+                end=end_ts.replace(tzinfo=timezone.utc),
                 interval=self.INTERVAL,
                 prepost=False,
                 auto_adjust=True,

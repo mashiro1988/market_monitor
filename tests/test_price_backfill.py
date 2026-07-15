@@ -31,7 +31,7 @@ def test_price_backfill_caps_window_to_72_hours(monkeypatch):
 
     scanner.yfinance = SimpleNamespace(fetch_history=fake_fetch_history("yfinance"))
     scanner.okx = SimpleNamespace(fetch_history=fake_fetch_history("okx"))
-    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: len(records))
+    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: list(records))
 
     records = scanner.backfill_missing_history(max_hours=200, end_time=end_time)
 
@@ -46,7 +46,7 @@ def test_price_backfill_zero_hours_disables_sources(monkeypatch):
     scanner = PriceScanner.__new__(PriceScanner)
     scanner.yfinance = SimpleNamespace(fetch_history=lambda start, end: (_ for _ in ()).throw(AssertionError()))
     scanner.okx = SimpleNamespace(fetch_history=lambda start, end: (_ for _ in ()).throw(AssertionError()))
-    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: len(records))
+    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: list(records))
 
     assert scanner.backfill_missing_history(max_hours=0, end_time=datetime(2026, 4, 28, 12, 0)) == []
 
@@ -73,7 +73,7 @@ def test_price_backfill_range_uses_exact_window(monkeypatch):
 
     scanner.yfinance = SimpleNamespace(fetch_history=fake_fetch_history("yfinance"))
     scanner.okx = SimpleNamespace(fetch_history=fake_fetch_history("okx"))
-    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: len(records))
+    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: list(records))
 
     records = scanner.backfill_range(start_time, end_time)
 
