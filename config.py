@@ -122,6 +122,10 @@ SCAN_INTERVALS = {
 }
 SCAN_ROLLING_BACKFILL_INTERVALS = int(os.getenv("SCAN_ROLLING_BACKFILL_INTERVALS", "2"))
 
+# 游标同步"至少回看"地板（小时，两源共用）：平时每轮固定回看 24h，晚到 ≤24h 的 bar 自动进库
+# （原 gap_repair 的覆盖搬进主路径）；停机更久时窗口按库内游标自动拉长（见 sync_window_start）。
+SYNC_MIN_LOOKBACK_HOURS = int(os.getenv("SYNC_MIN_LOOKBACK_HOURS", "24"))
+
 # 预测市场图表的「活跃」宽限期（分钟）：最后一笔快照落后于表内最新快照超过该值的市场，
 # 视为已停止跟踪（软删除后快照断流），整体从 /predictions 与 families 图表消失。
 # 基准取表内最新快照时间而非墙钟，调度器宕机时不会误杀全部市场。

@@ -4,6 +4,7 @@
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from loguru import logger
+from sqlalchemy import func
 from database import get_session
 from models.price import PriceSnapshot
 from scanners.base import BaseSource, PriceRecord, SourceHealthMixin
@@ -12,6 +13,34 @@ from scanners.sources.okx_source import OkxPriceSource
 from scanners.sources.cnbc_bond_source import CnbcBondQuoteSource
 from scanners.gap_filler import GapFiller
 import config
+
+
+def sync_window_start(latest_by_symbol: dict[str, datetime | None], now: datetime,
+                      cap_hours: float) -> datetime:
+    """游标同步窗口起点：max(now − CAP, min(cursor − 30min, now − 24h))。
+
+    cursor = 各品种"库内最新 bar 时刻"的最小值（最落后品种决定，快的品种多拉部分幂等跳过）；
+    任一品种库空 → 直接取 now − CAP（首轮种子拉满）。三种取值是同一条公式，不是三个机制。"""
+    cap_start = now - timedelta(hours=float(cap_hours))
+    cursors = list(latest_by_symbol.values())
+    if not cursors or any(c is None for c in cursors):
+        return cap_start
+    floor_start = now - timedelta(hours=float(config.SYNC_MIN_LOOKBACK_HOURS))
+    cursor_start = min(cursors) - timedelta(minutes=30)
+    return max(cap_start, min(cursor_start, floor_start))
+
+
+def _latest_by_symbol(session, symbols: list[str]) -> dict[str, datetime | None]:
+    """各品种库内最新 bar 时刻；没有行的品种为 None。"""
+    latest: dict[str, datetime | None] = {sym: None for sym in symbols}
+    rows = (
+        session.query(PriceSnapshot.symbol, func.max(PriceSnapshot.timestamp))
+        .filter(PriceSnapshot.symbol.in_(symbols))
+        .group_by(PriceSnapshot.symbol)
+        .all()
+    )
+    latest.update({sym: ts for sym, ts in rows})
+    return latest
 
 
 class PriceScanner(SourceHealthMixin):
