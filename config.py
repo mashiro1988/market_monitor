@@ -120,8 +120,6 @@ SCAN_INTERVALS = {
     "news": 5,
     "prediction": 5,
 }
-SCAN_ROLLING_BACKFILL_INTERVALS = int(os.getenv("SCAN_ROLLING_BACKFILL_INTERVALS", "2"))
-
 # 游标同步"至少回看"地板（小时，两源共用）：平时每轮固定回看 24h，晚到 ≤24h 的 bar 自动进库
 # （原 gap_repair 的覆盖搬进主路径）；停机更久时窗口按库内游标自动拉长（见 sync_window_start）。
 SYNC_MIN_LOOKBACK_HOURS = int(os.getenv("SYNC_MIN_LOOKBACK_HOURS", "24"))

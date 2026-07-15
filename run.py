@@ -22,15 +22,7 @@ configure_logging()
 
 from loguru import logger
 
-from services.scan_runtime import (
-    configure_proxy_env,
-    next_aligned_run_time,
-    recent_closed_interval_window,
-    run_news_backfill_once,
-    run_price_backfill_once,
-    run_scan_once,
-    run_startup_backfill_once,
-)
+from services.scan_runtime import configure_proxy_env, run_scan_once
 
 configure_proxy_env()
 

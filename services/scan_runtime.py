@@ -11,6 +11,7 @@ from pathlib import Path
 from loguru import logger
 
 import config
+from database import get_session
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SCAN_LOCK_PATH = str(ROOT_DIR / ".scan.lock")
@@ -209,9 +210,11 @@ def run_scan_once():
         news_records = news_scanner.scan()
 
         try:
-            _run_rolling_backfill(price_scanner, news_scanner, scan_started_at)
+            _run_news_rolling_backfill(news_scanner, scan_started_at)
         except Exception as exc:
-            logger.exception(f"[ScanCatchup] rolling backfill failed, continuing scan: {exc}")
+            logger.exception(f"[ScanCatchup] news rolling backfill failed, continuing scan: {exc}")
+
+        _tag_new_news()
 
         logger.info("[Scan] 开始预测市场扫描...")
         pred_scanner = PredictionScanner()
@@ -255,45 +258,32 @@ def _log_source_statuses(source_statuses: dict[str, list[dict]]) -> None:
             logger.info("[ScanSource] {} returned 0 rows: {}", group, names)
 
 
-def _run_rolling_backfill(price_scanner, news_scanner, now: datetime):
-    """每轮扫描后补最近几个已收盘 interval，只写库，不参与本轮告警评估。"""
-    intervals = max(0, int(getattr(config, "SCAN_ROLLING_BACKFILL_INTERVALS", 2)))
-    if intervals <= 0:
-        return
-
-    price_interval = max(1, int(config.SCAN_INTERVALS.get("price", 5)))
-    price_start, price_end = recent_closed_interval_window(price_interval, intervals, now)
-    logger.info(
-        f"[ScanCatchup] 回补最近 {intervals} 个价格 interval: "
-        f"{price_start.isoformat()} - {price_end.isoformat()} UTC"
-    )
-    price_scanner.backfill_range(price_start, price_end)
-
+def _run_news_rolling_backfill(news_scanner, now: datetime):
+    """每轮扫描后补最近 2 个已收盘新闻 interval（价格侧已由游标同步窗口自愈，2026-07-14 重构）。"""
     news_interval = max(1, int(config.SCAN_INTERVALS.get("news", 5)))
-    news_start, news_end = recent_closed_interval_window(news_interval, intervals, now)
+    news_start, news_end = recent_closed_interval_window(news_interval, 2, now)
     logger.info(
-        f"[ScanCatchup] 回补最近 {intervals} 个新闻 interval: "
+        f"[ScanCatchup] 回补最近 2 个新闻 interval: "
         f"{news_start.isoformat()} - {news_end.isoformat()} UTC"
     )
     news_scanner.backfill_range(news_start, news_end, score_records=False)
 
 
-def run_price_backfill_once(max_hours: int | None = None):
-    """执行一次价格历史回补；与常规扫描共用 `.scan.lock` 防止并发。"""
-    configure_proxy_env()
-    with _scan_lock() as acquired:
-        if not acquired:
-            return []
-
-        from database import create_tables
-
-        create_tables()
-
-        from scanners.price_scanner import PriceScanner
-
-        price_scanner = PriceScanner()
-        return price_scanner.backfill_missing_history(max_hours=max_hours)
-
+def _tag_new_news() -> None:
+    """给未打标新闻打内容标签（游标语义：tagged_at IS NULL 即待办；原每小时 job 收编，2026-07-14）。
+    无 DEEPSEEK_API_KEY 静默跳过；异常自吞不影响扫描。"""
+    if not getattr(config, "DEEPSEEK_API_KEY", ""):
+        return
+    from services.news_tagging import tag_untagged
+    session = get_session()
+    try:
+        tagged = tag_untagged(session, limit=200)
+        if tagged:
+            logger.info(f"[NewsTagging] 本轮打标 {tagged} 条")
+    except Exception as exc:
+        logger.exception(f"[NewsTagging] 打标失败，不影响本轮扫描: {exc}")
+    finally:
+        session.close()
 
 def run_news_backfill_once(max_hours: int | None = None):
     """执行一次新闻历史回补；与常规扫描共用 `.scan.lock` 防止并发。"""
@@ -313,7 +303,7 @@ def run_news_backfill_once(max_hours: int | None = None):
 
 
 def run_startup_backfill_once():
-    """启动后回补价格与新闻；单次持有扫描锁，避免长回补期间并发扫描。"""
+    """启动后回补停机期间缺失的新闻；价格由常规扫描的游标同步窗口自愈（2026-07-14 重构）。"""
     configure_proxy_env()
     with _scan_lock() as acquired:
         if not acquired:
@@ -324,25 +314,6 @@ def run_startup_backfill_once():
         create_tables()
 
         from scanners.news_scanner import NewsScanner
-        from scanners.price_scanner import PriceScanner
 
-        started_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        price_scanner = PriceScanner()
-        news_scanner = NewsScanner()
-
-        price_records = price_scanner.backfill_missing_history()
-        news_records = news_scanner.backfill_missing_history()
-
-        finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        scan_interval = max(1, int(config.SCAN_INTERVALS.get("price", 5)))
-        elapsed_seconds = (finished_at - started_at).total_seconds()
-        if elapsed_seconds >= scan_interval * 60:
-            catchup_hours = max(1, int((elapsed_seconds + 3599) // 3600))
-            logger.info(
-                f"[StartupBackfill] 启动回补耗时 {elapsed_seconds / 60:.1f} 分钟，"
-                f"追加回补最近 {catchup_hours} 小时价格缺口"
-            )
-            price_records.extend(
-                price_scanner.backfill_missing_history(max_hours=catchup_hours, end_time=finished_at)
-            )
-        return price_records, news_records
+        news_records = NewsScanner().backfill_missing_history()
+        return [], news_records

@@ -152,6 +152,39 @@ def test_scan_heals_mid_window_hole(make_session, monkeypatch):
     assert [r.timestamp for r in healed] == [t2]
 
 
+# ---------- 打标挂尾（原每小时 job 收编） ----------
+
+from services import scan_runtime
+
+
+def test_tag_new_news_skips_without_key(monkeypatch):
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "", raising=False)
+    called = []
+    monkeypatch.setattr("services.news_tagging.tag_untagged",
+                        lambda session, limit: called.append(limit) or 0)
+    scan_runtime._tag_new_news()
+    assert called == []                          # 无 key 静默跳过
+
+
+def test_tag_new_news_invokes_tagger_with_limit(monkeypatch, make_session):
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "sk-test", raising=False)
+    monkeypatch.setattr("services.scan_runtime.get_session", make_session, raising=False)
+    called = []
+    monkeypatch.setattr("services.news_tagging.tag_untagged",
+                        lambda session, limit: called.append(limit) or 3)
+    scan_runtime._tag_new_news()
+    assert called == [200]
+
+
+def test_tag_new_news_error_does_not_raise(monkeypatch, make_session):
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "sk-test", raising=False)
+    monkeypatch.setattr("services.scan_runtime.get_session", make_session, raising=False)
+    def boom(session, limit):
+        raise RuntimeError("api down")
+    monkeypatch.setattr("services.news_tagging.tag_untagged", boom)
+    scan_runtime._tag_new_news()                 # 不应抛出
+
+
 # ---------- 游标查询 ----------
 
 def test_latest_by_symbol_reads_max_ts_and_none_for_missing(make_session):
