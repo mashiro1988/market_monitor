@@ -118,55 +118,6 @@ class OkxPriceSource(BaseSource):
             points.append((start_ms, bar_end, price, volume))
         return points
 
-    def _pick_last_closed(self, candles: list) -> tuple[datetime, float, float | None, float | None] | None:
-        """
-        OKX candles are newest first:
-        [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm].
-        ts is bar start; timestamp stored in DB is bar end.
-        """
-        closed = self._closed_candle_points(candles)
-        if not closed:
-            return None
-
-        latest = closed[0]
-        previous = closed[1] if len(closed) > 1 else None
-
-        bar_end = latest[1]
-        price = latest[2]
-        prev_price = previous[2] if previous else None
-        volume = latest[3]
-        return bar_end, price, prev_price, volume
-
-    def _fetch_one(self, exchange, display_symbol: str, configured_symbol: str) -> PriceRecord | None:
-        for inst_id in self._candidate_inst_ids(display_symbol, configured_symbol, "swap"):
-            try:
-                picked = self._pick_last_closed(self._fetch_candles(exchange, inst_id))
-                if picked:
-                    return self._make_record(display_symbol, picked, "okx_swap_5m")
-                logger.warning(f"[OKX] {display_symbol}({inst_id}) 合约 5m K线数据为空")
-            except Exception as e:
-                if self._is_missing_instrument(e):
-                    logger.info(f"[OKX] {display_symbol} 无合约 {inst_id}，尝试现货")
-                    continue
-                logger.error(f"[OKX] 采集合约 {display_symbol}({inst_id}) 失败: {type(e).__name__}: {e}")
-                continue
-
-        for inst_id in self._candidate_inst_ids(display_symbol, configured_symbol, "spot"):
-            try:
-                picked = self._pick_last_closed(self._fetch_candles(exchange, inst_id))
-                if picked:
-                    return self._make_record(display_symbol, picked, "okx_spot_5m")
-                logger.warning(f"[OKX] {display_symbol}({inst_id}) 现货 5m K线数据为空")
-            except Exception as e:
-                if self._is_missing_instrument(e):
-                    logger.info(f"[OKX] {display_symbol} 无现货 {inst_id}")
-                    continue
-                logger.error(f"[OKX] 采集现货 {display_symbol}({inst_id}) 失败: {type(e).__name__}: {e}")
-                return None
-
-        logger.warning(f"[OKX] {display_symbol} 合约/现货均不可用")
-        return None
-
     def _fetch_history_for_inst(
         self,
         exchange,
@@ -267,23 +218,6 @@ class OkxPriceSource(BaseSource):
             source=source,
             timestamp=bar_end,
         )
-
-    def fetch(self) -> list[PriceRecord]:
-        records = []
-        try:
-            exchange = self._make_exchange()
-        except Exception as e:
-            logger.error(f"[OKX] 初始化交易所失败: {type(e).__name__}: {e}")
-            return records
-
-        for symbol, configured_symbol in self.symbols.items():
-            record = self._fetch_one(exchange, symbol, configured_symbol)
-            if record:
-                records.append(record)
-
-        if not records:
-            logger.warning("[OKX] 本轮未产出任何记录")
-        return records
 
     def fetch_history(self, start_ts: datetime, end_ts: datetime) -> list[PriceRecord]:
         """批量拉取时间窗内的历史 5m K 线收盘价，用于中断后回补。"""

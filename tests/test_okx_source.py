@@ -1,4 +1,4 @@
-"""Tests for OKX source fallback behavior."""
+"""Tests for OKX source fallback behavior（游标同步后唯一路径 = fetch_history 族）。"""
 from datetime import datetime, timezone
 
 import ccxt
@@ -19,7 +19,13 @@ def _candles(latest_close: float = 105.0, previous_close: float = 100.0) -> list
     ]
 
 
-def test_current_fetch_retries_swap_then_uses_spot(monkeypatch):
+# start=00:05 让首页 oldest_start(00:00) 触到 start_floor（start−5min），分页在第一页后即终止，
+# 断言的调用序列不掺分页噪音。
+_START = datetime(2026, 1, 1, 0, 5)
+_END = datetime(2026, 1, 1, 0, 15)
+
+
+def test_history_retries_swap_then_uses_spot(monkeypatch):
     monkeypatch.setattr(okx_source.time, "sleep", lambda *_: None)
     source = OkxPriceSource.__new__(OkxPriceSource)
 
@@ -36,16 +42,16 @@ def test_current_fetch_retries_swap_then_uses_spot(monkeypatch):
 
     exchange = Exchange()
 
-    record = source._fetch_one(exchange, "BTC", "BTCUSDT")
+    records = source._fetch_history_one(exchange, "BTC", "BTCUSDT", _START, _END)
 
-    assert record is not None
     assert exchange.calls == ["BTC-USDT-SWAP", "BTC-USDT-SWAP", "BTC-USDT"]
-    assert record.source == "okx_spot_5m"
-    assert record.symbol == "BTC/USDT"
-    assert record.change_pct == pytest.approx(5.0)
+    assert records, "现货回退应产出记录"
+    assert all(r.source == "okx_spot_5m" for r in records)
+    assert records[-1].symbol == "BTC/USDT"
+    assert records[-1].change_pct == pytest.approx(5.0)
 
 
-def test_current_fetch_keeps_swap_when_retry_succeeds(monkeypatch):
+def test_history_keeps_swap_when_retry_succeeds(monkeypatch):
     monkeypatch.setattr(okx_source.time, "sleep", lambda *_: None)
     source = OkxPriceSource.__new__(OkxPriceSource)
 
@@ -61,8 +67,7 @@ def test_current_fetch_keeps_swap_when_retry_succeeds(monkeypatch):
 
     exchange = Exchange()
 
-    record = source._fetch_one(exchange, "BTC", "BTCUSDT")
+    records = source._fetch_history_one(exchange, "BTC", "BTCUSDT", _START, _END)
 
-    assert record is not None
     assert exchange.calls == 2
-    assert record.source == "okx_swap_5m"
+    assert records and all(r.source == "okx_swap_5m" for r in records)

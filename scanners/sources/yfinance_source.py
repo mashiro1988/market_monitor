@@ -77,25 +77,6 @@ class YFinancePriceSource(BaseSource):
                 bars.append((end, float(value)))
         return bars
 
-    def _pick_last_closed(self, close_series: pd.Series) -> tuple[datetime, float, float | None] | None:
-        """
-        从 5m K 线序列中挑出"最近一根已收盘"的 bar。
-        yfinance K 线以 bar 起始时刻为索引，end = start + 5min。
-        只接受 end <= now 的 bar；返回 (end_utc_naive, close, prev_close)。
-        """
-        close_series = close_series.dropna()
-        if close_series.empty:
-            return None
-
-        valid_items = self._iter_closed_bars(close_series)
-
-        if not valid_items:
-            return None
-
-        last_end, last_close = valid_items[-1]
-        prev_close = valid_items[-2][1] if len(valid_items) >= 2 else None
-        return last_end, last_close, prev_close
-
     def _records_from_close_series(
         self,
         asset_class: str,
@@ -156,64 +137,6 @@ class YFinancePriceSource(BaseSource):
         if isinstance(close, pd.DataFrame):
             return close[symbol]
         return close
-
-    def fetch(self) -> list[PriceRecord]:
-        """一次 yf.download 批量拉取所有 yfinance 品种的最新 5m K 线收盘价"""
-        records: list[PriceRecord] = []
-        tickers = self._all_tickers()
-        if not tickers:
-            return records
-        ticker_list = list(tickers)
-
-        try:
-            df = yf.download(
-                ticker_list,
-                period="7d",
-                interval=self.INTERVAL,
-                prepost=False,
-                auto_adjust=True,
-                progress=False,
-                threads=True,
-                session=self._session,
-            )
-        except Exception as e:
-            logger.error(f"yfinance 批量下载失败: {e}")
-            return records
-
-        if df.empty:
-            logger.warning("yfinance 5m 批量下载返回空数据")
-            return records
-
-        for symbol in ticker_list:
-            asset_class, name = tickers[symbol]
-            try:
-                close_series = self._close_series_for(df, symbol)
-
-                picked = self._pick_last_closed(close_series)
-                if picked is None:
-                    logger.warning(f"{name} ({symbol}) 无已收盘 5m K 线")
-                    continue
-
-                end_ts, price, prev_price = picked
-                change_pct = (
-                    (price - prev_price) / prev_price * 100
-                    if prev_price else None
-                )
-
-                records.append(PriceRecord(
-                    asset_class=asset_class,
-                    symbol=symbol,
-                    name=name,
-                    price=price,
-                    prev_price=prev_price,
-                    change_pct=change_pct,
-                    source=self.name,
-                    timestamp=end_ts,
-                ))
-            except Exception as e:
-                logger.error(f"yfinance 解析 {symbol} 失败: {e}")
-
-        return records
 
     def fetch_history(self, start_ts: datetime, end_ts: datetime) -> list[PriceRecord]:
         """批量拉取时间窗内的历史 5m K 线收盘价，用于中断后回补。"""

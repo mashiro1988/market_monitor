@@ -1,7 +1,7 @@
 """
 数据源基类 - 所有数据源适配器的抽象基类
 """
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -101,10 +101,10 @@ class BaseSource(ABC):
 
     name: str = "unknown"
 
-    @abstractmethod
     def fetch(self) -> list:
-        """获取数据，返回标准化记录列表（PriceRecord / NewsRecord / PredictionRecord）"""
-        ...
+        """获取"当前"口径数据。仅剩即时报价类源（CNBC 债券）实现；
+        K 线类源走 fetch_history 区间语义（游标同步重构 2026-07-14）。"""
+        raise NotImplementedError(f"{self.name} 不支持即时 fetch，请用 fetch_history")
 
     def health_check(self) -> bool:
         """检查数据源是否可用，默认返回 True"""
