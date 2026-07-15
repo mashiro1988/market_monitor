@@ -83,7 +83,7 @@
 | `created_at`, `updated_at` | datetime | |
 
 `(symbol, window_start, window_end)` 唯一。upsert 复用已存在的行。迁移在 `database.migrate_legacy_annotations`（启动时幂等执行三步：v1 二元行 selected 全部→driver、no_clear→no_news_driver；v2.0 旧枚举行按映射表升级到 v2.1；Phase3a 把存量 `post_hoc_explanation` / `contradictory` 从 `news_roles` 移除为 noise）。
-窗口生成为**多尺度**（`config.ANNOTATION_WINDOW_SCALES`：15m+60m 档、各带净变动门槛、跨档重叠同向合并，`annotation_service.load_price_windows`）；价格快照缺口由 `services/gap_repair.py` 每小时 :37 自愈（扫描→批量回补→复扫→按回补结果分类→企业微信账目）。
+窗口生成为**多尺度**（`config.ANNOTATION_WINDOW_SCALES`：15m+60m 档、各带净变动门槛、跨档重叠同向合并，`annotation_service.load_price_windows`）；价格快照缺口由 5min 扫描的**游标同步窗口**自愈（每轮至少回看 24h、停机自动拉长，2026-07-14 重构，无独立自愈 job）。
 
 **写入方：** `annotation_service.upsert_annotation`（落库前 `_normalize_v2_labels` 归一化，非法枚举 400；兼容字段由 `_derive_compat_fields` `services/annotation_service.py:795` 派生）。
 **读取方：** `annotation_service.load_price_windows`、`export_training_jsonl`（JSONL 训练集导出，`GET /api/annotations/export`，候选全量展开；未标=noise，redundant 不当负样本）。
@@ -325,7 +325,7 @@ symbol -> CMC 板块 的多对多映射本地缓存。
 - `prediction_markets.prev_probability` - 预测告警靠它对比；删除或改用途会改变告警语义。
 - `chart_utils.to_beijing_time` - 所有 API 响应和 WeCom 推送都过它。
 - `config.MARKET_OVERVIEW_DEFAULT_SYMBOLS` - 同时被 React 默认图和整点摘要使用。
-- `config.SCAN_INTERVALS` - 任何变更会传导到 `next_aligned_run_time`、`_run_rolling_backfill`、`AlertEngine` 窗口容差。
+- `config.SCAN_INTERVALS` - 任何变更会传导到 `next_aligned_run_time`、`_run_news_rolling_backfill`、`AlertEngine` 窗口容差。
 - `(sector_returns.snapshot_at, category)` 唯一约束 - 板块写入幂等和榜单读取都依赖它。
 - `remote_puller` 的 `last_cutoff_ts` - 当前用于跳过已拉取 pivot；如果板块扫描失败，它不会表达"已拉取但下游未成功"。
 - `config.SECTOR_WHITELIST` - 决定算哪些板块；改它后必须 `python run.py refresh-sectors` 让 `cmc_symbol_categories` 重新同步，否则 sector_scanner 用过期映射。

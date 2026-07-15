@@ -2,6 +2,13 @@
 
 > 最新的放最前。每条 5 行：日期 / 背景 / 决策 / 拒绝的备选 / 影响。
 
+## 2026-07-14 - 价格管道游标同步：采集=回补单路径，四层补 bar 机制与小时 job 退役
+
+- 背景：yfinance.fetch() 每 5min 已下载 7 天全量 5m K 线却只留最后一根，滚动追平/每小时 gap_repair/启动回补三层机制一直在取回主路径丢弃的数据；四层交互复杂度是"48h 段重算"issue 的根源。yfinance 间歇限频的主因也是"每轮下两遍"（~9,600 请求/天）。
+- 决策：scan() 每轮对每源算一个窗口 `max(now−CAP, min(cursor−30min, now−24h))`（cursor=库内最落后品种最新 bar；yf CAP=7d、OKX CAP=72h），调 fetch_history 幂等入库——游标即数据库本身。gap_repair 连监控都不留（用户拍板），验证=部署 3-7 天后线上只读缺口报告；小时 job 整个删除：traditional_open 入库即设（部署时一次性清存量 NULL），LLM 打标 tag_untagged（本身就是 tagged_at IS NULL 游标语义）挂到 5min 新闻扫描尾部。请求量 ~9,600→~4,600/天。
+- 拒绝的备选：保留小时缺口监控 job（休市缺口造成推送噪音，且主路径自愈后"源有库缺"趋近不可能）；yfinance 继续 period=7d（解析/查重 5 倍白干）；逐洞重算作用域（对账幂等已是护栏，包络+幂等结果相同）。
+- 影响：调度器无任何"回头补数据"的 job；spec `docs/superpowers/specs/2026-07-14-cursor-sync-price-pipeline-design.md`、plan 同名 plans/；告警评估收到的 price_records 变为"本轮插入"，staleness 保护挡追平轮历史 bar；两源只剩 fetch_history 族（BaseSource.fetch 去抽象，仅 CNBC 报价源实现）；段重算脚本维持存档（补写事件仅剩长停机一种来源）。
+
 ## 2026-07-12 - 段检测架构简化：实时判断 + settle 写保护，撤销三道边缘闸
 
 - 背景：48h 滑动扫描会覆写历史段，切片边缘/数据空洞让"看不全数据的轮次"改错历史（实弹：0.3 段被追认成 0.5 窗口、78 条幽灵行）；连打三道边缘闸后用户指出"3 小时空洞会被切得七零八落，一直打补丁不是我要的方式"。
