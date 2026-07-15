@@ -96,34 +96,6 @@ def _start_background_scheduler() -> BackgroundScheduler:
                 logger.exception("[FastAPI Scheduler] remote_data_cycle monitor failed")
             logger.exception("[FastAPI Scheduler] remote_data_cycle failed: {}", exc)
 
-    def gap_repair_cycle() -> None:
-        """每小时数据settle作业集（news-impact-engine Phase 1），顺序固定：
-        ① 价格快照缺口自愈（扫近 24h 缺口→回补→复扫→企业微信账目，services/gap_repair.py）；
-        ② 补 traditional_open（纯日历**前置条件**，新闻入库时本应已设，这里兜底历史/漏设的 NULL 行）；
-        ③ 给"可打标"新闻（已补前置条件 traditional_open）打主题/方向/量级（services/news_tagging.py）。
-        先补开市时段的价格洞、再确保前置条件、最后打标。内容标签纯看新闻、不看价格，**不需要等反应
-        窗口走完**——"窗口走完"只约束反应度量与 driver 标注。打标只写内容标签、不再碰 traditional_open。"""
-        try:
-            from services.gap_repair import run_gap_repair
-            stats = run_gap_repair()
-            logger.info("[FastAPI Scheduler] gap_repair finished: {}", stats)
-        except Exception as exc:
-            logger.exception("[FastAPI Scheduler] gap_repair failed: {}", exc)
-        try:
-            from services.news_tagging import backfill_traditional_open, tag_untagged
-            from database import SessionLocal
-            session = SessionLocal()
-            try:
-                filled = backfill_traditional_open(session)
-                if filled:
-                    logger.info("[FastAPI Scheduler] traditional_open backfill: {} 条", filled)
-                tagged = tag_untagged(session, limit=1500)
-                logger.info("[FastAPI Scheduler] news_tagging finished: {} 条", tagged)
-            finally:
-                session.close()
-        except Exception as exc:
-            logger.exception("[FastAPI Scheduler] news_tagging failed: {}", exc)
-
     def data_retention_cycle() -> None:
         """每日清理过期快照；被标注/训练集引用的新闻由 service 层保护。"""
         try:
@@ -225,15 +197,6 @@ def _start_background_scheduler() -> BackgroundScheduler:
         IntervalTrigger(seconds=REMOTE_DATA_CYCLE_SEC,
                         start_date=datetime.now(timezone.utc) + timedelta(seconds=2)),
         id="remote_data_cycle",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-    # 缺口自愈：每小时第 37 分（错开 5 分钟扫描栅格与整点 hourly_summary），常态一轮 <10s。
-    scheduler.add_job(
-        gap_repair_cycle,
-        CronTrigger(minute=37),
-        id="gap_repair",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

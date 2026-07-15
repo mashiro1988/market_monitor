@@ -166,8 +166,9 @@ def test_scheduler_registers_operational_jobs(monkeypatch):
         "startup_backfill",
         "hourly_summary",
         "remote_data_cycle",
-        "gap_repair",
         "data_retention",
         "cmc_bootstrap",
         "cmc_refresh",
     }.issubset(job_ids)
+    # 游标同步重构（2026-07-14）：缺口自愈 job 退役，洞由扫描窗口自愈
+    assert "gap_repair" not in job_ids
