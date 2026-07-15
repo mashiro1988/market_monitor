@@ -13,10 +13,15 @@
 2. 验证不靠常驻 job：scan 周期日志记录各源插入计数（过程 log）；部署 3-7 天后用线上只读查询出
    缺口报告，人工判定新路径是否 robust。偶发缺失接受；极端情况走一次性专项补（手动，无常驻机制）。
 
+3. 小时 job（`gap_repair_cycle`）**整个删除**：①价格修复退役（本案主体）；②traditional_open 兜底
+   ——入库即设（[news_scanner.py:337](../../../scanners/news_scanner.py)"出生即定"），存量 NULL 行部署时
+   一次性 sweep 后运行时无兜底必要；③LLM 内容打标 `tag_untagged`——本身就是游标语义
+   （`tagged_at IS NULL` 即待办、幂等、分片失败不阻断），挂到每轮 5min 新闻扫描尾部，壳子消失。
+
 **非目标**
 - 不换数据源（yfinance/OKX/CNBC 维持现状；Massive Futures 接入是独立后续案）。
 - okx_gapfill 休市合成点不动（展示功能，非补真数据）。
-- 新闻/预测管道不动（滚动回填的**新闻部分保留**；小时 job 的新闻打标两步保留）。
+- 新闻/预测扫描本体不动（滚动回填的**新闻部分保留**；打标只换挂载点、逻辑零改动）。
 - 行为引擎、告警评估、调度周期不动。
 
 ## 2. 病根（为什么现在有四层）
@@ -89,7 +94,7 @@ start  = max(now − CAP, min(cursor − 30min, now − 24h))
 | `run_price_backfill_once` | [scan_runtime.py:281](../../../services/scan_runtime.py) | 整个删除（全仓无调用方；[run.py:30](../../../run.py) 死 import 一并清） |
 | `PriceScanner.backfill_missing_history` / `backfill_range` | [price_scanner.py:66](../../../scanners/price_scanner.py) | 均删除；新路径直接组合 `source.fetch_history` + `_save_records` |
 | **`services/gap_repair.py` 整个文件** | 含 `find_gaps` / `repair_symbols` / `run_gap_repair` | **删除**（v2：监控也不要）；`tests/test_gap_repair.py` 删除 |
-| 小时 job 的价格步骤 | [app.py:99](../../../api/app.py) `gap_repair_cycle` ① | 删除；job 只剩 traditional_open + news_tagging 两步，函数与 job id 更名 `news_tagging_cycle`（cron :37 不变） |
+| **小时 job `gap_repair_cycle` 整个** | [app.py:99](../../../api/app.py) 及其 `add_job`（cron :37） | **删除**（v2.1）。②traditional_open：入库即设，运行时兜底删；部署时在服务器一次性调 `backfill_traditional_open` 清存量 NULL（函数保留——`scripts/backfill_ledger.py` 仍用）。③打标：`tag_untagged(limit=200)` 移到每轮新闻扫描之后（scan_runtime，紧跟新闻滚动回填），无 `DEEPSEEK_API_KEY` 时静默跳过 |
 | `yfinance.fetch()` / `okx.fetch()` 及 live 取最后一根的私有帮手 | 两个 source 文件 | 删除（`cnbc.fetch()` 保留；`okx.fetch_instrument_bars` 是 gapfill 依赖，保留） |
 | `config.SCAN_ROLLING_BACKFILL_INTERVALS` | [config.py:123](../../../config.py) | 删除 |
 | `config.GAP_REPAIR_LOOKBACK_HOURS` | config.py | 删除（无消费方） |
@@ -100,8 +105,9 @@ start  = max(now − CAP, min(cursor − 30min, now − 24h))
 ### 3.4 明确不变
 
 5min 调度与扫描锁、告警评估时序（评估读库，自愈 bar 自动参与窗口）、`gap_filler` 的位置与全部逻辑、
-`_save_records` 真实覆盖合成点语义、新闻/预测扫描与新闻打标小时步骤、行为引擎
-（本案落地后补写事件仅剩长停机一种来源，"段重算脚本"维持 2026-07-12 决策：存档设计、出事再建）。
+`_save_records` 真实覆盖合成点语义、新闻/预测扫描本体与打标逻辑（`tag_news_batch`/`tag_untagged` 内部零改动，
+只换挂载点；打标节奏从"最迟 59min"变"最迟 ~5min"，下游 behavior 分类在 settle（段结束 1h+）读 magnitude，
+余量只增不减）、行为引擎（本案落地后补写事件仅剩长停机一种来源，"段重算脚本"维持 2026-07-12 决策）。
 
 ## 4. 边界情况
 
@@ -121,6 +127,9 @@ start  = max(now − CAP, min(cursor − 30min, now − 24h))
 4. **返回口径**：scan 返回仅含本轮新插入记录。
 5. **种子**：库空品种首轮拉 CAP 深度。
 
+6. **打标挂尾**：新闻扫描后有未打标新闻 → `tag_untagged` 被调（fake DeepSeek）；无 key → 静默跳过不报错；
+   打标异常不影响本轮扫描返回。
+
 删除 `tests/test_gap_repair.py`。回归：`test_save_records_overwrite`、`test_gap_filler`、`test_scan_windows`、
 启动路径（价格回补不再被调用）、`test_api`（若引用 gap_repair job 名）全绿。
 
@@ -132,7 +141,8 @@ start  = max(now − CAP, min(cursor − 30min, now − 24h))
 
 ## 7. 部署与验证
 
-服务器 `git pull && ./deploy.sh`。部署当天记录部署时刻；**3-7 天后（≈ 2026-07-17 ~ 07-21）出验收报告**
+服务器 `git pull && ./deploy.sh`；部署后在服务器一次性执行 `backfill_traditional_open`（venv python 一行，
+清掉存量 NULL 行，此后运行时无兜底）。部署当天记录部署时刻；**3-7 天后（≈ 2026-07-17 ~ 07-21）出验收报告**
 （§3.2 的三项只读查询，PENDING.md 挂一条带日期的待办）。验收通过后本案关闭；
 若发现系统性缺失，按报告定位是源问题还是路径 bug，修因不加层。
 
