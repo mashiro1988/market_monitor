@@ -198,16 +198,16 @@ def test_scan_invokes_gapfiller_after_save(monkeypatch):
 
     # Build scanner without calling __init__ (avoids network source constructors)
     scanner = ps.PriceScanner.__new__(ps.PriceScanner)
-    scanner.yfinance = SimpleNamespace(fetch=lambda: [], name="yfinance")
-    scanner.okx = SimpleNamespace(fetch=lambda: [], name="okx")
-    scanner.coingecko = SimpleNamespace()
+    scanner.yfinance = SimpleNamespace(
+        fetch_history=lambda start, end: [], name="yfinance",
+        CAP_HOURS=168, _all_tickers=lambda: {},
+    )
+    scanner.okx = SimpleNamespace(fetch_history=lambda start, end: [], name="okx")
     scanner.cnbc_bonds = SimpleNamespace(fetch=lambda: [], name="cnbc_bonds")
 
-    # _fetch_safe returns [] for all sources → no crypto records → no missing_crypto call
-    monkeypatch.setattr(scanner, "_fetch_safe", lambda src: [])
-    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: 0)
-
-    # Ensure no missing crypto triggers _fetch_coingecko_symbols
+    monkeypatch.setattr(scanner, "_save_records", lambda records, scan_time: [])
+    # 游标查询不走真实 DB（sentinel session 没有 .query）
+    monkeypatch.setattr(ps, "_latest_by_symbol", lambda session, symbols: {s: None for s in symbols})
     monkeypatch.setattr(config, "PRICE_SOURCES", {"crypto": {}})
 
     # Provide a sentinel session for gap_filler

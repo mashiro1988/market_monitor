@@ -71,6 +71,87 @@ def test_save_records_returns_only_inserted(make_session, monkeypatch):
     assert third == []
 
 
+# ---------- scan 单路径 ----------
+
+import config
+
+
+class FakeHistorySource:
+    """可编程的 fetch_history 源：记录被调用的窗口，按轮次返回预设记录。"""
+    def __init__(self, name, rounds):
+        self.name = name
+        self.rounds = list(rounds)      # 每轮返回的 list[PriceRecord]
+        self.calls = []                 # [(start, end)]
+
+    def fetch_history(self, start_ts, end_ts):
+        self.calls.append((start_ts, end_ts))
+        return self.rounds.pop(0) if self.rounds else []
+
+
+class FakeQuoteSource:
+    name = "cnbc_bond_quote"
+    def fetch(self):
+        return []
+
+
+class NoopGapFiller:
+    def run(self, session, okx_source, scan_time):
+        return 0
+
+
+def _make_scanner(make_session, monkeypatch, yf_rounds, okx_rounds):
+    monkeypatch.setattr(ps_module, "get_session", make_session)
+    scanner = PriceScanner()
+    yf = FakeHistorySource("yfinance", yf_rounds)
+    yf._all_tickers = lambda: {"NQ=F": ("futures", "纳指期货")}
+    yf.CAP_HOURS = 168
+    scanner.yfinance = yf
+    scanner.okx = FakeHistorySource("okx", okx_rounds)
+    scanner.cnbc_bonds = FakeQuoteSource()
+    scanner.gap_filler = NoopGapFiller()
+    monkeypatch.setattr(config, "PRICE_SOURCES",
+                        {**config.PRICE_SOURCES, "crypto": {"BTC": "BTCUSDT"}})
+    return scanner
+
+
+def test_scan_empty_db_seeds_cap_window(make_session, monkeypatch):
+    scanner = _make_scanner(make_session, monkeypatch, [[]], [[]])
+    scanner.scan()
+    (yf_start, yf_end), = scanner.yfinance.calls
+    (okx_start, okx_end), = scanner.okx.calls
+    assert (yf_end - yf_start) == timedelta(hours=168)      # 库空 → 种子拉满 CAP
+    assert (okx_end - okx_start) == timedelta(hours=int(config.PRICE_BACKFILL_MAX_HOURS))
+
+
+def test_scan_normal_uses_24h_floor_and_returns_inserted(make_session, monkeypatch):
+    t_old = datetime.utcnow().replace(second=0, microsecond=0) - timedelta(minutes=10)
+    t_new = t_old + timedelta(minutes=5)
+    scanner = _make_scanner(
+        make_session, monkeypatch,
+        yf_rounds=[[_rec(t_old)], [_rec(t_old), _rec(t_new)]],
+        okx_rounds=[[], []],
+    )
+    first = scanner.scan()
+    assert [r.timestamp for r in first] == [t_old]
+    second = scanner.scan()                                  # t_old 已在库 → 只插 t_new
+    assert [r.timestamp for r in second] == [t_new]
+    yf_start2, yf_end2 = scanner.yfinance.calls[1]
+    assert (yf_end2 - yf_start2) == timedelta(hours=24)      # 游标新鲜 → 24h 地板
+
+
+def test_scan_heals_mid_window_hole(make_session, monkeypatch):
+    base = datetime.utcnow().replace(second=0, microsecond=0) - timedelta(hours=1)
+    t1, t2, t3 = base, base + timedelta(minutes=5), base + timedelta(minutes=10)
+    scanner = _make_scanner(
+        make_session, monkeypatch,
+        yf_rounds=[[_rec(t1), _rec(t3)], [_rec(t1), _rec(t2), _rec(t3)]],   # 第一轮源端缺 t2
+        okx_rounds=[[], []],
+    )
+    scanner.scan()
+    healed = scanner.scan()                                  # 第二轮源补全 → 洞被填
+    assert [r.timestamp for r in healed] == [t2]
+
+
 # ---------- 游标查询 ----------
 
 def test_latest_by_symbol_reads_max_ts_and_none_for_missing(make_session):

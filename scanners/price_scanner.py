@@ -54,28 +54,40 @@ class PriceScanner(SourceHealthMixin):
         self._reset_source_statuses()
 
     def scan(self) -> list[PriceRecord]:
-        """执行一次完整的价格扫描"""
-        all_records: list[PriceRecord] = []
+        """执行一次同步扫描：每源一个窗口，拉取 → 幂等写入（采集=回补，无第二条写路径）。
+
+        返回**本轮实际插入**的记录（含真实覆盖合成点）。追平轮会带出历史 bar，
+        告警侧有 staleness 保护（alerts/evaluators/price.py）自动跳过旧 bar。"""
+        inserted: list[PriceRecord] = []
         scan_time = datetime.now(timezone.utc).replace(tzinfo=None)
         self._reset_source_statuses()
 
-        # 1. yfinance: 股指、期货、亚洲指数、商品、部分债券
-        all_records.extend(self._fetch_safe(self.yfinance))
+        session = get_session()
+        try:
+            yf_latest = _latest_by_symbol(session, list(self.yfinance._all_tickers()))
+            okx_latest = _latest_by_symbol(
+                session, [f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})]
+            )
+        finally:
+            session.close()
+        yf_start = sync_window_start(yf_latest, scan_time, cap_hours=self.yfinance.CAP_HOURS)
+        okx_start = sync_window_start(okx_latest, scan_time,
+                                      cap_hours=float(config.PRICE_BACKFILL_MAX_HOURS))
 
-        # 2. 加密货币：OKX 先查合约 5m K 线，合约不存在则现货 5m K 线；缺失品种等待小时级回补，不写实时 tick。
-        crypto_records = self._fetch_safe(self.okx)
+        # 1. yfinance: 股指、期货、亚洲指数、商品（至少回看 24h，停机自动拉长，封顶 7d）
+        inserted.extend(self._save_records(
+            self._fetch_history_safe(self.yfinance, yf_start, scan_time), scan_time))
+
+        # 2. OKX 加密货币：同一条窗口公式（封顶 72h；正常 24h 单页一次调用）
+        okx_records = self._fetch_history_safe(self.okx, okx_start, scan_time)
         expected_crypto = set(config.PRICE_SOURCES.get("crypto", {}).keys())
-        fetched_crypto = {r.name for r in crypto_records}
-        missing_crypto = sorted(expected_crypto - fetched_crypto)
+        missing_crypto = sorted(expected_crypto - {r.name for r in okx_records})
         if missing_crypto:
-            logger.warning(f"[PriceScanner] OKX 缺失 {missing_crypto}，本轮不写实时兜底，等待历史回补补齐")
-        all_records.extend(crypto_records)
+            logger.warning(f"[PriceScanner] OKX 本轮未返回 {missing_crypto}，等待下一轮窗口自愈")
+        inserted.extend(self._save_records(okx_records, scan_time))
 
-        # 3. CNBC: 美债/日债 2Y/10Y 盘中收益率（海外可达，替代东方财富）
-        all_records.extend(self._fetch_safe(self.cnbc_bonds))
-
-        # 写入数据库
-        self._save_records(all_records, scan_time)
+        # 3. CNBC: 美债/日债收益率（仅当前报价口径，无历史，不参与缺口语义）
+        inserted.extend(self._save_records(self._fetch_safe(self.cnbc_bonds), scan_time))
 
         # 休市补点：真实写库后，用 OKX 永续补休市空档（独立 session，失败不影响扫描结果）
         try:
@@ -89,8 +101,22 @@ class PriceScanner(SourceHealthMixin):
         except Exception as e:
             logger.error(f"[PriceScanner] gap-fill 失败: {type(e).__name__}: {e}")
 
-        logger.info(f"[PriceScanner] 扫描完成，共 {len(all_records)} 条价格记录")
-        return all_records
+        logger.info(f"[PriceScanner] 扫描完成，新插入 {len(inserted)} 条价格记录")
+        return inserted
+
+    def _fetch_history_safe(self, source, start_ts: datetime, end_ts: datetime) -> list[PriceRecord]:
+        """安全调用数据源区间拉取，捕获异常并记录源健康状态。"""
+        try:
+            logger.info(f"[PriceScanner] 同步 {source.name} "
+                        f"{start_ts.isoformat()} → {end_ts.isoformat()} UTC...")
+            records = source.fetch_history(start_ts, end_ts)
+            self._record_source_status(source.name, records, stage="scan")
+            logger.info(f"[PriceScanner] {source.name} 返回 {len(records)} 条记录")
+            return records
+        except Exception as e:
+            self._record_source_error(source.name, e, stage="scan")
+            logger.error(f"[PriceScanner] {source.name} 同步失败: {e}")
+            return []
 
     def backfill_missing_history(
         self,
