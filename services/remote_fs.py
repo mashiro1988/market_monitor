@@ -24,7 +24,6 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -500,19 +499,3 @@ def load_pkl_as_df(local_path: Path) -> pd.DataFrame:
     if not isinstance(obj, pd.DataFrame):
         raise TypeError(f"{local_path} 内不是 DataFrame，是 {type(obj).__name__}")
     return obj
-
-
-# ============================================================
-# 时区辅助：服务器是 UTC, market_monitor DB 是 UTC naive
-# ============================================================
-def utc_naive(ts) -> datetime:
-    """把 pandas Timestamp / datetime（含 tz 或不含）转成 UTC naive datetime。
-    供 scanner 入库前调用。
-    """
-    if hasattr(ts, "to_pydatetime"):
-        ts = ts.to_pydatetime()
-    if isinstance(ts, datetime):
-        if ts.tzinfo is not None:
-            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
-        return ts
-    raise TypeError(f"无法转换 {type(ts).__name__} 为 datetime")

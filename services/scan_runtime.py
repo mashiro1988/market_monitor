@@ -297,23 +297,6 @@ def _tag_new_news() -> None:
     finally:
         session.close()
 
-def run_news_backfill_once(max_hours: int | None = None):
-    """执行一次新闻历史回补；与常规扫描共用 `.scan.lock` 防止并发。"""
-    configure_proxy_env()
-    with _scan_lock() as acquired:
-        if not acquired:
-            return []
-
-        from database import create_tables
-
-        create_tables()
-
-        from scanners.news_scanner import NewsScanner
-
-        news_scanner = NewsScanner()
-        return news_scanner.backfill_missing_history(max_hours=max_hours)
-
-
 def run_startup_backfill_once():
     """启动后回补停机期间缺失的新闻；价格由常规扫描的游标同步窗口自愈（2026-07-14 重构）。"""
     configure_proxy_env()
