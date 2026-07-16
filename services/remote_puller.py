@@ -325,7 +325,3 @@ def run_remote_data_cycle() -> dict:
     max_instances=1 + coalesce=True 保证不会自我重叠。
     """
     return get_puller().cycle()
-
-
-def get_status() -> PullerStatus:
-    return get_puller().status()

@@ -17,7 +17,6 @@ sqlalchemy>=2.0.23,<3.0
 
 # 定时任务
 apscheduler>=3.10.4,<4.0
-croniter>=2.0.1,<7.0
 
 # 工具库
 python-dotenv>=1.0.0,<2.0

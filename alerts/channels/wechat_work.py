@@ -53,20 +53,3 @@ class WeChatWorkChannel:
         except Exception as e:
             logger.error(f"[WeChat Work] 发送异常: {e}")
             return False
-
-    def send_text(self, content: str) -> bool:
-        """发送纯文本消息"""
-        if not self.webhook_url:
-            return False
-
-        payload = {
-            "msgtype": "text",
-            "text": {"content": content},
-        }
-
-        try:
-            proxies = config.proxies()
-            r = requests.post(self.webhook_url, json=payload, timeout=10, proxies=proxies)
-            return r.json().get("errcode") == 0
-        except Exception:
-            return False

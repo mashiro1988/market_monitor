@@ -25,7 +25,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from loguru import logger
 
@@ -474,14 +474,6 @@ def pull(remote_rel_path: str, local_name: Optional[str] = None, *, force: bool 
         )
     )
     return local_path
-
-
-def pull_many(remote_rel_paths: Iterable[str], *, force: bool = False) -> dict[str, Optional[Path]]:
-    """批量拉取，复用同一个 SFTP 会话。返回 {remote_rel_path: local_path or None}。"""
-    result: dict[str, Optional[Path]] = {}
-    for rel in remote_rel_paths:
-        result[rel] = pull(rel, force=force)
-    return result
 
 
 # ============================================================
