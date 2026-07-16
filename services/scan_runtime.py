@@ -87,24 +87,36 @@ def recent_closed_interval_window(
 
 
 def _process_exists(pid: int) -> bool:
-    """Return whether pid appears to be alive on Windows."""
+    """Return whether pid appears to be alive on the current platform."""
     if pid <= 0:
         return False
-    try:
-        import ctypes
 
-        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return False
+    if os.name == "nt":
         try:
-            exit_code = ctypes.c_ulong()
-            if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            import ctypes
+
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
                 return False
-            return exit_code.value == 259  # STILL_ACTIVE
-        finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
-    except Exception:
+            try:
+                exit_code = ctypes.c_ulong()
+                if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return exit_code.value == 259  # STILL_ACTIVE
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            return True
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
         return True
+    except OSError:
+        return True
+    return True
 
 
 def _read_lock_pid() -> int | None:
