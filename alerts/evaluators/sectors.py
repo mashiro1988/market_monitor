@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from alerts._session import get_alert_session
 from alerts.rules import AlertRule, AlertRuleType
 from chart_utils import format_beijing_time
 from models.sector import SectorReturn
@@ -15,13 +16,6 @@ PERIOD_FIELDS = {
     "720h": ("ret_720h", "ret_720h_median"),
     "30d": ("ret_720h", "ret_720h_median"),
 }
-
-
-def _get_session():
-    # Keep tests and older callers that monkeypatch alerts.engine.get_session working.
-    from alerts import engine as engine_module
-
-    return engine_module.get_session()
 
 
 class SectorAlertMixin:
@@ -47,7 +41,7 @@ class SectorAlertMixin:
         min_token_count = max(1, int(rule.params.get("min_token_count", 10) or 10))
         top_n = max(1, int(rule.params.get("top_n", 8) or 8))
 
-        session = _get_session()
+        session = get_alert_session()
         try:
             latest = session.query(SectorReturn.snapshot_at).order_by(SectorReturn.snapshot_at.desc()).first()
             if not latest:

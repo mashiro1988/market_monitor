@@ -5,18 +5,12 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 import config
+from alerts._session import get_alert_session
 from alerts.rules import AlertRuleType
 from alerts.types import PriceThresholdSummary, PriceWindowMove
 from chart_utils import format_beijing_time
 from models.news import NewsItem
 from models.price import PriceSnapshot
-
-
-def _get_session():
-    # Keep tests and older callers that monkeypatch alerts.engine.get_session working.
-    from alerts import engine as engine_module
-
-    return engine_module.get_session()
 
 
 class HourlySummaryMixin:
@@ -127,7 +121,7 @@ class HourlySummaryMixin:
             if self._is_in_cooldown(rule.name, rule.cooldown_minutes, rule.channels):
                 continue
 
-            session = _get_session()
+            session = get_alert_session()
             try:
                 now = datetime.now(timezone.utc).replace(tzinfo=None)
                 one_hour_ago = now - timedelta(hours=1)

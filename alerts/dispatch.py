@@ -4,15 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
+from alerts._session import get_alert_session
 from alerts.rules import AlertRule
 from models.alert_log import AlertLog
-
-
-def _get_session():
-    # Keep tests and older callers that monkeypatch alerts.engine.get_session working.
-    from alerts import engine as engine_module
-
-    return engine_module.get_session()
 
 
 class AlertDispatchMixin:
@@ -24,7 +18,7 @@ class AlertDispatchMixin:
         channels: list[str] | None = None,
         exact_marker: str | None = None,
     ) -> set[str]:
-        session = _get_session()
+        session = get_alert_session()
         try:
             query = session.query(AlertLog.channel, AlertLog.message).filter(
                 AlertLog.rule_name == rule_name,
@@ -54,7 +48,7 @@ class AlertDispatchMixin:
 
     def _log_alert(self, rule_name: str, message: str, channel: str, delivered: bool):
         """记录告警发送日志"""
-        session = _get_session()
+        session = get_alert_session()
         try:
             log = AlertLog(
                 timestamp=datetime.now(timezone.utc).replace(tzinfo=None),

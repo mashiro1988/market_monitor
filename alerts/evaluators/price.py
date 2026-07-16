@@ -3,18 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import config
+from alerts._session import get_alert_session
 from alerts.rules import AlertRuleType
 from alerts.types import PriceWindowMove
 from chart_utils import format_beijing_time
 from models.price import PriceSnapshot
 from scanners.base import PriceRecord
-
-
-def _get_session():
-    # Keep tests and older callers that monkeypatch alerts.engine.get_session working.
-    from alerts import engine as engine_module
-
-    return engine_module.get_session()
 
 
 class PriceAlertMixin:
@@ -158,7 +152,7 @@ class PriceAlertMixin:
         if current_ts.tzinfo is not None:
             current_ts = current_ts.astimezone(timezone.utc).replace(tzinfo=None)
 
-        session = _get_session()
+        session = get_alert_session()
         try:
             return PriceAlertMixin._price_window_move_from_session(
                 session=session,

@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from alerts._session import get_alert_session
 from alerts.rules import AlertRuleType
 from models.prediction import PredictionMarket
 from scanners.base import PredictionRecord
-
-
-def _get_session():
-    # Keep tests and older callers that monkeypatch alerts.engine.get_session working.
-    from alerts import engine as engine_module
-
-    return engine_module.get_session()
 
 
 class PredictionAlertMixin:
@@ -26,7 +20,7 @@ class PredictionAlertMixin:
             threshold = rule.params.get("threshold_pct", 5.0)
             window_minutes = int(rule.params.get("window_minutes", 0) or 0)
 
-            session = _get_session()
+            session = get_alert_session()
             try:
                 triggered = []
                 records_by_market: dict[str, list[PredictionRecord]] = {}

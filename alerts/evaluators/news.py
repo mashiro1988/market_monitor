@@ -3,17 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import config
+from alerts._session import get_alert_session
 from alerts.rules import AlertRule, AlertRuleType
 from chart_utils import format_beijing_time
 from models.alert_log import AlertLog
 from scanners.base import NewsRecord
-
-
-def _get_session():
-    # Keep tests and older callers that monkeypatch alerts.engine.get_session working.
-    from alerts import engine as engine_module
-
-    return engine_module.get_session()
 
 
 class NewsAlertMixin:
@@ -68,7 +62,7 @@ class NewsAlertMixin:
     def _retry_failed_news_alerts(self, rule: AlertRule) -> None:
         retry_hours = int(getattr(config, "NEWS_ALERT_RETRY_HOURS", 24))
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=max(1, retry_hours))
-        session = _get_session()
+        session = get_alert_session()
         try:
             rows = (
                 session.query(AlertLog)

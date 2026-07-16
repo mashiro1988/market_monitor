@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
-import requests
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -32,6 +30,7 @@ from schemas.annotations import (
     PriceWindowSchema,
     ReferenceChange,
 )
+from services.deepseek_client import call_deepseek_chat
 from services.news_service import to_news_schema
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
@@ -299,8 +298,6 @@ def _annotation_news_sources() -> list[str]:
     """标注上下文 / 自动标注 候选新闻的源白名单——只读取在 `config.NEWS_SOURCES` 里启用的。
     切换 / 增减英文源（CNBC / Reuters 等）时只改 config，不动业务代码。"""
     return [k for k, v in config.NEWS_SOURCES.items() if v.get("enabled")]
-
-DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 
 AUTO_ANNOTATE_SYSTEM_PROMPT = """你是一名买方量化研究员，专门分析单一资产在短时间窗口内的价格异动与新闻的因果关系：
 给每条候选新闻标注**因果角色（causal_role）**，并给出本窗口归因的**置信度（confidence）**。
@@ -1222,31 +1219,16 @@ def _call_deepseek_reasoner_messages(messages: list[dict]) -> tuple[str, str, fl
         # 4000 偶发把 content 截成空（DeepSeek 返回空 content 报错），留足余量。
         "max_tokens": 8000,
     }
-    headers = {
-        "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    started = time.monotonic()
-    resp = requests.post(
-        DEEPSEEK_API_URL,
-        json=payload,
-        headers=headers,
+    result = call_deepseek_chat(
+        payload,
+        api_key=config.DEEPSEEK_API_KEY,
         timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_REASONER_READ_TIMEOUT),
     )
-    duration = time.monotonic() - started
-
-    if resp.status_code >= 400:
-        preview = resp.text[:300].replace("\n", " ")
-        raise RuntimeError(f"DeepSeek 返回 {resp.status_code}: {preview}")
-
-    body = resp.json()
-    message = body["choices"][0].get("message", {})
-    content = (message.get("content") or "").strip()
-    reasoning = (message.get("reasoning_content") or "").strip()
+    content = result.content
+    reasoning = result.reasoning_content
     if not content:
         raise RuntimeError(f"DeepSeek 返回空 content（reasoning 预览: {reasoning[:200]}）")
-    return content, reasoning, duration
+    return content, reasoning, result.duration_seconds
 
 
 class AutoV2Parsed(NamedTuple):
@@ -1783,28 +1765,13 @@ def _call_deepseek_reasoner_batch(user_content: str) -> tuple[str, str, float]:
         # max_tokens 同时覆盖 reasoning_content + content；批量场景里 thinking 容易吃掉
         "max_tokens": 16000,
     }
-    headers = {
-        "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    started = time.monotonic()
-    resp = requests.post(
-        DEEPSEEK_API_URL,
-        json=payload,
-        headers=headers,
+    result = call_deepseek_chat(
+        payload,
+        api_key=config.DEEPSEEK_API_KEY,
         timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_REASONER_BATCH_READ_TIMEOUT),
     )
-    duration = time.monotonic() - started
-
-    if resp.status_code >= 400:
-        preview = resp.text[:300].replace("\n", " ")
-        raise RuntimeError(f"DeepSeek 返回 {resp.status_code}: {preview}")
-
-    body = resp.json()
-    message = body["choices"][0].get("message", {})
-    content = (message.get("content") or "").strip()
-    reasoning = (message.get("reasoning_content") or "").strip()
+    content = result.content
+    reasoning = result.reasoning_content
     if not content:
         raise RuntimeError(f"DeepSeek 批量返回空 content（reasoning 预览: {reasoning[:200]}）")
-    return content, reasoning, duration
+    return content, reasoning, result.duration_seconds

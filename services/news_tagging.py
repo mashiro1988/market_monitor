@@ -9,18 +9,15 @@ from __future__ import annotations
 
 import json
 import re
-import time
 
-import requests
 from loguru import logger
 from sqlalchemy.orm import Session
 
 import config
 from models.news import NewsItem
 from services import market_calendar
+from services.deepseek_client import call_deepseek_chat
 from services.time_utils import utc_now_naive
-
-DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 
 TAGGING_SYSTEM_PROMPT = (
     "你是宏观新闻分类员。给每条新闻打三个**纯内容**标签（只看新闻本身，**不看价格、不猜市场反应**）：\n\n"
@@ -60,12 +57,15 @@ def _call_deepseek_tagger(user_content: str) -> str:
         "max_tokens": 4000,
         "temperature": 0,
     }
-    headers = {"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-    resp = requests.post(DEEPSEEK_API_URL, json=payload, headers=headers,
-                         timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_READ_TIMEOUT))
-    if resp.status_code >= 400:
-        raise RuntimeError(f"DeepSeek 打标返回 {resp.status_code}: {resp.text[:200]}")
-    content = (resp.json()["choices"][0].get("message", {}).get("content") or "").strip()
+    result = call_deepseek_chat(
+        payload,
+        api_key=config.DEEPSEEK_API_KEY,
+        timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_READ_TIMEOUT),
+        http_error_prefix="DeepSeek 打标返回",
+        error_preview_chars=200,
+        normalize_error_newlines=False,
+    )
+    content = result.content
     if not content:
         raise RuntimeError("DeepSeek 打标返回空 content")
     return content
