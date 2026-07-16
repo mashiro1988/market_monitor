@@ -10,7 +10,7 @@ from typing import Optional
 @dataclass
 class PriceRecord:
     """标准化的价格记录"""
-    asset_class: str        # stock_index, futures, bond, commodity, crypto
+    asset_class: str        # stock_index, futures, perp, bond, commodity, crypto
     symbol: str             # ^DJI, ES=F, BTC/USDT, etc.
     name: str               # 道琼斯, S&P500期货, etc.
     price: float

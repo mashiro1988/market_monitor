@@ -236,6 +236,32 @@ textarea {
   padding: 12px;
 }
 
+.asset-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin-bottom: 9px;
+  padding: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.asset-tabs button {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+}
+
+.asset-tabs button.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+}
+
 .asset-meta {
   display: flex;
   align-items: center;

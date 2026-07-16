@@ -1,5 +1,5 @@
 """
-OKX 数据源 - 通过 ccxt raw API 获取加密货币价格
+OKX 数据源 - 通过 ccxt raw API 获取加密货币与代理永续价格
 
 不调用 load_markets()，直接使用 OKX instId 拉 5 分钟 K 线：
 1. 优先 USDT 永续合约：BTC-USDT-SWAP
@@ -22,7 +22,7 @@ class PerpBar(NamedTuple):
 
 
 class OkxPriceSource(BaseSource):
-    """通过 OKX 获取加密货币价格（5m K 线收盘价口径）"""
+    """通过 OKX 获取加密货币与代理永续价格（5m K 线收盘价口径）"""
 
     name = "okx"
     INTERVAL_MS = 5 * 60 * 1000
@@ -30,6 +30,7 @@ class OkxPriceSource(BaseSource):
 
     def __init__(self):
         self.symbols = config.PRICE_SOURCES.get("crypto", {})
+        self.perp_symbols = config.PRICE_SOURCES.get("perp_proxy", {})
         self.proxy = config.proxy_url()
 
     def _make_exchange(self):
@@ -126,6 +127,10 @@ class OkxPriceSource(BaseSource):
         source: str,
         start_ts: datetime,
         end_ts: datetime,
+        *,
+        record_symbol: str | None = None,
+        record_name: str | None = None,
+        asset_class: str = "crypto",
     ) -> list[PriceRecord]:
         """Fetch closed 5m candles for one OKX instrument within [start_ts, end_ts]."""
         points_by_start: dict[int, tuple[datetime, float, float | None]] = {}
@@ -159,6 +164,9 @@ class OkxPriceSource(BaseSource):
                 display_symbol,
                 (bar_end, price, current_prev, volume),
                 source,
+                record_symbol=record_symbol,
+                record_name=record_name,
+                asset_class=asset_class,
             ))
             prev_price = price
         return records
@@ -204,13 +212,50 @@ class OkxPriceSource(BaseSource):
         logger.warning(f"[OKX] {display_symbol} 合约/现货历史均不可用")
         return []
 
-    def _make_record(self, symbol: str, picked: tuple[datetime, float, float | None, float | None], source: str) -> PriceRecord:
+    def _fetch_perp_history_one(
+        self,
+        exchange,
+        display_name: str,
+        inst_id: str,
+        start_ts: datetime,
+        end_ts: datetime,
+    ) -> list[PriceRecord]:
+        """按配置的精确 instId 拉取代理永续；不存在时不回退到现货。"""
+        try:
+            records = self._fetch_history_for_inst(
+                exchange,
+                display_name,
+                inst_id,
+                "okx_swap_5m",
+                start_ts,
+                end_ts,
+                record_symbol=inst_id,
+                record_name=display_name,
+                asset_class="perp",
+            )
+            if records:
+                return records
+            logger.warning(f"[OKX] 代理永续 {display_name}({inst_id}) 历史 5m K线数据为空")
+        except Exception as e:
+            logger.error(f"[OKX] 采集代理永续 {display_name}({inst_id}) 失败: {type(e).__name__}: {e}")
+        return []
+
+    def _make_record(
+        self,
+        symbol: str,
+        picked: tuple[datetime, float, float | None, float | None],
+        source: str,
+        *,
+        record_symbol: str | None = None,
+        record_name: str | None = None,
+        asset_class: str = "crypto",
+    ) -> PriceRecord:
         bar_end, price, prev_price, volume = picked
         change_pct = ((price - prev_price) / prev_price * 100) if prev_price else None
         return PriceRecord(
-            asset_class="crypto",
-            symbol=f"{symbol}/USDT",
-            name=symbol,
+            asset_class=asset_class,
+            symbol=record_symbol or f"{symbol}/USDT",
+            name=record_name or symbol,
             price=price,
             prev_price=prev_price,
             change_pct=change_pct,
@@ -237,6 +282,8 @@ class OkxPriceSource(BaseSource):
 
         for symbol, configured_symbol in self.symbols.items():
             records.extend(self._fetch_history_one(exchange, symbol, configured_symbol, start_ts, end_ts))
+        for display_name, inst_id in self.perp_symbols.items():
+            records.extend(self._fetch_perp_history_one(exchange, display_name, inst_id, start_ts, end_ts))
 
         if not records:
             logger.warning("[OKX] 历史回补未产出任何记录")

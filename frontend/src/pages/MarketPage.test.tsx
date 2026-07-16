@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveShadedBands } from "./MarketPage";
+import { buildOverviewCards, deriveShadedBands } from "./MarketPage";
 
 describe("deriveShadedBands", () => {
   it("derives a band from contiguous gapfill points using existing time strings", () => {
@@ -43,5 +43,28 @@ describe("deriveShadedBands", () => {
 
   it("returns empty array when history.series is missing", () => {
     expect(deriveShadedBands({} as any)).toEqual([]);
+  });
+});
+
+describe("buildOverviewCards", () => {
+  it("pairs each proxy perp with its corresponding futures card", () => {
+    const items = [
+      { symbol: "NQ=F", name: "纳指期货", asset_class: "futures" },
+      { symbol: "ES=F", name: "标普期货", asset_class: "futures" },
+      { symbol: "QQQ-USDT-SWAP", name: "纳指代理永续", asset_class: "perp" }
+    ] as any;
+
+    const cards = buildOverviewCards(items, "futures");
+
+    expect(cards).toHaveLength(2);
+    expect(cards.find((card) => card.primary.symbol === "NQ=F")?.perp?.symbol).toBe("QQQ-USDT-SWAP");
+    expect(cards.find((card) => card.primary.symbol === "ES=F")?.perp).toBeUndefined();
+  });
+
+  it("does not render proxy perps as a separate overview band", () => {
+    const items = [
+      { symbol: "QQQ-USDT-SWAP", name: "纳指代理永续", asset_class: "perp" }
+    ] as any;
+    expect(buildOverviewCards(items, "futures")).toEqual([]);
   });
 });

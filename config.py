@@ -295,10 +295,18 @@ PRICE_SOURCES = {
         "BTC": "BTCUSDT",
         "ETH": "ETHUSDT",
     },
+    # OKX 商品/指数代理永续：作为独立行情入库，不再改写对应期货曲线。
+    # key 是页面显示名，value 同时是 OKX instId 与数据库原始 symbol。
+    "perp_proxy": {
+        "纳指代理永续": "QQQ-USDT-SWAP",
+        "原油永续": "CL-USDT-SWAP",
+        "黄金永续": "XAU-USDT-SWAP",
+    },
 }
 
 # ============================================================
-# 休市补点（gap-fill）：休市时段用 OKX 永续代理价补连续点
+# 旧休市补点（gap-fill）：阶段 1 默认关闭；保留配置与代码用于短期回滚。
+# OKX 永续现按 PRICE_SOURCES["perp_proxy"] 作为独立行情入库。
 # 详见 docs/superpowers/specs/2026-06-28-okx-gapfill-market-overview-design.md
 # ============================================================
 ONCHAIN_GAPFILL = {
@@ -307,7 +315,7 @@ ONCHAIN_GAPFILL = {
     "GC=F": {"okx_inst": "XAU-USDT-SWAP"},   # 现货黄金
 }
 GAPFILL_SOURCE = "okx_gapfill"   # 合成点 source 哨兵；后端一律引用本常量
-GAPFILL_ENABLED = os.getenv("GAPFILL_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+GAPFILL_ENABLED = os.getenv("GAPFILL_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 # 2026-07-12 用户拍板 60→20：每日 CME 1h 维护段原来恰好躲过补点判定（判定生效时市场已重开），
 # 联动曲线每天北京 05-06 点留洞；降到 20min 后洞缩到 ~20min。误判风险可控：真实 bar 一回来
 # 就按 source-aware UPDATE 覆盖同槽代理点。

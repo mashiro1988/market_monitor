@@ -80,6 +80,18 @@ def test_latest_prices_includes_currency_class(session):
     assert item.asset_class == "currency"
 
 
+def test_latest_prices_includes_independent_perp(session):
+    now = utc_now_naive()
+    _add(session, "NQ=F", now - timedelta(minutes=5), 23000.0, asset_class="futures")
+    _add(session, "QQQ-USDT-SWAP", now - timedelta(minutes=5), 700.0, asset_class="perp")
+    session.commit()
+    resp = market_service.get_latest_prices(session)
+    by_symbol = {item.symbol: item for item in resp.items}
+    assert by_symbol["NQ=F"].asset_class == "futures"
+    assert by_symbol["QQQ-USDT-SWAP"].asset_class == "perp"
+    assert market_service.CLASS_ORDER.index("perp") > market_service.CLASS_ORDER.index("futures")
+
+
 def test_symbols_options_match_overview_crypto_filter(session, monkeypatch):
     """跨资产走势的品种选项必须与概览同口径：白名单外的加密（已停采 alt）不出现。"""
     monkeypatch.setitem(config.PRICE_SOURCES, "crypto", {"BTC": "BTCUSDT", "ETH": "ETHUSDT"})

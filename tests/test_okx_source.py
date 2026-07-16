@@ -71,3 +71,27 @@ def test_history_keeps_swap_when_retry_succeeds(monkeypatch):
 
     assert exchange.calls == 2
     assert records and all(r.source == "okx_swap_5m" for r in records)
+
+
+def test_perp_history_uses_exact_inst_id_and_independent_metadata():
+    source = OkxPriceSource.__new__(OkxPriceSource)
+
+    class Exchange:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def publicGetMarketCandles(self, params):
+            self.calls.append(params["instId"])
+            return {"data": _candles()}
+
+    exchange = Exchange()
+    records = source._fetch_perp_history_one(
+        exchange, "纳指代理永续", "QQQ-USDT-SWAP", _START, _END
+    )
+
+    assert exchange.calls == ["QQQ-USDT-SWAP"]
+    assert records
+    assert {r.symbol for r in records} == {"QQQ-USDT-SWAP"}
+    assert {r.name for r in records} == {"纳指代理永续"}
+    assert {r.asset_class for r in records} == {"perp"}
+    assert {r.source for r in records} == {"okx_swap_5m"}

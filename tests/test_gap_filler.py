@@ -7,6 +7,13 @@ from sqlalchemy.orm import sessionmaker
 from database import Base
 import models  # noqa: F401  注册模型
 
+
+@pytest.fixture(autouse=True)
+def enable_legacy_gapfill_for_component_tests(monkeypatch):
+    """旧组件仍保留作回滚；其行为测试显式打开，生产默认保持关闭。"""
+    import config
+    monkeypatch.setattr(config, "GAPFILL_ENABLED", True)
+
 @pytest.fixture
 def session():
     engine = create_engine("sqlite:///:memory:")
@@ -62,6 +69,18 @@ NOW = datetime(2026, 6, 26, 21, 0)   # 周五交易时段
 class FakeOkx:
     def __init__(self, bars): self._bars = bars
     def fetch_instrument_bars(self, inst_ids, limit=12): return self._bars
+
+
+def test_gapfill_disabled_writes_nothing(session, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "GAPFILL_ENABLED", False)
+
+    class MustNotFetch:
+        def fetch_instrument_bars(self, inst_ids, limit=12):
+            raise AssertionError("disabled gap-fill must not call OKX")
+
+    from scanners.gap_filler import GapFiller
+    assert GapFiller().run(session, MustNotFetch(), NOW) == 0
 
 def _real(session, symbol, ts, price, source="yfinance", asset_class="futures", name=None):
     session.add(PriceSnapshot(timestamp=ts, asset_class=asset_class, symbol=symbol,

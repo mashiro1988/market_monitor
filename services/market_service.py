@@ -24,10 +24,11 @@ from schemas.market import (
 from services.pagination import clamp_page, page_count
 from services.time_utils import timestamp_pair, utc_now_naive
 
-CLASS_ORDER = ["stock_index", "futures", "asian_index", "bond", "commodity", "currency", "crypto"]
+CLASS_ORDER = ["stock_index", "futures", "perp", "asian_index", "bond", "commodity", "currency", "crypto"]
 CLASS_NAMES = {
     "stock_index": "美股指数",
     "futures": "美股期货",
+    "perp": "代理永续",
     "asian_index": "亚洲指数",
     "bond": "债券利率",
     "commodity": "商品",
@@ -37,6 +38,7 @@ CLASS_NAMES = {
 MARKET_OPEN_NOTES = {
     "stock_index": "北京时间：开盘 21:30，收盘 04:00（T+1，美夏令时）；开盘 22:30，收盘 05:00（T+1，美冬令时）",
     "futures": "北京时间：开盘 06:00，收盘 05:00（T+1，美夏令时）；开盘 07:00，收盘 06:00（T+1，美冬令时）",
+    "perp": "全天 24 小时交易；作为独立行情展示，不用于改写期货价格",
     "asian_index": "北京时间：日本/韩国开盘 08:00，收盘 14:30；A股开盘 09:30，收盘 15:00（午休 11:30-13:00）",
     "bond": "北京时间：美债参考开盘 20:00，收盘 05:00（T+1，美夏令时）；开盘 21:00，收盘 06:00（T+1，美冬令时）；日债参考开盘 08:00，收盘 14:30",
     "commodity": "北京时间：开盘 06:00，收盘 05:00（T+1，美夏令时）；开盘 07:00，收盘 06:00（T+1，美冬令时）",

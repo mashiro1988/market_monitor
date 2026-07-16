@@ -12,7 +12,7 @@ class PriceSnapshot(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime, nullable=False)
-    asset_class = Column(String(20), nullable=False)  # stock_index, futures, bond, commodity, crypto
+    asset_class = Column(String(20), nullable=False)  # stock_index, futures, perp, bond, commodity, crypto
     symbol = Column(String(30), nullable=False)        # ^DJI, ES=F, BTC/USDT, etc.
     name = Column(String(50), nullable=False)           # 道琼斯, S&P500期货, etc.
     price = Column(Float, nullable=False)

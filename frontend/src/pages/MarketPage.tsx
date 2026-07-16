@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Download, Maximize2, Minimize2, Play } from "lucide-react";
 import { api } from "../api/client";
-import { OKX_GAPFILL_SOURCE } from "../api/constants";
+import { OKX_GAPFILL_SOURCE, PERP_PROXY_PAIRS } from "../api/constants";
 import type { MarketHistoryResponse, MarketLatestItem, MarketTableRow } from "../api/types";
 import { MultiLineChart, type ChartPoint } from "../components/Charts";
 import { Button, MultiSelectControl, PageHeader, SelectControl, Stat } from "../components/Controls";
@@ -13,6 +13,7 @@ import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 const classNames: Record<string, string> = {
   stock_index: "美股指数",
   futures: "美股期货",
+  perp: "代理永续",
   asian_index: "亚洲指数",
   bond: "债券利率",
   commodity: "商品",
@@ -20,7 +21,8 @@ const classNames: Record<string, string> = {
   crypto: "加密货币"
 };
 
-const classOrder = ["stock_index", "futures", "asian_index", "bond", "commodity", "currency", "crypto"];
+const classOrder = ["stock_index", "futures", "perp", "asian_index", "bond", "commodity", "currency", "crypto"];
+const overviewClassOrder = classOrder.filter((assetClass) => assetClass !== "perp");
 const windowOptions = [
   { label: "1小时", value: "1" },
   { label: "4小时", value: "4" },
@@ -77,7 +79,8 @@ const MARKET_HOURS_BY_SYMBOL: Record<string, string> = {
 };
 
 const MARKET_HOURS_BY_CLASS: Record<string, string> = {
-  crypto: "全天 24h"
+  crypto: "全天 24h",
+  perp: "全天 24h"
 };
 
 function marketHours(symbol: string, assetClass: string): string {
@@ -111,7 +114,9 @@ function persistChartSymbols(symbols: string[]) {
 
 function formatPrice(item: MarketLatestItem) {
   if (item.asset_class === "bond") return `${item.price.toFixed(3)}%`;
-  if (item.asset_class === "crypto") return `$${item.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (item.asset_class === "crypto" || item.asset_class === "perp") {
+    return `$${item.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  }
   return item.price.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
@@ -125,6 +130,82 @@ function tone(value: number | null | undefined): "up" | "down" | "neutral" {
 function pct(value: number | null | undefined) {
   if (value == null) return "—";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+export type OverviewCard = { primary: MarketLatestItem; perp?: MarketLatestItem };
+
+export function buildOverviewCards(items: MarketLatestItem[], assetClass: string): OverviewCard[] {
+  const bySymbol = new Map(items.map((item) => [item.symbol, item]));
+  return items
+    .filter((item) => item.asset_class === assetClass)
+    .map((primary) => {
+      const perpSymbol = PERP_PROXY_PAIRS[primary.symbol];
+      return { primary, perp: perpSymbol ? bySymbol.get(perpSymbol) : undefined };
+    });
+}
+
+function MarketAssetCard({ primary, perp }: OverviewCard) {
+  const [activeTab, setActiveTab] = useState<"primary" | "perp">("primary");
+  const item = activeTab === "perp" && perp ? perp : primary;
+
+  return (
+    <article className="asset-card">
+      {perp ? (
+        <div className="asset-tabs" role="tablist" aria-label={`${primary.name}行情类型`}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "primary"}
+            className={activeTab === "primary" ? "active" : ""}
+            onClick={() => setActiveTab("primary")}
+          >
+            期货
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "perp"}
+            className={activeTab === "perp" ? "active" : ""}
+            onClick={() => setActiveTab("perp")}
+          >
+            Perp
+          </button>
+        </div>
+      ) : null}
+      <div className="asset-meta">
+        <span>{item.name}</span>
+        <code>{item.symbol}</code>
+      </div>
+      <strong>{formatPrice(item)}</strong>
+      {item.source?.startsWith(OKX_GAPFILL_SOURCE) && (
+        <span
+          className="badge-proxy"
+          title="OKX 永续休市代理价"
+          style={{
+            alignSelf: "flex-start",
+            fontSize: 11,
+            lineHeight: 1.4,
+            padding: "1px 6px",
+            borderRadius: 4,
+            color: "#94a3b8",
+            background: "rgba(148,163,184,0.16)",
+            border: "1px solid rgba(148,163,184,0.3)"
+          }}
+        >
+          代理价
+        </span>
+      )}
+      <div className="mini-stats">
+        <Stat label="5m" value={pct(item.change_5m)} tone={tone(item.change_5m)} />
+        <Stat label="1h" value={pct(item.change_1h)} tone={tone(item.change_1h)} />
+        <Stat label="24h" value={pct(item.change_24h)} tone={tone(item.change_24h)} />
+      </div>
+      <div className="card-foot">
+        <small>{item.timestamp_bj}</small>
+        <small className="market-hours">开市 {marketHours(item.symbol, item.asset_class)}</small>
+      </div>
+    </article>
+  );
 }
 
 export function deriveShadedBands(history: MarketHistoryResponse): { x1: string; x2: string; label?: string }[] {
@@ -315,48 +396,15 @@ export function MarketPage() {
       {scan.data ? <div className={`task-banner ${scan.data.status}`}>{scan.data.status} · {scan.data.message}</div> : null}
 
       <div className="asset-groups">
-        {classOrder.map((assetClass) => {
-          const items = latest.data?.items.filter((item) => item.asset_class === assetClass) ?? [];
-          if (!items.length) return null;
+        {overviewClassOrder.map((assetClass) => {
+          const cards = buildOverviewCards(latest.data?.items ?? [], assetClass);
+          if (!cards.length) return null;
           return (
             <section className="band" key={assetClass}>
               <h2>{classNames[assetClass] ?? assetClass}</h2>
               <div className="asset-grid">
-                {items.map((item) => (
-                  <article className="asset-card" key={item.symbol}>
-                    <div className="asset-meta">
-                      <span>{item.name}</span>
-                      <code>{item.symbol}</code>
-                    </div>
-                    <strong>{formatPrice(item)}</strong>
-                    {item.source?.startsWith(OKX_GAPFILL_SOURCE) && (
-                      <span
-                        className="badge-proxy"
-                        title="OKX 永续休市代理价"
-                        style={{
-                          alignSelf: "flex-start",
-                          fontSize: 11,
-                          lineHeight: 1.4,
-                          padding: "1px 6px",
-                          borderRadius: 4,
-                          color: "#94a3b8",
-                          background: "rgba(148,163,184,0.16)",
-                          border: "1px solid rgba(148,163,184,0.3)",
-                        }}
-                      >
-                        代理价
-                      </span>
-                    )}
-                    <div className="mini-stats">
-                      <Stat label="5m" value={pct(item.change_5m)} tone={tone(item.change_5m)} />
-                      <Stat label="1h" value={pct(item.change_1h)} tone={tone(item.change_1h)} />
-                      <Stat label="24h" value={pct(item.change_24h)} tone={tone(item.change_24h)} />
-                    </div>
-                    <div className="card-foot">
-                      <small>{item.timestamp_bj}</small>
-                      <small className="market-hours">开市 {marketHours(item.symbol, item.asset_class)}</small>
-                    </div>
-                  </article>
+                {cards.map((card) => (
+                  <MarketAssetCard key={card.primary.symbol} {...card} />
                 ))}
               </div>
             </section>

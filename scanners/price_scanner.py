@@ -48,7 +48,7 @@ class PriceScanner(SourceHealthMixin):
 
     def __init__(self):
         self.yfinance = YFinancePriceSource()
-        self.okx = OkxPriceSource()              # 加密货币主源：OKX 合约优先，现货补位
+        self.okx = OkxPriceSource()              # 加密主源 + 独立代理永续：OKX 5m K 线
         self.cnbc_bonds = CnbcBondQuoteSource()   # 美/日债收益率：CNBC 行情 API（海外可达）
         self.gap_filler = GapFiller()
         self._reset_source_statuses()
@@ -65,9 +65,9 @@ class PriceScanner(SourceHealthMixin):
         session = get_session()
         try:
             yf_latest = _latest_by_symbol(session, list(self.yfinance._all_tickers()))
-            okx_latest = _latest_by_symbol(
-                session, [f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})]
-            )
+            okx_symbols = [f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})]
+            okx_symbols.extend(config.PRICE_SOURCES.get("perp_proxy", {}).values())
+            okx_latest = _latest_by_symbol(session, okx_symbols)
         finally:
             session.close()
         yf_start = sync_window_start(yf_latest, scan_time, cap_hours=self.yfinance.CAP_HOURS)
@@ -78,12 +78,16 @@ class PriceScanner(SourceHealthMixin):
         inserted.extend(self._save_records(
             self._fetch_history_safe(self.yfinance, yf_start, scan_time), scan_time))
 
-        # 2. OKX 加密货币：同一条窗口公式（封顶 72h；正常 24h 单页一次调用）
+        # 2. OKX 加密货币 + 独立代理永续：同一窗口公式（封顶 72h）
         okx_records = self._fetch_history_safe(self.okx, okx_start, scan_time)
         expected_crypto = set(config.PRICE_SOURCES.get("crypto", {}).keys())
         missing_crypto = sorted(expected_crypto - {r.name for r in okx_records})
         if missing_crypto:
             logger.warning(f"[PriceScanner] OKX 本轮未返回 {missing_crypto}，等待下一轮窗口自愈")
+        expected_perps = set(config.PRICE_SOURCES.get("perp_proxy", {}).values())
+        missing_perps = sorted(expected_perps - {r.symbol for r in okx_records})
+        if missing_perps:
+            logger.warning(f"[PriceScanner] OKX 本轮未返回代理永续 {missing_perps}，等待下一轮窗口自愈")
         inserted.extend(self._save_records(okx_records, scan_time))
 
         # 3. CNBC: 美债/日债收益率（仅当前报价口径，无历史，不参与缺口语义）
