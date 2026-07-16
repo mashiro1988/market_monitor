@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scanners.base import NewsRecord
+from scanners.sources import jin10_source
 from scanners.sources.jin10_source import Jin10Source
 
 
@@ -53,6 +54,28 @@ def test_fetch_handles_null_data_page():
 
     with patch("scanners.sources.jin10_source.requests.get", return_value=response):
         assert Jin10Source().fetch() == []
+
+
+def test_jin10_logs_skipped_item_count(monkeypatch):
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {
+        "data": [
+            "not-an-object",
+            {"id": "missing-title", "data": {}},
+            {"id": "good", "data": {"title": "正常快讯", "content": "内容"}},
+        ]
+    }
+    fake_logger = MagicMock()
+    monkeypatch.setattr(jin10_source.logger, "debug", fake_logger.debug)
+    monkeypatch.setattr(jin10_source.logger, "info", fake_logger.info)
+
+    with patch("scanners.sources.jin10_source.requests.get", return_value=response):
+        records = Jin10Source().fetch()
+
+    assert [record.source_id for record in records] == ["good"]
+    assert fake_logger.debug.call_count == 2
+    assert "跳过 2 条" in fake_logger.info.call_args.args[0]
 
 
 def test_backfill_revisits_same_second_boundary():

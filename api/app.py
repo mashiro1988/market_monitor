@@ -289,7 +289,7 @@ def create_app(enable_scheduler: bool = True) -> FastAPI:
             auth = request.headers.get("authorization", "")
             supplied = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
             supplied = supplied or request.headers.get("x-app-token", "").strip()
-            if not hmac.compare_digest(supplied, token):
+            if not hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")):
                 return JSONResponse(
                     status_code=401,
                     content={"code": "UNAUTHORIZED", "message": "未授权", "details": {}},

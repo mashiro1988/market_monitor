@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
 
@@ -29,8 +30,11 @@ def get_rules() -> list[AlertRuleSchema]:
 
 def get_webhook_status() -> AlertWebhookStatus:
     webhook = config.WECHAT_WORK_WEBHOOK
-    preview = f"{webhook[:50]}..." if webhook else None
-    return AlertWebhookStatus(configured=bool(webhook), preview=preview)
+    if not webhook:
+        return AlertWebhookStatus(configured=False, preview=None)
+    parts = urlsplit(webhook)
+    preview = f"{parts.scheme}://{parts.netloc}{parts.path}"
+    return AlertWebhookStatus(configured=True, preview=preview)
 
 
 def test_wechat() -> AlertTestResponse:

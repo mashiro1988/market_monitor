@@ -40,6 +40,19 @@ def test_optional_api_auth(monkeypatch):
     assert allowed.status_code == 200
 
 
+def test_optional_api_auth_rejects_non_ascii_header_as_401(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "APP_AUTH_TOKEN", "secret-token")
+    response = client().get(
+        "/api/status",
+        headers=[(b"authorization", "Bearer é".encode("utf-8"))],
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "UNAUTHORIZED"
+
+
 def test_market_latest_and_csv():
     c = client()
     latest = c.get("/api/market/latest")

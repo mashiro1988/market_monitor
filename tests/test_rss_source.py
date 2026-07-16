@@ -1,6 +1,7 @@
 """RSS 源：新英文快讯源注册 + Cloudflare 429 退避重试。"""
 import sys
 import os
+from unittest.mock import MagicMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
@@ -52,3 +53,22 @@ def test_rss_empty_guid_uses_title_and_time_fingerprint(monkeypatch):
     assert len(records) == 2
     assert len({record.source_id for record in records}) == 2
     assert any(r.title == "Fed hikes" for r in records)
+
+
+def test_rss_logs_skipped_entry_count(monkeypatch):
+    feed = b"""
+    <rss><channel>
+      <item><guid>missing-title</guid></item>
+      <item><title>Fed hikes</title><guid>good</guid></item>
+    </channel></rss>
+    """
+    fake_logger = MagicMock()
+    monkeypatch.setattr(rss_source.requests, "get", lambda *a, **k: _Resp(200, feed))
+    monkeypatch.setattr(rss_source, "logger", fake_logger)
+    monkeypatch.setattr(config, "proxies", lambda: {})
+
+    records = RSSSource("financialjuice", "http://x/feed", "FinancialJuice", "en").fetch()
+
+    assert [record.title for record in records] == ["Fed hikes"]
+    assert fake_logger.debug.called
+    assert "跳过 1 条" in fake_logger.info.call_args.args[0]

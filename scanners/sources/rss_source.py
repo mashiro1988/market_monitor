@@ -54,10 +54,13 @@ class RSSSource(BaseSource):
             logger.error(f"RSS {self.name} 获取失败: {e}")
             return records
 
+        skipped = 0
         for entry in feed.entries[:50]:  # 限制每次最多50条
             try:
                 title = entry.get("title", "").strip()
                 if not title:
+                    skipped += 1
+                    logger.debug("跳过一条 {} 条目: 缺少标题", self.name)
                     continue
 
                 # 提取内容摘要
@@ -105,10 +108,11 @@ class RSSSource(BaseSource):
                     categories=categories if categories else None,
                     published_at=published_at,
                 ))
-            except Exception:
-                continue
+            except Exception as exc:
+                skipped += 1
+                logger.debug("跳过一条 {} 条目: {}", self.name, exc)
 
-        logger.info(f"RSS {self.name} 获取 {len(records)} 条新闻")
+        logger.info(f"RSS {self.name} 获取 {len(records)} 条新闻，跳过 {skipped} 条")
         return records
 
     def fetch_backfill(self, start_time: datetime, end_time: datetime) -> list[NewsRecord]:

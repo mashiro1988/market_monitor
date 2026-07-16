@@ -122,9 +122,12 @@ class Jin10Source(BaseSource):
         if not isinstance(items, list):
             return records
 
+        skipped = 0
         for it in items:
             try:
                 if not isinstance(it, dict):
+                    skipped += 1
+                    logger.debug("跳过一条金十条目: 记录不是对象")
                     continue
                 content_data = it.get("data") or {}
                 if not isinstance(content_data, dict):
@@ -139,6 +142,8 @@ class Jin10Source(BaseSource):
                     title = clean[:100]
 
                 if not title:
+                    skipped += 1
+                    logger.debug("跳过一条金十条目: 缺少标题和正文")
                     continue
 
                 # 清理 HTML 标签
@@ -165,10 +170,11 @@ class Jin10Source(BaseSource):
                     categories="financial",
                     published_at=published_at,
                 ))
-            except Exception:
-                continue
+            except Exception as exc:
+                skipped += 1
+                logger.debug("跳过一条金十条目: {}", exc)
 
-        logger.info(f"金十数据获取 {len(records)} 条快讯")
+        logger.info(f"金十数据获取 {len(records)} 条快讯，跳过 {skipped} 条")
         return records
 
     def _fetch_flash_page(self) -> list[NewsRecord]:
