@@ -54,6 +54,9 @@ scripts/inspect_factors*.py
 scripts/fetch_realtime_src.py
 scripts/server_src/
 
+# ===== Generated local analysis reports =====
+docs/reports/
+
 # ===== 个人工作笔记 / 项目地图 (本地自用，不入库) =====
 AGENTS.md
 ARCHITECTURE.md

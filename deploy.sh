@@ -38,6 +38,7 @@ git pull --ff-only
 # 必须先构建再重启：/assets 挂载在 app 导入时决定。
 # venv 前置 PATH：npm build 的 generate:api-types 调裸 `python`（Ubuntu 无此命令，且脚本需要项目依赖），
 # 不前置的话 set -e 会在构建步中止、永远走不到 restart（2026-07-09 线上踩坑）。
-( cd frontend && npm install && PATH="$(pwd)/../.venv/bin:$PATH" npm run build )
+# npm ci 严格按 lockfile 安装且不改写它，避免不同 npm 版本让服务器工作树变脏并阻塞下次 git pull。
+( cd frontend && npm ci && PATH="$(pwd)/../.venv/bin:$PATH" npm run build )
 sudo systemctl restart market-monitor
 sudo systemctl --no-pager status market-monitor
