@@ -394,7 +394,7 @@ Expected: `backend = local`，且打印出非 None 的 ready 文件。**若为 N
 
 ### Task 11: Phase 3 构建前端
 
-- [ ] `cd frontend && npm install && npm run build`
+- [ ] `cd frontend && npm ci && npm run build`
 - **验证门：** `ls frontend/dist/index.html` 存在；`ls frontend/dist/assets/` 非空
 
 ### Task 12: Phase 4 systemd（`deployment.md` §5 Phase 4）
