@@ -125,29 +125,28 @@ test("computeNetValueDomain 无数值返回 undefined", () => {
 
 
 describe("deriveTierLanes", () => {
-  // 2026-07-12 用户白板拍板：主图不画红绿，下方 0.3/0.5/0.8 三行速度带——
-  // 每个 5min 桶算即时 15min 开收净，落在最高触及档那一行（无锁存，可降档），方向定色。
+  // 2026-07-12 用户白板拍板三行速度带；2026-07-19 用户拍板撤销退档滞回——
+  // 每个 5min 桶算即时 15min 开收净，纯阈值判档、落在最高触及档那一行（触及即档、降档立即可见），方向定色。
   const bks = ["13:05", "13:10", "13:15", "13:20", "13:25", "13:30", "13:35", "13:40"].map((m, i) => (
     { time: `t${i}`, utcMinute: `2026-07-08T${m}` }
   ));
   it("routes each bucket to its highest touched tier lane (with de-escalation)", () => {
     // 15min 净（closes[i]/closes[i-3]−1）：t3 +0.35% → 0.3 行；t4 +0.55% → 0.5 行；
-    // t5 +0.85% → 0.8 行；t6 +0.40% → 回落 0.3 行（低于 0.5 档滞回线 0.475，真降档可见）；
-    // t7 +0.20% → 无带（低于 0.3 档滞回线 0.285）
+    // t5 +0.85% → 0.8 行；t6 +0.40% → 回落 0.3 行（<0.5 立即降档）；t7 +0.20% → 无带（<0.3）
     const closes = [1.0, 1.0, 1.0, 1.0035, 1.0055, 1.0085, 1.00752, 1.0075];
     const lanes = deriveTierLanes(bks, closes);
     expect(lanes[0].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t2", "t3", 1], ["t5", "t6", 1]]);
     expect(lanes[1].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t3", "t4", 1]]);
     expect(lanes[2].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t4", "t5", 1]]);
   });
-  it("hysteresis keeps a grazing run in one lane (2026-07-11 23:40 实弹)", () => {
-    // 实弹：-0.535% / -0.495% / -0.520%——中间一桶以 5‰ 之差跌破 0.5 被切成 0.5/0.3/0.5 三明治。
-    // 滞回：进档按原阈值，退档需 < 档位×0.95（0.5 档滞回线 0.475）→ 三桶合成一条 0.5 带。
+  it("纯阈值判档：擦线掉档立即可见（2026-07-19 撤销滞回）", () => {
+    // 2026-07-11 曾因中间桶 -0.480% 以 5‰ 之差跌破 0.5 档被切成 0.5/0.3/0.5 三明治，
+    // 07-12 加过 ×0.95 退档滞回补救；07-19 用户拍板撤销——读数触及哪档就画哪档。
     const closes = [1.0, 1.0, 1.0, 0.99465, 0.99520, 0.99480, 0.9950, 0.9952];
-    // t3: -0.535%；t4: -0.480%（≥0.475 滞回保持）；t5: -0.520%；t6/t7 停在低位（15min 净≈0，无带）
+    // t3: -0.535% → 0.5 行；t4: -0.480% → 0.3 行（<0.5 立即降档）；t5: -0.520% → 0.5 行；t6/t7 净≈0 无带
     const lanes = deriveTierLanes(bks, closes);
-    expect(lanes[1].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t2", "t5", -1]]);
-    expect(lanes[0].filter((b) => b.dir === -1)).toEqual([]);   // 中间桶不再掉进 0.3 行
+    expect(lanes[1].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t2", "t3", -1], ["t4", "t5", -1]]);
+    expect(lanes[0].map((b) => [b.x1, b.x2, b.dir])).toEqual([["t3", "t4", -1]]);
   });
   it("merges consecutive same-tier same-direction buckets into one bar", () => {
     // t3/t4/t5 三桶都在 0.3 档跌速（其后动能衰减到无带）→ 合并为一条 [t2..t5]

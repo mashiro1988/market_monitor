@@ -6,7 +6,7 @@ import type { NewsItem, PriceWindow } from "../api/types";
 import { MultiLineChart } from "./Charts";
 import { MultiSelectControl, type MultiOption } from "./Controls";
 import { ErrorState, LoadingState } from "./StateViews";
-import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveTierLanes, shiftUtcIso } from "./windowNetValue";
+import { buildNetValueChart, computeNetValueDomain, deriveMarkers, deriveTierLanes, priceKey, shiftUtcIso } from "./windowNetValue";
 import type { TierLaneBand } from "./windowNetValue";
 
 // 默认篮子（含美债10Y/美元指数——低波动，走右副轴）；独立持久化，与 MarketPage 互不影响。
@@ -41,7 +41,7 @@ function persistBasket(symbols: string[]) {
 // 三行档位速度带（2026-07-12 用户白板拍板）：0.3 上 / 0.5 中 / 0.8 下，各行独占一条轨道，
 // 任一时刻的读数只落在最高触及档那一行——不存在跨档区域，也不受段检测嵌套段影响。
 // 与主图复用同款轴宽+边距，SVG 逐像素对齐。
-const LANE_LABELS = ["0.3", "0.5", "0.8"];
+const LANE_LABELS = ["0.3%档", "0.5%档", "0.8%档"];
 
 function TierLaneRow({
   data,
@@ -175,7 +175,6 @@ export function WindowNetValueChart({
       <div className="subsection-head">
         <span className="subsection-title">窗口净值走势</span>
         <div className="window-netvalue-head-controls">
-          <span className="muted-text small">净值归一 1.000 · 低波品种右副轴 · 竖线=驱动新闻 · 下方三行=0.3/0.5/0.8 档速度带</span>
           <MultiSelectControl label="对照品种" values={basket} onChange={setBasket} options={symbolOptions} />
         </div>
       </div>
@@ -192,6 +191,14 @@ export function WindowNetValueChart({
             unit=""
             baseline={1}
             valueFormatter={(v) => v.toFixed(3)}
+            tooltipFormatter={(value, seriesKey, row) => {
+              // 净值 4 位小数 + 原始价格（≤4 位小数），替代默认的全精度浮点串
+              const px = row?.[priceKey(seriesKey)];
+              const nv = value.toFixed(4);
+              return typeof px === "number"
+                ? `${nv} · ${px.toLocaleString(undefined, { maximumFractionDigits: 4 })}`
+                : nv;
+            }}
             yDomain={yDomain}
             markers={markers}
             highlightKey={highlightKey ?? undefined}
@@ -208,9 +215,7 @@ export function WindowNetValueChart({
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="muted-text small netvalue-marker-empty">尚未选出驱动新闻</p>
-          )}
+          ) : null}
         </>
       )}
     </div>

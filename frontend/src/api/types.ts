@@ -105,6 +105,8 @@ export type AnnotationListItem = {
   references: ReferenceChange[];
   no_clear_news: boolean;
   selected_count: number;
+  news_briefs: AnnotationNewsBrief[];
+  s_scores: Record<string, Record<string, unknown>>;
   market_reaction_type: string | null;
   confidence: number | null;
   eval_set: boolean;
@@ -113,6 +115,13 @@ export type AnnotationListItem = {
   notes: string | null;
   created_at: TimeFields;
   updated_at: TimeFields;
+};
+
+export type AnnotationNewsBrief = {
+  id: number;
+  role: string;
+  title: string;
+  time_bj: string | null;
 };
 
 export type AnnotationResponse = {

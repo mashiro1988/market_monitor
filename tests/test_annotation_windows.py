@@ -218,3 +218,132 @@ def test_list_annotations_carries_references(session):
     assert len(items) == 1
     refs = {r.label: r for r in items[0].references}
     assert refs["纳指"].pct == pytest.approx(0.5, abs=0.01)
+
+
+# ---- hours<=0 = 全量回溯（2026-07-19：标注页撤掉回溯筛选，前端固定传 0） ----
+
+def _add_btc_segment(session, start, end):
+    from models.behavior import BehaviorSegment
+    session.add(BehaviorSegment(
+        symbol="BTC/USDT", start_dt=start, end_dt=end, direction=1,
+        tier_idx=1, tier_max=0.5, net_pct=0.6,
+        classification="pure_resonance", class_version="v1",
+    ))
+
+
+def _add_btc_price(session, ts, price):
+    session.add(PriceSnapshot(timestamp=ts, asset_class="crypto", symbol="BTC/USDT",
+                              name="BTC", price=price, source="test"))
+
+
+def test_hours_zero_full_lookback_windows(session):
+    """hours<=0 = 全量：回溯到最早行为段；同一 40 天前的段在 hours=72 下不可见。"""
+    now = utc_now_naive()
+    start = now - timedelta(days=40)
+    end = start + timedelta(minutes=30)
+    _add_btc_segment(session, start, end)
+    _add_btc_price(session, start, 100000.0)
+    _add_btc_price(session, end, 100600.0)
+    session.commit()
+    assert load_price_windows(session, "BTC/USDT", hours=72) == []
+    wins = load_price_windows(session, "BTC/USDT", hours=0)
+    assert len(wins) == 1
+    assert wins[0].change_pct == pytest.approx(0.6, abs=0.01)
+    assert wins[0].annotatable                                 # 早已走完的段不冻结
+
+
+def test_hours_zero_no_segments_returns_empty(session):
+    """全量模式无任何行为段 → 空列表（不回退到原始扫描）。"""
+    now = utc_now_naive()
+    _add_btc_price(session, now - timedelta(minutes=20), 100000.0)
+    _add_btc_price(session, now - timedelta(minutes=15), 100600.0)
+    session.commit()
+    assert load_price_windows(session, "BTC/USDT", hours=0) == []
+
+
+def test_hours_zero_full_lookback_annotations(session):
+    from models.news import NewsPriceAnnotation
+    now = utc_now_naive()
+    ws = now - timedelta(days=40)
+    we = ws + timedelta(minutes=15)
+    session.add(NewsPriceAnnotation(
+        symbol="BTC/USDT", window_start=ws, window_end=we,
+        context_start=ws, context_end=we,
+        change_pct=1.0, no_clear_news=False, created_at=now, updated_at=now,
+    ))
+    session.commit()
+    assert annotation_service.list_annotations(session, symbol="BTC/USDT", hours=24) == []
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0)
+    assert len(items) == 1
+
+
+def test_list_annotations_carries_news_briefs_and_s_scores(session):
+    """已标注列表行内嵌 driver/同簇冗余新闻摘要（driver 优先），且匹配到当前窗口时带 s_scores。"""
+    import json as _json
+    from models.behavior import BehaviorSegment
+    from models.news import NewsItem, NewsPriceAnnotation
+
+    now = utc_now_naive()
+    start = now - timedelta(hours=10)
+    end = start + timedelta(minutes=30)
+    session.add(BehaviorSegment(
+        symbol="BTC/USDT", start_dt=start, end_dt=end, direction=1,
+        tier_idx=1, tier_max=0.5, net_pct=0.6,
+        classification="pure_resonance", class_version="v1",
+        s_scores=_json.dumps({"NQ=F": {"s": 0.77, "ess": 6.3, "coverage": 1.0}}),
+    ))
+    _add_btc_price(session, start, 100000.0)
+    _add_btc_price(session, end, 100600.0)
+    n1 = NewsItem(timestamp=start + timedelta(minutes=5), source="jin10", title="美军对伊朗发起打击", content="硬事件", language="zh")
+    n2 = NewsItem(timestamp=start + timedelta(minutes=2), source="jin10", title="伊朗遇袭首报", content="同簇首报", language="zh")
+    session.add_all([n1, n2])
+    session.commit()
+    session.add(NewsPriceAnnotation(
+        symbol="BTC/USDT", window_start=start, window_end=end,
+        context_start=start, context_end=end, change_pct=0.6,
+        news_roles=_json.dumps({str(n1.id): "driver", str(n2.id): "redundant"}),
+        no_clear_news=False, created_at=now, updated_at=now,
+    ))
+    session.commit()
+
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0)
+    assert len(items) == 1
+    item = items[0]
+    assert [b.role for b in item.news_briefs] == ["driver", "redundant"]   # driver 优先
+    assert item.news_briefs[0].title == "美军对伊朗发起打击"
+    assert item.news_briefs[1].title == "伊朗遇袭首报"
+    assert item.news_briefs[0].time_bj                                     # 北京时间随行
+    assert item.s_scores["NQ=F"]["s"] == 0.77                              # 与工作台同数
+    assert item.needs_review is False
+
+
+def test_needs_review_skips_pre_segment_era_annotations(session):
+    """行为段时代之前的老标注（当时窗口源还不是行为段）匹配不到任何当前窗口，
+    不该被永久打上 needs_review；时代内匹配不上的照旧标。"""
+    from models.news import NewsPriceAnnotation
+
+    now = utc_now_naive()
+    seg_start = now - timedelta(days=10)
+    _add_btc_segment(session, seg_start, seg_start + timedelta(minutes=30))
+    _add_btc_price(session, seg_start, 100000.0)
+    _add_btc_price(session, seg_start + timedelta(minutes=30), 100600.0)
+
+    def _ann(ws):
+        we = ws + timedelta(minutes=15)
+        session.add(NewsPriceAnnotation(
+            symbol="BTC/USDT", window_start=ws, window_end=we,
+            context_start=ws, context_end=we,
+            change_pct=1.0, no_clear_news=False, created_at=now, updated_at=now,
+        ))
+
+    _ann(now - timedelta(days=40))      # 时代前：不标 needs_review
+    _ann(now - timedelta(days=5))       # 时代内、与段无重叠：needs_review
+    session.commit()
+
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0)
+    by_start = {i.window_start.timestamp_utc: i for i in items}
+    old = [i for i in items if i.needs_review is False]
+    flagged = [i for i in items if i.needs_review is True]
+    assert len(items) == 2
+    assert len(old) == 1 and len(flagged) == 1
+    assert min(by_start) == next(i.window_start.timestamp_utc for i in old)   # 更早那条 = 时代前

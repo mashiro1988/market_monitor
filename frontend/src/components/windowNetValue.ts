@@ -10,6 +10,12 @@ export type NetValueChart = {
   highlightKey: string | null;
 };
 
+// tooltip 需要净值旁边同时展示原始价格：净值在 row[key]，原始价挂在 row[priceKey(key)]。
+// price 键没有对应 <Line>，不会进图例/tooltip 条目，仅供 tooltip formatter 从 payload 反查。
+export function priceKey(seriesKey: string): string {
+  return `${seriesKey}$px`;
+}
+
 // 把行情历史转成「净值 = price / 显示区间首个可见 price」，每条线左缘精确归一为 1.000。
 // 合并键用 UTC 截到分钟（ISO 字典序即时间序），显示用 BJT（与 MarketPage buildHistoryChart 同口径）。
 export function buildNetValueChart(
@@ -32,6 +38,7 @@ export function buildNetValueChart(
       const displayTime = point.timestamp_bj?.slice(5, 16) ?? utcMinute;
       const row = byUtcMinute.get(utcMinute) ?? { time: displayTime };
       row[key] = base !== null ? point.price / base : null;
+      row[priceKey(key)] = point.price;
       byUtcMinute.set(utcMinute, row);
     });
   });
@@ -108,9 +115,10 @@ export function computeNetValueDomain(
 }
 
 
-// 三行档位速度带（2026-07-12 用户白板拍板）：主图不画段色带；下方 0.3/0.5/0.8 三行，
-// 每个 5min 桶算**即时 15min 开收净**（close vs 3 桶前 close，与段检测触发原语同款），
-// 落在最高触及档那一行（分区、无锁存——降档可见），方向定色（青涨/玫红跌）、行位定档。
+// 三行档位速度带（2026-07-12 用户白板拍板；2026-07-19 拍板撤销退档滞回）：主图不画段色带；
+// 下方 0.3/0.5/0.8 三行，每个 5min 桶算**即时 15min 开收净**（close vs 3 桶前 close，
+// 与段检测触发原语同款），**纯阈值判档**、落在最高触及档那一行（分区、无锁存、无滞回——
+// 触及即档、降档立即可见），方向定色（青涨/玫红跌）、行位定档。
 // 与段检测内部产物（稀释回退嵌套段等）解耦：这是纯速度仪表，段/窗口语义只在列表与证据台。
 export type TierLaneBand = {
   x1: string;
@@ -129,26 +137,19 @@ export function deriveTierLanes(
 ): TierLaneBand[][] {
   const lanes: TierLaneBand[][] = [[], [], []];
   if (!buckets.length || !closes) return lanes;
-  // 退档滞回（2026-07-12 实弹修正：23:40 段 -0.535/-0.495/-0.520 中间桶 5‰ 擦线掉档，
-  // 连贯下冲被切成 0.5/0.3/0.5 三明治）：进档按原阈值（触及即升，与检测器同语义），
-  // 同向连续时退档需跌破 档位×0.95（2026-07-12 用户定参）；变向或断读即重置。
   const marks: ({ tier: number; dir: 1 | -1 } | null)[] = [];
-  let last: { tier: number; dir: 1 | -1 } | null = null;
   for (let i = 0; i < buckets.length; i++) {
     const cur = closes[i];
     const prev = i >= 3 ? closes[i - 3] : null;               // 3 桶 = 15min 开收净
-    if (cur == null || prev == null || prev === 0) { marks.push(null); last = null; continue; }
+    if (cur == null || prev == null || prev === 0) { marks.push(null); continue; }
     const chg = (cur / prev - 1) * 100;
     const a = Math.abs(chg);
     const dir: 1 | -1 = chg >= 0 ? 1 : -1;
     let tier = -1;
     for (let k = BTC_TIERS.length - 1; k >= 0; k--) {
-      const bar = last && last.dir === dir && k <= last.tier ? BTC_TIERS[k] * 0.95 : BTC_TIERS[k];
-      if (a >= bar) { tier = k; break; }
+      if (a >= BTC_TIERS[k]) { tier = k; break; }
     }
-    if (tier < 0) { marks.push(null); last = null; continue; }
-    last = { tier, dir };
-    marks.push(last);
+    marks.push(tier < 0 ? null : { tier, dir });
   }
   let i = 0;
   while (i < marks.length) {

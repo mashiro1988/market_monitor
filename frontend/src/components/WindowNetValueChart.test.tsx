@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -77,7 +77,8 @@ test("勾选为 driver 的新闻出现在标记列表，noise 不出现", async 
   expect(screen.queryByText("噪音新闻标题")).not.toBeInTheDocument();
 });
 
-test("未勾选驱动时显示空提示", async () => {
+test("未勾选驱动时不渲染占位提示（2026-07-19 撤销：绿线有无即语义）", async () => {
   renderChart({});
-  expect(await screen.findByText(/尚未选出驱动新闻/)).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText("加载中")).not.toBeInTheDocument());
+  expect(screen.queryByText(/尚未选出驱动新闻/)).not.toBeInTheDocument();
 });

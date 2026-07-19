@@ -337,6 +337,15 @@ def test_list_annotations_needs_review(session):
     session.commit()
     from services import behavior_classifier as _bc
     _bc.classify(session, "BTC/USDT", now=now)          # Phase 2：窗口源=行为段，先跑一轮段检测
+    # 时代锚点（2026-07-19 全量回溯守卫）：needs_review 只对最早行为段之后的标注生效。
+    # 补一个更早的空壳段（无边界快照 → 不产窗口）把时代拉到幽灵标注之前。
+    from models.behavior import BehaviorSegment
+    session.add(BehaviorSegment(
+        symbol="BTC/USDT", start_dt=now - timedelta(hours=8), end_dt=now - timedelta(hours=7, minutes=30),
+        direction=1, tier_idx=1, tier_max=0.5, net_pct=0.6,
+        classification="pure_resonance", class_version="v1",
+    ))
+    session.commit()
     wins = annotation_service.load_price_windows(session, "BTC/USDT", hours=24)
     assert wins, "需要至少一个窗口来测 needs_review"
     w = wins[0]
@@ -402,6 +411,7 @@ def test_prompts_drop_retired_roles():
         assert "market_reaction_type" not in p          # Part A：市场反应类型退场
         assert "redundant" in p                          # redundant 可标角色
         assert "confidence" in p                         # confidence 保留（训模型用）
-        assert "s_scores" in p and "max_ref" in p and "machine_class" in p  # v11 派生信号（S 证据链）
+        assert "s_scores" in p and "max_ref" in p        # v11 派生信号（S 证据链）
+        assert "machine_class" not in p                  # v14（2026-07-19）：机器预分类退出 DeepSeek 输入——机器归因不准
         assert "reference_change_segments" in p and "trigger_move_start_bj" in p and "pre_window_move_pct" in p
     assert annotation_service.ANNOTATION_PROMPT_VERSION != "v4-20260612"

@@ -1420,19 +1420,20 @@ code {
   margin-top: -6px;
 }
 
-/* 窗口证据表：对照品种 × 共振分 */
-.evidence-grid { display: flex; flex-direction: column; gap: 2px; }
+/* 品种窗口相关性（2026-07-19 分块布局）：7 个品种排成 3 列小块，数值紧贴标签、缩短视距 */
+.evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 18px; }
+@media (max-width: 1100px) { .evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .evidence-row {
   display: grid;
-  grid-template-columns: 132px minmax(140px, 1fr) 88px 96px;
-  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
   align-items: center;
   padding: 5px 8px;
   border-radius: 6px;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+  background: rgba(148, 163, 184, 0.05);
 }
-.evidence-row:nth-child(even) { background: rgba(148, 163, 184, 0.05); }
 .evidence-row.self { background: rgba(94, 234, 212, 0.06); }
 .evidence-label { display: flex; align-items: center; gap: 7px; color: var(--text); }
 .ref-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
@@ -1446,12 +1447,20 @@ code {
 .s-badge.weak { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid transparent; }
 .s-badge.none { color: var(--muted); opacity: 0.7; }
 .s-badge.selfmark { color: var(--muted); background: transparent; border: 1px dashed var(--line-soft); }
+.s-badge.selfmark.thin { color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); }
+
+/* 已标注列表（2026-07-19）：宏观对标续接 S 徽标；归因列内嵌 driver/同簇冗余标题 */
+.macro-s { margin-left: 4px; font-size: 10.5px; padding: 0 5px; }
+.ann-briefs { display: flex; flex-direction: column; gap: 2px; min-width: 220px; }
+.ann-brief { display: flex; align-items: baseline; gap: 6px; }
+.ann-brief-tag { flex: none; font-size: 10.5px; font-weight: 700; border-radius: 3px; padding: 0 4px; }
+.ann-brief-tag.driver { color: #5eead4; border: 1px solid rgba(94, 234, 212, 0.45); }
+.ann-brief-tag.redundant { color: var(--muted); border: 1px solid var(--line-soft); }
+.ann-brief-time { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ann-brief-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 460px; }
 
 /* 机器预判幽灵徽标：虚线描边、无底色——一眼区别于人工 ✓ 结论，避免"已标注"错觉 */
 .klass.ghost { background: transparent !important; border: 1px dashed var(--line); opacity: 0.75; font-weight: 500; }
-
-/* ESS 单值（表头内联）：<5 证据薄标黄 */
-.ess-thin-inline { color: #fbbf24; }
 
 /* 联动曲线 ±N 档位切换（2026-07-11） */
 .linkage-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

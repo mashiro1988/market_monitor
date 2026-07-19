@@ -184,7 +184,8 @@ def test_prompts_document_reference_changes():
         assert "news_driven|pure_resonance|sentiment_tech" in prompt
         assert "峰值" in prompt
         assert "max|S|" in prompt
-        assert "machine_class" in prompt
+        # v14 守卫（2026-07-19）：机器预分类退出 DeepSeek 输入（机器归因不准），不得复活
+        assert "machine_class" not in prompt
         assert "证据薄" in prompt
         assert "无对照（宏观休市）≠ 无宏观新闻" in prompt
         assert "不要做 lag" in prompt

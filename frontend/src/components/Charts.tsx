@@ -31,6 +31,7 @@ export function MultiLineChart({
   highlightKey,
   baseline,
   valueFormatter,
+  tooltipFormatter,
   yDomain,
   shadedBands,
   secondaryKeys
@@ -43,6 +44,9 @@ export function MultiLineChart({
   highlightKey?: string;
   baseline?: number;
   valueFormatter?: (value: number) => string;
+  // tooltip 逐条目格式化：返回该系列的展示串（可借 row 附带原始价格等上下文）。
+  // 不传则用 recharts 默认（原始浮点全精度）。
+  tooltipFormatter?: (value: number, seriesKey: string, row: ChartPoint | undefined) => string;
   yDomain?: [number, number];
   shadedBands?: { x1: string; x2: string; label?: string; fill?: string; stroke?: string }[];
   secondaryKeys?: string[];   // 放到右侧副轴的线（如美债/美元等低波动品种，自适应各自量程）
@@ -62,7 +66,17 @@ export function MultiLineChart({
           {hasSecondary ? (
             <YAxis yAxisId="right" orientation="right" tick={{ fill: "#fb7185", fontSize: 11 }} width={48} tickFormatter={valueFormatter} domain={["auto", "auto"]} />
           ) : null}
-          <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #263142", color: "#e2e8f0" }} />
+          <Tooltip
+            contentStyle={{ background: "#0f172a", border: "1px solid #263142", color: "#e2e8f0" }}
+            formatter={tooltipFormatter ? (value, name, item) => [
+              tooltipFormatter(
+                typeof value === "number" ? value : Number(value),
+                String(name),
+                item?.payload as ChartPoint | undefined
+              ),
+              String(name),
+            ] : undefined}
+          />
           <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 12 }} />
           {baseline != null ? (
             <ReferenceLine yAxisId="left" y={baseline} stroke="rgba(148,163,184,0.5)" strokeDasharray="4 4" />

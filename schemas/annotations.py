@@ -214,6 +214,14 @@ class DeleteAnnotationResponse(BaseModel):
     deleted: bool = True
 
 
+class AnnotationNewsBrief(BaseModel):
+    """已标注列表行内嵌的新闻摘要（来自 news_roles；driver 优先、同簇冗余随后）。"""
+    id: int
+    role: str                       # driver / redundant
+    title: str
+    time_bj: str | None = None      # 北京时间 MM-DD HH:MM
+
+
 class AnnotationListItem(BaseModel):
     """已标注列表的轻量行，不包含完整 selected_news（用 GET /api/annotations/{id} 拉详情）。"""
     id: int
@@ -225,6 +233,9 @@ class AnnotationListItem(BaseModel):
     references: list[ReferenceChange] = Field(default_factory=list)
     no_clear_news: bool
     selected_count: int
+    # 2026-07-19：driver/同簇冗余标题直接进列表行（免开详情）；匹配到当前窗口时随行带 S（与工作台同数）
+    news_briefs: list[AnnotationNewsBrief] = Field(default_factory=list)
+    s_scores: dict[str, dict] = Field(default_factory=dict)
     market_reaction_type: str | None = None
     confidence: float | None = None
     eval_set: bool = False

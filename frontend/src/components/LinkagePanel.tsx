@@ -72,7 +72,7 @@ export function LinkagePanel({
   return (
     <div className="linkage-panel">
       <div className="mini-title linkage-title-row">
-        <span>联动强度 max|S|（≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立）</span>
+        <span>相关性强度（|S|≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立）</span>
         {windowUtc ? (
           <span className="pad-switch">
             {PAD_CHOICES.map((h) => (
@@ -109,7 +109,7 @@ export function LinkagePanel({
           </LineChart>
         </ResponsiveContainer>
       ))}
-      <div className="mini-title">同步参照数（|S|≥0.3 的参照个数）</div>
+      <div className="mini-title">同步品种数（|S|≥0.3）</div>
       <ResponsiveContainer width="100%" height={66}>
         <LineChart data={link.frames} syncId={`linkage-${symbol}`} margin={{ top: 2, right: 60, left: 0, bottom: 0 }}>
           <XAxis dataKey="t" tick={{ fontSize: 10 }} minTickGap={60} />
@@ -118,7 +118,7 @@ export function LinkagePanel({
           {highlight ? (
             <ReferenceArea x1={highlight.x1} x2={highlight.x2} strokeOpacity={0} fill="rgba(94,234,212,0.20)" stroke="rgba(94,234,212,0.45)" />
           ) : null}
-          <Line dataKey="breadth" name="同步参照数" type="stepAfter" stroke={INK} strokeWidth={1.5} dot={false} connectNulls={false} />
+          <Line dataKey="breadth" name="同步品种数" type="stepAfter" stroke={INK} strokeWidth={1.5} dot={false} connectNulls={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>

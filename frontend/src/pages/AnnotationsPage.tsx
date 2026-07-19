@@ -4,22 +4,21 @@ import { Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow, ReferenceChange } from "../api/types";
 
-// 实测 5 窗口 × reasoning_effort=max 经常把 max_tokens 预算用完导致空 content（模型
-// 还在思考没产出 JSON），所以再保守一档到 3。后端 AUTO_ANNOTATE_BATCH_LIMIT 仍是 10,
-// 是给 API 留的硬上限，不是日常工况。
-const AUTO_BATCH_CHUNK = 3;
-import { Button, PageHeader, SelectControl, Stat, TextInput } from "../components/Controls";
+// 2026-07-19 拍板：批量=逐窗口串行循环（每次调用只喂 1 个窗口）。曾用 3/片省时间，但个人站
+// 不赶时间——单窗口上下文最小、reasoning 预算最省、失败重试粒度最细。后端
+// AUTO_ANNOTATE_BATCH_LIMIT 仍是 10，只是 API 硬上限，不是日常工况。
+const AUTO_BATCH_CHUNK = 1;
+import { Button, PageHeader } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 import { LinkagePanel, REF_COLORS } from "../components/LinkagePanel";
 import { WindowNetValueChart } from "../components/WindowNetValueChart";
-import { classMeta, toWindowClass } from "./behaviorFormat";
+import { classMeta } from "./behaviorFormat";
 
-const hoursOptions = [
-  { label: "24小时", value: "24" },
-  { label: "72小时", value: "72" },
-  { label: "7天", value: "168" }
-];
+// 2026-07-19 简化：个人站单品种工作台。行为段只产 BTC/USDT（品种下拉曾是假选项）；
+// 回溯固定全量（hours=0，后端从最早行为段起算）；标注人输入退役（自动标注仍落 model 名）。
+const SYMBOL = "BTC/USDT";
+const HOURS_ALL = 0;
 
 function windowKey(w: PriceWindow): string {
   return `${w.symbol}|${w.window_start.timestamp_utc}|${w.window_end.timestamp_utc}`;
@@ -52,9 +51,9 @@ function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
   return { text, cls: ref.pct >= 0 ? "up-text" : "down-text" };
 }
 
-// 窗口证据面板（2026-07-10 特别设计）：对照品种 × 共振分 S 合并成一张证据表——
-// 每行 = 参照的绝对起终点 + 窗口涨跌 + 该参照的 rolling |S| 峰值读数（ESS<5 标证据薄），
-// 最强参照高亮。这是 DeepSeek 判 driver 用的同一套证据，人工审核所见即所判。
+// 品种窗口相关性面板（2026-07-10 设计；2026-07-19 简化：改名 + 三列分块 + ESS 挂 BTC 块）：
+// 每格 = 参照的绝对起终点 + 窗口涨跌 + 该参照的 rolling |S| 峰值读数（ESS<5 标证据薄）。
+// 这是 DeepSeek 判 driver 用的同一套证据，人工审核所见即所判。
 function sBadge(entry: { s: number; ess: number } | undefined): { text: string; cls: string; title: string } {
   if (!entry) return { text: "S —", cls: "s-badge none", title: "无对照（休市/数据缺）" };
   const a = Math.abs(entry.s);
@@ -71,17 +70,14 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
   const refs = win.references ?? [];
   if (!refs.length) return null;
   const scores = (win.s_scores ?? {}) as Record<string, { s: number; ess: number }>;
-  // ESS 权重来自 BTC 侧，覆盖齐全时各参照相同 → 表头只列一个数（取最薄值，保守口径）
+  // ESS 权重来自 BTC 侧，覆盖齐全时各参照相同 → 取最薄值（保守口径），读数挂在 BTC（本身）块上
   const essVals = Object.values(scores).map((v) => v.ess).filter((v) => Number.isFinite(v));
   const essMin = essVals.length ? Math.min(...essVals) : null;
   const ordered = [...refs].sort((a, b) => Number(b.is_self) - Number(a.is_self));   // 本身置顶作基准
   return (
     <div className="subsection">
       <div className="subsection-head">
-        <span className="subsection-title">窗口证据 · 对照 × 共振分</span>
-        <span className="muted-text small">
-          S = 段窗 |S| 峰值{essMin != null ? <> · ESS <b className={essMin < 5 ? "ess-thin-inline" : undefined} title="证据厚度（各参照读数取最薄值）：BTC 异动能量摊在几根 K 线上，<5 = 证据薄">{essMin.toFixed(1)}{essMin < 5 ? " 薄⚠" : ""}</b></> : null}
-        </span>
+        <span className="subsection-title">品种窗口相关性</span>
       </div>
       <div className="evidence-grid">
         {ordered.map((ref) => {
@@ -99,7 +95,16 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
               </span>
               <span className="evidence-span">{span}</span>
               <span className={`evidence-move ${moveCls}`}>{move}</span>
-              {badge ? <span className={badge.cls} title={badge.title}>{badge.text}</span> : <span className="s-badge selfmark">基准</span>}
+              {badge ? (
+                <span className={badge.cls} title={badge.title}>{badge.text}</span>
+              ) : (
+                <span
+                  className={`s-badge selfmark${essMin != null && essMin < 5 ? " thin" : ""}`}
+                  title="证据厚度 ESS（各参照读数取最薄值）：BTC 异动能量摊在几根 K 线上，<5 = 证据薄"
+                >
+                  {essMin != null ? `ESS ${essMin.toFixed(1)}${essMin < 5 ? " 薄⚠" : ""}` : "ESS —"}
+                </span>
+              )}
             </div>
           );
         })}
@@ -109,14 +114,13 @@ function WindowEvidence({ win }: { win: PriceWindow }) {
 }
 
 // sessionStorage 持久化 in-progress 标注：批量 AI 结果 + 用户对每个窗口的手动修改（角色/反应类型/notes）
-// + 当前选中窗口 + 标注人。切到别的页面再回来不会丢；标注保存成功后该 key 会被清理。
+// + 当前选中窗口。切到别的页面再回来不会丢；标注保存成功后该 key 会被清理。
 // Phase3a：标签体系升级为 driver/redundant/noise；旧 v2 草稿里可能残留 retired roles，直接弃读。
 const STORAGE_KEY = "annotations.session.phase3a";
 
 type StoredState = {
   batchByKey: [string, AutoAnnotateBatchItem][];
   batchMeta: { reasoning: string; model: string; duration_seconds: number } | null;
-  labeler: string;
   activeKey: string;
 };
 
@@ -189,8 +193,6 @@ export function AnnotationsPage() {
   // 仅在 mount 时读一次 sessionStorage，避免 useState lazy initializer 被多次评估。
   const initialStored = useRef<Partial<StoredState>>(loadStored()).current;
 
-  const [hours, setHours] = useState("72");
-  const [symbol, setSymbol] = useState("");
   const [activeKey, setActiveKey] = useState<string>(initialStored.activeKey ?? "");
 
   // 编辑表单状态（Phase3a：每条新闻 causal_role + 置信度/summary）
@@ -198,7 +200,6 @@ export function AnnotationsPage() {
   const [confidence, setConfidence] = useState<number | null>(null);
   const [windowClass, setWindowClass] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [labeler, setLabeler] = useState(initialStored.labeler ?? "");
   const [autoResult, setAutoResult] = useState<AutoAnnotateResponse | null>(null);
   const [saveValidation, setSaveValidation] = useState("");
 
@@ -247,22 +248,16 @@ export function AnnotationsPage() {
   const hidePricePeek = () => setPricePeek(null);
 
   const rules = useQuery({ queryKey: ["annotation-rules"], queryFn: api.priceRules });
-  const symbols = useQuery({ queryKey: ["annotation-symbols", hours], queryFn: () => api.annotationSymbols(Number(hours)) });
-  const currentSymbol = symbol || symbols.data?.[0]?.symbol || "";
-  const rule = rules.data?.find((item) => item.symbol === currentSymbol);
-
-  // Phase 2：行为段（含 0.3 档簇拥）→ 净值图档位色带；只取近 3 天，随窗口列表同刷。
+  const rule = rules.data?.find((item) => item.symbol === SYMBOL);
 
   const windowsQuery = useQuery({
-    queryKey: ["annotation-windows", currentSymbol, hours],
-    queryFn: () => api.annotationWindows({ symbol: currentSymbol, hours: Number(hours) }),
-    enabled: Boolean(currentSymbol)
+    queryKey: ["annotation-windows", SYMBOL],
+    queryFn: () => api.annotationWindows({ symbol: SYMBOL, hours: HOURS_ALL })
   });
 
   const annotatedListQuery = useQuery({
-    queryKey: ["annotation-list", currentSymbol, hours],
-    queryFn: () => api.annotationsList({ symbol: currentSymbol, hours: Number(hours) }),
-    enabled: Boolean(currentSymbol)
+    queryKey: ["annotation-list", SYMBOL],
+    queryFn: () => api.annotationsList({ symbol: SYMBOL, hours: HOURS_ALL })
   });
 
   // 把后端按 run 排好的窗口分组。后端保证排序：每个 primary 后紧跟它的 secondaries（按时间升序）。
@@ -427,7 +422,6 @@ export function AnnotationsPage() {
         const data: StoredState = {
           batchByKey: Array.from(batchByKey.entries()),
           batchMeta,
-          labeler,
           activeKey
         };
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -436,12 +430,13 @@ export function AnnotationsPage() {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [batchByKey, batchMeta, labeler, activeKey]);
+  }, [batchByKey, batchMeta, activeKey]);
 
-  // 三类预填：已有人工结论 > 机器预分类归并；切窗口时重置
+  // 三类预填：只认已有人工结论（2026-07-19：机器预分类整页退场——机器归因不准，不再预填/展示）；
+  // AI 自动标注的 window_class 建议仍会经 hydrate/applyAutoResult 填入。切窗口时重置。
   useEffect(() => {
-    setWindowClass(activeWindow?.human_class ?? toWindowClass(activeWindow?.machine_class ?? null));
-  }, [activeKey, activeWindow?.human_class, activeWindow?.machine_class]);
+    setWindowClass(activeWindow?.human_class ?? null);
+  }, [activeKey, activeWindow?.human_class]);
 
   const save = useMutation({
     mutationFn: () => api.saveAnnotation({
@@ -455,7 +450,7 @@ export function AnnotationsPage() {
       confidence,
       window_class: windowClass,
       notes,
-      labeler: autoResult ? `${labeler || ""}${labeler ? " · " : ""}${autoResult.model} (auto, reviewed)` : labeler,
+      labeler: autoResult ? `${autoResult.model} (auto, reviewed)` : null,
       // 训练数据：把当前展示的全部候选新闻 ID 一起存（即使是纯人工标注，也保留负样本信息）。
       candidate_news_ids: (contextNews.data?.items ?? []).map((item) => item.id),
       // 自动标注流程：保存 LLM 原始推理 / 摘要 / 原始角色（与人改后的分开存——人机分歧是难例信号）。
@@ -698,18 +693,7 @@ export function AnnotationsPage() {
 
   return (
     <section>
-      <PageHeader title="新闻标注" subtitle="价格异动窗口 × 候选新闻" />
-
-      <div className="annotation-filter">
-        <SelectControl label="回溯" value={hours} onChange={setHours} options={hoursOptions} />
-        <SelectControl
-          label="品种"
-          value={currentSymbol}
-          onChange={(value) => { setSymbol(value); setActiveKey(""); }}
-          options={(symbols.data ?? []).map((item) => ({ value: item.symbol, label: `${item.name} (${item.symbol})` }))}
-        />
-        <TextInput label="标注人" value={labeler} onChange={setLabeler} placeholder="可留空" />
-      </div>
+      <PageHeader title="新闻标注" />
 
       {/* Section 1: 自动标注 —— LLM 触发按钮 + 当前窗口元信息 + 推理面板 */}
       <section className="panel annotation-block">
@@ -771,12 +755,12 @@ export function AnnotationsPage() {
         {autoAnnotate.error ? <ErrorState error={autoAnnotate.error} /> : null}
       </section>
 
-      {/* Section 2: 当前窗口 · 证据台（2026-07-10 特别设计）——选中窗口的全部证据集中在此：
+      {/* Section 2: 当前窗口——选中窗口的全部证据集中在此：
           净值图 + 段档位轨道 → 对照×S 证据表 → rolling S 曲线组。列表行只留一行摘要。 */}
       {activeWindow ? (
         <section className="panel annotation-block workbench-block">
           <div className="panel-head">
-            <h2>当前窗口 · 证据台</h2>
+            <h2>当前窗口</h2>
             <div className="workbench-head-meta">
               <span className="workbench-time">
                 {activeWindow.window_start.timestamp_bj?.slice(5, 16)} → {activeWindow.window_end.timestamp_bj?.slice(11, 16)}
@@ -787,13 +771,8 @@ export function AnnotationsPage() {
               {activeWindow.tier_idx != null ? (
                 <span className={`tier-chip t${activeWindow.tier_idx}`}>{["0.3档", "0.5档", "0.8档"][activeWindow.tier_idx]}</span>
               ) : null}
-              {activeWindow.cluster03_count ? (
-                <span className="muted-text small" title="窗口区间内重叠的 0.3 档段（渐进式共振提示；±1h 邻域的 0.3 段只画色带不计数）">+{activeWindow.cluster03_count}×0.3</span>
-              ) : null}
               {activeWindow.human_class ? (
                 <span className={`klass ${classMeta(activeWindow.human_class).cls}`} title="人工已审">✓{classMeta(activeWindow.human_class).label}</span>
-              ) : toWindowClass(activeWindow.machine_class) ? (
-                <span className={`klass ghost ${classMeta(toWindowClass(activeWindow.machine_class)!).cls}`} title="机器预判（本地分类 job，非 AI 标注、不花 token；仅供推理起点，可推翻）">预判·{classMeta(toWindowClass(activeWindow.machine_class)!).label}</span>
               ) : null}
             </div>
           </div>
@@ -808,7 +787,7 @@ export function AnnotationsPage() {
           {activeWindow.symbol === "BTC/USDT" ? (
             <div className="subsection">
               <div className="subsection-head">
-                <span className="subsection-title">联动证据 · rolling S</span>
+                <span className="subsection-title">品种相关性时序图</span>
               </div>
               <LinkagePanel
                 symbol="BTC/USDT"
@@ -878,13 +857,8 @@ export function AnnotationsPage() {
                                 const vals = Object.values(primary.s_scores ?? {}).map((v) => Math.abs((v as { s: number }).s));
                                 return vals.length ? <span className="schip max">S {Math.max(...vals).toFixed(2)}</span> : null;
                               })()}
-                              {primary.cluster03_count ? (
-                                <span className="muted-text small" title="窗口区间内重叠的 0.3 档段（渐进式共振提示；±1h 邻域的 0.3 段只画色带不计数）">+{primary.cluster03_count}×0.3</span>
-                              ) : null}
                               {primary.human_class ? (
                                 <span className={`klass ${classMeta(primary.human_class).cls}`} title="人工已审">✓{classMeta(primary.human_class).label}</span>
-                              ) : toWindowClass(primary.machine_class) ? (
-                                <span className={`klass ghost ${classMeta(toWindowClass(primary.machine_class)!).cls}`} title="机器预判（本地分类 job，非 AI 标注、不花 token；仅供推理起点，可推翻）">预判·{classMeta(toWindowClass(primary.machine_class)!).label}</span>
                               ) : null}
                               {locked ? <span className="window-item-lock" title="尚未 settle">⏳</span> : null}
                             </span>
@@ -900,7 +874,7 @@ export function AnnotationsPage() {
                 <header className="annotation-pair-panel-head">
                   <span>候选新闻</span>
                   <span>
-                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条 · 前${activePre}/后60 分钟`}
+                    {!activeWindow ? "选中窗口后载入" : `${contextNews.data?.items.length ?? 0} 条`}
                   </span>
                 </header>
                 <div className="annotation-pair-panel-body">
@@ -932,9 +906,6 @@ export function AnnotationsPage() {
                         {opt.label}
                       </button>
                     ))}
-                    {activeWindow?.machine_class ? (
-                      <span className="muted-text small">机器：{classMeta(toWindowClass(activeWindow.machine_class) ?? activeWindow.machine_class).label}</span>
-                    ) : null}
                   </div>
                 </div>
                 <div className="field">
@@ -1041,7 +1012,17 @@ export function AnnotationsPage() {
                   <span className="macro-cell">
                     {row.references.map((ref) => {
                       const f = fmtRef(ref);
-                      return <span key={ref.symbol} className={f.cls}>{f.text}</span>;
+                      // 匹配到当前窗口的行随行带 S（与工作台同数）；老标注无 S 就不占位
+                      const s = !ref.is_self
+                        ? ((row.s_scores ?? {})[ref.symbol] as unknown as { s: number; ess: number } | undefined)
+                        : undefined;
+                      const badge = s ? sBadge(s) : null;
+                      return (
+                        <span key={ref.symbol} className={f.cls}>
+                          {f.text}
+                          {badge ? <span className={`${badge.cls} macro-s`} title={badge.title}>{badge.text}</span> : null}
+                        </span>
+                      );
                     })}
                   </span>
                 ) : "—"
@@ -1049,14 +1030,22 @@ export function AnnotationsPage() {
               {
                 key: "selected",
                 header: "归因",
-                cell: (row) => (
-                  <span>
-                    {row.selected_count > 0
-                      ? <span className="muted-text small">驱动 {row.selected_count} 条</span>
-                      : row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
-                    {row.confidence != null ? <span className="muted-text small"> · {row.confidence.toFixed(2)}</span> : null}
-                  </span>
-                )
+                cell: (row) => {
+                  const briefs = row.news_briefs ?? [];
+                  return (
+                    <div className="ann-briefs">
+                      {briefs.map((b) => (
+                        <div key={b.id} className="ann-brief" title={b.title}>
+                          <span className={`ann-brief-tag ${b.role}`}>{b.role === "driver" ? "驱" : "冗"}</span>
+                          {b.time_bj ? <span className="ann-brief-time">{b.time_bj}</span> : null}
+                          <span className="ann-brief-title">{b.title}</span>
+                        </div>
+                      ))}
+                      {!briefs.length && row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
+                      {row.confidence != null ? <span className="muted-text small">置信 {row.confidence.toFixed(2)}</span> : null}
+                    </div>
+                  );
+                }
               },
               { key: "labeler", header: "标注人", cell: (row) => row.labeler || "—" },
               { key: "notes", header: "备注摘要", cell: (row) => row.notes || "—" },
