@@ -1,6 +1,8 @@
 :root {
   color-scheme: dark;
-  font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  /* 2026-07-20 拍板：英文 Arial、中文微软雅黑。Arial 在前吃掉拉丁字形/数字，
+     CJK 字形 Arial 没有 → 回落到微软雅黑；"微软雅黑"别名兜底本地化注册名。 */
+  font-family: Arial, "Microsoft YaHei", "微软雅黑", sans-serif;
   background: #090d12;
   color: #dbe7f3;
   --bg: #090d12;
@@ -277,7 +279,7 @@ code {
 }
 
 .asset-meta code {
-  font-family: Arial, sans-serif;
+  font-family: Arial, "Microsoft YaHei", "微软雅黑", sans-serif;
   font-size: 13px;
   letter-spacing: 0.02em;
 }
@@ -932,6 +934,7 @@ code {
   padding: 10px;
   max-height: 320px;
   overflow: auto;
+  font-family: inherit;   /* pre 默认 monospace，中文会漏出微软雅黑之外 → 跟全局字体栈 */
   background: var(--panel-2);
   border: 1px solid var(--line-soft);
   border-radius: 6px;
