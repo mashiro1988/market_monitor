@@ -17,6 +17,7 @@ SKIP_COMPONENTS = {
     "HTTPValidationError",
     "ValidationError",
     "Page_AlertLogSchema_",
+    "Page_AnnotationListItem_",
     "Page_MarketTableRow_",
 }
 

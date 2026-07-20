@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Circle, Layers, RotateCcw, Save, Sparkles } from "lucide-react";
 import { api } from "../api/client";
 import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, NewsItem, PriceWindow, ReferenceChange } from "../api/types";
 
@@ -19,6 +19,8 @@ import { classMeta } from "./behaviorFormat";
 // 回溯固定全量（hours=0，后端从最早行为段起算）；标注人输入退役（自动标注仍落 model 名）。
 const SYMBOL = "BTC/USDT";
 const HOURS_ALL = 0;
+// 已标注列表分页（2026-07-20）：全量回溯后只增不减，20 条/页
+const ANN_PAGE_SIZE = 20;
 
 function windowKey(w: PriceWindow): string {
   return `${w.symbol}|${w.window_start.timestamp_utc}|${w.window_end.timestamp_utc}`;
@@ -266,10 +268,18 @@ export function AnnotationsPage() {
     queryFn: () => api.annotationWindows({ symbol: SYMBOL, hours: HOURS_ALL })
   });
 
+  const [annPage, setAnnPage] = useState(1);
   const annotatedListQuery = useQuery({
-    queryKey: ["annotation-list", SYMBOL],
-    queryFn: () => api.annotationsList({ symbol: SYMBOL, hours: HOURS_ALL })
+    queryKey: ["annotation-list", SYMBOL, annPage],
+    queryFn: () => api.annotationsList({ symbol: SYMBOL, hours: HOURS_ALL, page: annPage, page_size: ANN_PAGE_SIZE }),
+    placeholderData: (previous) => previous
   });
+  const annTotal = annotatedListQuery.data?.total ?? 0;
+  const annPages = Math.max(1, Math.ceil(annTotal / ANN_PAGE_SIZE));
+  // 撤销把最后一页删空时回退到最后一个有效页
+  useEffect(() => {
+    if (annPage > annPages) setAnnPage(annPages);
+  }, [annPage, annPages]);
 
   // 把后端按 run 排好的窗口分组。后端保证排序：每个 primary 后紧跟它的 secondaries（按时间升序）。
   // 已标注 primary 的整个 group 在这里被丢掉——primary 进了下方"已标注"块，
@@ -994,14 +1004,14 @@ export function AnnotationsPage() {
 
       <section className="panel annotation-block">
         <div className="panel-head">
-          <h2>已标注 ({annotatedListQuery.data?.length ?? 0})</h2>
+          <h2>已标注 ({annTotal})</h2>
         </div>
 
         {annotatedListQuery.isLoading ? <LoadingState /> :
          annotatedListQuery.error ? <ErrorState error={annotatedListQuery.error} /> : (
           <DataTable<AnnotationListItem>
-            rows={annotatedListQuery.data ?? []}
-            empty="该回溯期内还没有标注"
+            rows={annotatedListQuery.data?.items ?? []}
+            empty="还没有标注"
             columns={[
               {
                 key: "window",
@@ -1112,6 +1122,19 @@ export function AnnotationsPage() {
             ]}
           />
         )}
+        {annPages > 1 ? (
+          <div className="pager">
+            <Button kind="ghost" disabled={annPage <= 1 || annotatedListQuery.isFetching}
+              onClick={() => setAnnPage((v) => Math.max(1, v - 1))}>
+              <ChevronLeft size={16} />上一页
+            </Button>
+            <span>{annPage} / {annPages}</span>
+            <Button kind="ghost" disabled={annPage >= annPages || annotatedListQuery.isFetching}
+              onClick={() => setAnnPage((v) => v + 1)}>
+              下一页<ChevronRight size={16} />
+            </Button>
+          </div>
+        ) : null}
         {undo.error ? <ErrorState error={undo.error} /> : null}
       </section>
 

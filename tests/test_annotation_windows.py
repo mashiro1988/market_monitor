@@ -214,7 +214,7 @@ def test_list_annotations_carries_references(session):
     _add_nq(session, now, 20, 20000.0)
     _add_nq(session, now, 15, 20100.0)
     session.commit()
-    items = annotation_service.list_annotations(session, symbol=None, hours=24)
+    items = annotation_service.list_annotations(session, symbol=None, hours=24).items
     assert len(items) == 1
     refs = {r.label: r for r in items[0].references}
     assert refs["纳指"].pct == pytest.approx(0.5, abs=0.01)
@@ -272,8 +272,8 @@ def test_hours_zero_full_lookback_annotations(session):
         change_pct=1.0, no_clear_news=False, created_at=now, updated_at=now,
     ))
     session.commit()
-    assert annotation_service.list_annotations(session, symbol="BTC/USDT", hours=24) == []
-    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0)
+    assert annotation_service.list_annotations(session, symbol="BTC/USDT", hours=24).items == []
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0).items
     assert len(items) == 1
 
 
@@ -306,7 +306,7 @@ def test_list_annotations_carries_news_briefs_and_s_scores(session):
     ))
     session.commit()
 
-    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0)
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0).items
     assert len(items) == 1
     item = items[0]
     assert [b.role for b in item.news_briefs] == ["driver", "redundant"]   # driver 优先
@@ -315,6 +315,29 @@ def test_list_annotations_carries_news_briefs_and_s_scores(session):
     assert item.news_briefs[0].time_bj                                     # 北京时间随行
     assert item.s_scores["NQ=F"]["s"] == 0.77                              # 与工作台同数
     assert item.needs_review is False
+
+
+def test_list_annotations_paginated(session):
+    """已标注列表分页（2026-07-20：全量回溯后防越堆越多）：window_end 倒序切页，total/pages 正确。"""
+    from models.news import NewsPriceAnnotation
+
+    now = utc_now_naive()
+    for i in range(3):
+        ws = now - timedelta(hours=2 + i)
+        session.add(NewsPriceAnnotation(
+            symbol="BTC/USDT", window_start=ws, window_end=ws + timedelta(minutes=15),
+            context_start=ws, context_end=ws, change_pct=1.0,
+            no_clear_news=True, created_at=now, updated_at=now,
+        ))
+    session.commit()
+
+    p1 = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0, page=1, page_size=2)
+    assert (p1.total, p1.pages, p1.page, p1.page_size) == (3, 2, 1, 2)
+    assert len(p1.items) == 2
+    p2 = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0, page=2, page_size=2)
+    assert len(p2.items) == 1
+    # 倒序切页：第 1 页比第 2 页新
+    assert p1.items[-1].window_end.timestamp_utc > p2.items[0].window_end.timestamp_utc
 
 
 def test_needs_review_skips_pre_segment_era_annotations(session):
@@ -340,7 +363,7 @@ def test_needs_review_skips_pre_segment_era_annotations(session):
     _ann(now - timedelta(days=5))       # 时代内、与段无重叠：needs_review
     session.commit()
 
-    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0)
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0).items
     by_start = {i.window_start.timestamp_utc: i for i in items}
     old = [i for i in items if i.needs_review is False]
     flagged = [i for i in items if i.needs_review is True]

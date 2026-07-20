@@ -154,8 +154,8 @@ export const api = {
     request<{ items: import("./types").NewsItem[] }>(`/annotations/context-news${buildQuery(params)}`),
   saveAnnotation: (body: AnnotationCreateRequest) =>
     request<AnnotationResponse>("/annotations", { method: "POST", body: JSON.stringify(body) }),
-  annotationsList: (params: { symbol?: string; hours?: number }) =>
-    request<AnnotationListItem[]>(`/annotations${buildQuery(params)}`),
+  annotationsList: (params: { symbol?: string; hours?: number; page?: number; page_size?: number }) =>
+    request<Page<AnnotationListItem>>(`/annotations${buildQuery(params)}`),
   annotationDetail: (id: number) =>
     request<AnnotationDetail>(`/annotations/${id}`),
   deleteAnnotation: (id: number) =>

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 import config
 from models.news import NewsItem, NewsPriceAnnotation
 from models.price import PriceSnapshot
+from schemas.common import Page
 from schemas.annotations import (
     MARKET_REACTION_TYPES,
     NEWS_CAUSAL_ROLES,
@@ -1112,18 +1113,30 @@ def get_annotation_detail(session: Session, annotation_id: int) -> AnnotationDet
     )
 
 
-def list_annotations(session: Session, symbol: str | None, hours: int) -> list[AnnotationListItem]:
-    """已标注的轻量列表，按 window_end 倒序。symbol 为空则不过滤；hours<=0 = 全量（上限 500 条）。"""
+def list_annotations(
+    session: Session,
+    symbol: str | None,
+    hours: int,
+    page: int = 1,
+    page_size: int = 50,
+) -> Page[AnnotationListItem]:
+    """已标注的分页列表，按 window_end 倒序。symbol 为空则不过滤；hours<=0 = 全量。
+    2026-07-20 分页化：全量回溯后列表只增不减，改 Page 契约（与 /alerts/logs 同款）。"""
+    from services.pagination import clamp_page, page_count
+
     eff_hours = _effective_hours(hours)
     cutoff = (
         utc_now_naive() - timedelta(hours=eff_hours)
         if eff_hours is not None
         else datetime(1970, 1, 1)
     )
+    page, page_size = clamp_page(page, page_size)
     query = session.query(NewsPriceAnnotation).filter(NewsPriceAnnotation.window_end >= cutoff)
     if symbol:
         query = query.filter(NewsPriceAnnotation.symbol == symbol)
-    rows = query.order_by(NewsPriceAnnotation.window_end.desc()).limit(500).all()
+    query = query.order_by(NewsPriceAnnotation.window_end.desc())
+    total = query.count()
+    rows = query.offset((page - 1) * page_size).limit(page_size).all()
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
     if rows:
         earliest = min(r.window_start for r in rows)
@@ -1217,7 +1230,13 @@ def list_annotations(session: Session, symbol: str | None, hours: int) -> list[A
             created_at=timestamp_pair(row.created_at),
             updated_at=timestamp_pair(row.updated_at),
         ))
-    return items
+    return Page[AnnotationListItem](
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=page_count(total, page_size),
+    )
 
 
 def delete_annotation(session: Session, annotation_id: int) -> int:

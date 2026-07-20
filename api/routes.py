@@ -390,13 +390,16 @@ def annotation_eval_set(annotation_id: int, value: bool = True, db: Session = De
         raise ApiError("ANNOTATION_NOT_FOUND", str(exc), status_code=404) from exc
 
 
-@router.get("/annotations", response_model=list[AnnotationListItem])
+@router.get("/annotations", response_model=Page[AnnotationListItem])
 def annotation_list(
     symbol: str | None = None,
     hours: int = 72,
+    page: int = 1,
+    page_size: int = 50,
     db: Session = Depends(get_db),
-) -> list[AnnotationListItem]:
-    return annotation_service.list_annotations(db, symbol, hours)
+) -> Page[AnnotationListItem]:
+    """已标注分页列表；hours<=0 = 全量回溯。"""
+    return annotation_service.list_annotations(db, symbol, hours, page, page_size)
 
 
 @router.get("/annotations/{annotation_id}", response_model=AnnotationDetail)

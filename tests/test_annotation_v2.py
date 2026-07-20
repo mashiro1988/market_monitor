@@ -363,7 +363,7 @@ def test_list_annotations_needs_review(session):
         news_roles=json.dumps({}), no_clear_news=True, created_at=now, updated_at=now,
     ))
     session.commit()
-    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=24)
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=24).items
     normal = [it for it in items if it.window_end.timestamp_utc == w.window_end.timestamp_utc]
     ghost = [it for it in items if it.window_end.timestamp_utc != w.window_end.timestamp_utc]
     assert normal and normal[0].needs_review is False
