@@ -183,7 +183,7 @@ function MarketAssetCard({ primary, perp }: OverviewCard) {
           title="OKX 永续休市代理价"
           style={{
             alignSelf: "flex-start",
-            fontSize: 11,
+            fontSize: 13,
             lineHeight: 1.4,
             padding: "1px 6px",
             borderRadius: 4,

@@ -61,10 +61,10 @@ export function MultiLineChart({
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ left: 0, right: 12, top: 8, bottom: 0 }}>
           <CartesianGrid stroke="rgba(148,163,184,0.14)" vertical={false} />
-          <XAxis dataKey="time" tick={{ fill: "#94a3b8", fontSize: 11 }} minTickGap={28} />
-          <YAxis yAxisId="left" tick={{ fill: "#94a3b8", fontSize: 11 }} unit={valueFormatter ? "" : unit} width={48} tickFormatter={valueFormatter} domain={yDomain} allowDataOverflow={yDomain != null} />
+          <XAxis dataKey="time" tick={{ fill: "#94a3b8", fontSize: 13 }} minTickGap={28} />
+          <YAxis yAxisId="left" tick={{ fill: "#94a3b8", fontSize: 13 }} unit={valueFormatter ? "" : unit} width={48} tickFormatter={valueFormatter} domain={yDomain} allowDataOverflow={yDomain != null} />
           {hasSecondary ? (
-            <YAxis yAxisId="right" orientation="right" tick={{ fill: "#fb7185", fontSize: 11 }} width={48} tickFormatter={valueFormatter} domain={["auto", "auto"]} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fill: "#fb7185", fontSize: 13 }} width={48} tickFormatter={valueFormatter} domain={["auto", "auto"]} />
           ) : null}
           <Tooltip
             contentStyle={{ background: "#0f172a", border: "1px solid #263142", color: "#e2e8f0" }}
@@ -77,7 +77,7 @@ export function MultiLineChart({
               String(name),
             ] : undefined}
           />
-          <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 12 }} />
+          <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 13.5 }} />
           {baseline != null ? (
             <ReferenceLine yAxisId="left" y={baseline} stroke="rgba(148,163,184,0.5)" strokeDasharray="4 4" />
           ) : null}
@@ -93,7 +93,7 @@ export function MultiLineChart({
           {(shadedBands ?? []).map((b) => (
             <ReferenceArea key={`band-${b.x1}-${b.x2}-${b.fill ?? "d"}`} yAxisId="left" x1={b.x1} x2={b.x2}
               stroke={b.stroke} strokeOpacity={b.stroke ? 1 : 0} fill={b.fill ?? "rgba(148,163,184,0.14)"}
-              label={b.label ? { value: b.label, position: "insideTop", fill: "#94a3b8", fontSize: 11 } : undefined} />
+              label={b.label ? { value: b.label, position: "insideTop", fill: "#94a3b8", fontSize: 13 } : undefined} />
           ))}
           {keys.map((key, index) => (
             <Line

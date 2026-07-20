@@ -58,7 +58,7 @@ export function BehaviorPage() {
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="date" hide />
-                  <YAxis width={34} tick={{ fontSize: 10 }} />
+                  <YAxis width={34} tick={{ fontSize: 12 }} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <ReferenceLine y={0} stroke={INK} />
                   <Bar isAnimationActive={false} dataKey="up" name="涨段" stackId="s" fill={UP} opacity={0.65} />
@@ -71,7 +71,7 @@ export function BehaviorPage() {
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="date" hide />
-                  <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <YAxis width={34} tick={{ fontSize: 12 }} allowDecimals={false} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <ReferenceLine y={0} stroke={INK} />
                   <Bar isAnimationActive={false} dataKey="t05Up" name="0.5档涨" stackId="t" fill="#b48a3c" />
@@ -84,8 +84,8 @@ export function BehaviorPage() {
               <ResponsiveContainer width="100%" height={100}>
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                  <YAxis width={34} tick={{ fontSize: 10 }} />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis width={34} tick={{ fontSize: 12 }} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <ReferenceLine y={0} stroke={INK} />
                   <Bar isAnimationActive={false} dataKey="upSum" name="涨段净幅Σ" stackId="n" fill={UP} opacity={0.75} />
@@ -114,7 +114,7 @@ export function BehaviorPage() {
               <ComposedChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" hide />
-                <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
+                <YAxis width={34} tick={{ fontSize: 12 }} allowDecimals={false} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <Bar isAnimationActive={false} dataKey="nd" name="新闻驱动" stackId="c" fill={C_ND} opacity={0.85} />
                 <Bar isAnimationActive={false} dataKey="pr" name="纯共振" stackId="c" fill={C_PR} opacity={0.85} />
@@ -126,7 +126,7 @@ export function BehaviorPage() {
               <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" hide />
-                <YAxis width={34} tick={{ fontSize: 10 }} allowDecimals={false} />
+                <YAxis width={34} tick={{ fontSize: 12 }} allowDecimals={false} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <ReferenceLine y={0} stroke={INK} />
                 <Bar isAnimationActive={false} dataKey="sentUp" name="情绪涨段" stackId="sc" fill={UP} opacity={0.65} />
@@ -139,7 +139,7 @@ export function BehaviorPage() {
               <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" hide />
-                <YAxis width={34} tick={{ fontSize: 10 }} />
+                <YAxis width={34} tick={{ fontSize: 12 }} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <ReferenceLine y={0} stroke={INK} />
                 <Bar isAnimationActive={false} dataKey="sentUpNet" name="情绪涨净幅Σ" stackId="sn" fill={UP} opacity={0.65} />
@@ -151,8 +151,8 @@ export function BehaviorPage() {
             <ResponsiveContainer width="100%" height={100}>
               <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
-                <YAxis width={34} domain={[-100, 100]} ticks={[-50, 0, 50]} tick={{ fontSize: 10 }} />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <YAxis width={34} domain={[-100, 100]} ticks={[-50, 0, 50]} tick={{ fontSize: 12 }} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <ReferenceLine y={0} stroke={INK} />
                 <Bar isAnimationActive={false} dataKey="sentUpRatio" name="情绪涨占比%" stackId="sr" fill={UP} opacity={0.65} />

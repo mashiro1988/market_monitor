@@ -154,6 +154,17 @@ const CONFIDENCE_TIERS = [
   { value: 0.3, label: "低" },
 ] as const;
 
+// AI 置信度吸附到三档（2026-07-20）：DeepSeek 返回 0.85 之类的原始值时对不上三档按钮的
+// 固定数值，看起来像"没自动打标"。吸附到最近一档让按钮直接亮起，落库口径也统一为三档。
+function snapConfidence(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  let best: number = CONFIDENCE_TIERS[0].value;
+  for (const t of CONFIDENCE_TIERS) {
+    if (Math.abs(t.value - v) < Math.abs(best - v)) best = t.value;
+  }
+  return best;
+}
+
 
 function rolesEqual(a: Record<number, string>, b: Record<number, string>): boolean {
   const ka = Object.keys(a);
@@ -318,10 +329,16 @@ export function AnnotationsPage() {
   // 子树多余 re-render → 视觉抖动。
   useEffect(() => {
     const cached = batchByKey.get(activeKey);
+    // 本 effect 是 windowClass 的唯一所有者（2026-07-20 修复）：此前另有一个"三类预填"effect
+    // 在切窗口时把 windowClass 重置为 human_class ?? null，晚于本 effect 执行，
+    // 把批量 AI 结果里的 window_class 冲掉——这就是"批量打标后驱动类型没自动填上"的原因。
+    const wclassOf = (v: string | null | undefined) => v ?? activeWindow?.human_class ?? null;
     if (cached && batchMeta) {
       setNewsRoles((prev) => rolesEqual(prev, cached.news_roles ?? {}) ? prev : (cached.news_roles ?? {}));
-      setConfidence((prev) => prev === (cached.confidence ?? null) ? prev : (cached.confidence ?? null));
-      if (cached.window_class) setWindowClass((prev) => prev === cached.window_class ? prev : cached.window_class!);
+      const conf = snapConfidence(cached.confidence);
+      setConfidence((prev) => prev === conf ? prev : conf);
+      const wclass = wclassOf(cached.window_class);
+      setWindowClass((prev) => prev === wclass ? prev : wclass);
       setNotes((prev) => prev === cached.summary ? prev : cached.summary);
       setAutoResult((prev) => {
         const expectedReasoning = cached.reasoning || batchMeta.reasoning;
@@ -353,17 +370,21 @@ export function AnnotationsPage() {
       // 缓存里有但没 batchMeta（重新加载页面后 batchMeta 也持久化了，正常路径会走上面分支；
       // 这里是兜底：纯人工编辑过的窗口没有 AI 元数据，但表单内容还是要还原）
       setNewsRoles((prev) => rolesEqual(prev, cached.news_roles ?? {}) ? prev : (cached.news_roles ?? {}));
-      setConfidence((prev) => prev === (cached.confidence ?? null) ? prev : (cached.confidence ?? null));
-      if (cached.window_class) setWindowClass((prev) => prev === cached.window_class ? prev : cached.window_class!);
+      const conf = snapConfidence(cached.confidence);
+      setConfidence((prev) => prev === conf ? prev : conf);
+      const wclass = wclassOf(cached.window_class);
+      setWindowClass((prev) => prev === wclass ? prev : wclass);
       setNotes((prev) => prev === cached.summary ? prev : cached.summary);
       setAutoResult((prev) => prev === null ? prev : null);
     } else {
       setNewsRoles((prev) => Object.keys(prev).length === 0 ? prev : {});
       setConfidence((prev) => prev === null ? prev : null);
+      const wclass = wclassOf(null);
+      setWindowClass((prev) => prev === wclass ? prev : wclass);
       setNotes((prev) => prev === "" ? prev : "");
       setAutoResult((prev) => prev === null ? prev : null);
     }
-  }, [activeKey, batchByKey, batchMeta]);
+  }, [activeKey, batchByKey, batchMeta, activeWindow?.human_class]);
 
   // 用户编辑（新闻角色 / 置信度 / notes）在**事件处理器里**同步写回 batchByKey 草稿。
   // 不能用 effect 镜像表单→缓存：activeKey 切换时 hydrate（缓存→表单）和写回（表单→缓存）
@@ -371,7 +392,7 @@ export function AnnotationsPage() {
   // 永不收敛（实测 checked 被以 ~6500 次/秒翻转——就是「勾选框抖动」）。
   // 事件驱动写回只在用户真实操作时发生，结构上无环；hydrate 保持唯一的 缓存→表单 方向。
   const updateDraft = useCallback(
-    (patch: Partial<Pick<AutoAnnotateBatchItem, "news_roles" | "confidence" | "summary">>) => {
+    (patch: Partial<Pick<AutoAnnotateBatchItem, "news_roles" | "confidence" | "summary" | "window_class">>) => {
       if (!activeKey || !activeWindow) return;
       setBatchByKey((prev) => {
         const existing = prev.get(activeKey);
@@ -396,7 +417,8 @@ export function AnnotationsPage() {
         const full: AutoAnnotateBatchItem = { ...merged, selected_news_ids: selected, no_clear_news: noClear };
         // 用户把窗口清回全空且无 AI 痕迹 → 删草稿而不是存空条目（保持「没动过=无草稿」语义，
         // 批量自动标注的 pending 列表也依赖这一点）。
-        const empty = !roleIds.length && !merged.summary && !merged.reasoning;
+        const empty = !roleIds.length && !merged.summary && !merged.reasoning
+          && merged.confidence == null && !merged.window_class;
         if (empty) {
           if (!prev.has(activeKey)) return prev;
           const next = new Map(prev);
@@ -431,12 +453,6 @@ export function AnnotationsPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [batchByKey, batchMeta, activeKey]);
-
-  // 三类预填：只认已有人工结论（2026-07-19：机器预分类整页退场——机器归因不准，不再预填/展示）；
-  // AI 自动标注的 window_class 建议仍会经 hydrate/applyAutoResult 填入。切窗口时重置。
-  useEffect(() => {
-    setWindowClass(activeWindow?.human_class ?? null);
-  }, [activeKey, activeWindow?.human_class]);
 
   const save = useMutation({
     mutationFn: () => api.saveAnnotation({
@@ -505,7 +521,7 @@ export function AnnotationsPage() {
   const applyAutoResult = useCallback((result: AutoAnnotateResponse) => {
       setAutoResult(result);
       setNewsRoles(result.news_roles ?? {});
-      setConfidence(result.confidence ?? null);
+      setConfidence(snapConfidence(result.confidence));
       if (result.window_class) setWindowClass(result.window_class);
       if (result.confidence != null) setSaveValidation("");
       setNotes(result.summary);
@@ -671,7 +687,7 @@ export function AnnotationsPage() {
         const sel = (val: string | null, list: string[] | undefined, field: "topic" | "magnitude_tier" | "news_direction", color?: string) => (
           <select
             value={val ?? ""}
-            style={{ fontSize: 11, padding: "1px 2px", color, maxWidth: field === "topic" ? 96 : 56 }}
+            style={{ fontSize: 13, padding: "1px 2px", color, maxWidth: field === "topic" ? 110 : 64 }}
             onChange={(e) => updateTags.mutate({ id: row.id, body: { [field]: e.target.value || null } })}
             title={field === "topic" ? "主题" : field === "magnitude_tier" ? "量级" : "方向"}
           >
@@ -743,7 +759,7 @@ export function AnnotationsPage() {
               onChange={(e) => setRefineMessage(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && refineMessage.trim() && !refine.isPending) refine.mutate(); }}
               placeholder="不认可就纠正模型，例：driver 标错了，应该是「美军打击」那条及其同簇冗余"
-              style={{ flex: 1, fontSize: 13, padding: "4px 8px" }}
+              style={{ flex: 1, fontSize: 15, padding: "4px 8px" }}
             />
             <Button disabled={!refineMessage.trim() || refine.isPending} onClick={() => refine.mutate()}>
               {refine.isPending ? "重标中..." : "让模型重标"}
@@ -901,7 +917,13 @@ export function AnnotationsPage() {
                         key={opt.value}
                         type="button"
                         className={`tier-btn ${windowClass === opt.value ? "active" : ""}`}
-                        onClick={() => { setWindowClass(opt.value); setSaveValidation(""); }}
+                        onClick={() => {
+                          setWindowClass(opt.value);
+                          setSaveValidation("");
+                          // 人工改判写回草稿：否则任何缓存更新（如打字触发 write-back）都会
+                          // 让 hydrate 用 AI 的 window_class 盖掉人工选择
+                          updateDraft({ window_class: opt.value });
+                        }}
                       >
                         {opt.label}
                       </button>
@@ -1032,17 +1054,24 @@ export function AnnotationsPage() {
                 header: "归因",
                 cell: (row) => {
                   const briefs = row.news_briefs ?? [];
+                  // 2026-07-20：列表只展示 driver；同簇冗余仍全量落库，这里只报条数
+                  const drivers = briefs.filter((b) => b.role === "driver");
+                  const redundant = briefs.length - drivers.length;
+                  const footer = [
+                    redundant > 0 ? `+${redundant} 条同簇冗余` : null,
+                    row.confidence != null ? `置信 ${row.confidence.toFixed(2)}` : null,
+                  ].filter(Boolean).join(" · ");
                   return (
                     <div className="ann-briefs">
-                      {briefs.map((b) => (
+                      {drivers.map((b) => (
                         <div key={b.id} className="ann-brief" title={b.title}>
-                          <span className={`ann-brief-tag ${b.role}`}>{b.role === "driver" ? "驱" : "冗"}</span>
+                          <span className="ann-brief-tag driver">驱</span>
                           {b.time_bj ? <span className="ann-brief-time">{b.time_bj}</span> : null}
                           <span className="ann-brief-title">{b.title}</span>
                         </div>
                       ))}
-                      {!briefs.length && row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
-                      {row.confidence != null ? <span className="muted-text small">置信 {row.confidence.toFixed(2)}</span> : null}
+                      {!drivers.length && row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
+                      {footer ? <span className="muted-text small">{footer}</span> : null}
                     </div>
                   );
                 }

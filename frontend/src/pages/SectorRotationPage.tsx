@@ -235,7 +235,7 @@ function ReturnCell({ median, mean }: { median: number | null | undefined; mean:
   return (
     <td style={{ textAlign: "right" }} className={pctClass(median ?? mean)}>
       <div>{fmtPct(median)}</div>
-      <div className="muted" style={{ fontSize: 12 }}>均 {fmtPct(mean)}</div>
+      <div className="muted" style={{ fontSize: 13.5 }}>均 {fmtPct(mean)}</div>
     </td>
   );
 }

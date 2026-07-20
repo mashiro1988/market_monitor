@@ -85,7 +85,7 @@ export function LinkagePanel({
       <ResponsiveContainer width="100%" height={120}>
         <LineChart data={link.frames} syncId={`linkage-${symbol}`} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
           <XAxis dataKey="t" hide />
-          <YAxis width={34} domain={[0, 1]} tick={{ fontSize: 10 }} />
+          <YAxis width={34} domain={[0, 1]} tick={{ fontSize: 12 }} />
           <Tooltip contentStyle={TOOLTIP_STYLE} />
           {highlight ? (
             <ReferenceArea x1={highlight.x1} x2={highlight.x2} strokeOpacity={0} fill="rgba(94,234,212,0.22)" stroke="rgba(94,234,212,0.55)" />
@@ -99,7 +99,7 @@ export function LinkagePanel({
         <ResponsiveContainer key={refSym} width="100%" height={52}>
           <LineChart data={link.frames} syncId={`linkage-${symbol}`} margin={{ top: 2, right: 60, left: 0, bottom: 0 }}>
             <XAxis dataKey="t" hide />
-            <YAxis width={34} domain={[-1, 1]} ticks={[0]} tick={{ fontSize: 9 }} />
+            <YAxis width={34} domain={[-1, 1]} ticks={[0]} tick={{ fontSize: 11 }} />
             <Tooltip contentStyle={TOOLTIP_STYLE} />
             {highlight ? (
               <ReferenceArea x1={highlight.x1} x2={highlight.x2} strokeOpacity={0} fill="rgba(94,234,212,0.20)" stroke="rgba(94,234,212,0.45)" />
@@ -112,8 +112,8 @@ export function LinkagePanel({
       <div className="mini-title">同步品种数（|S|≥0.3）</div>
       <ResponsiveContainer width="100%" height={66}>
         <LineChart data={link.frames} syncId={`linkage-${symbol}`} margin={{ top: 2, right: 60, left: 0, bottom: 0 }}>
-          <XAxis dataKey="t" tick={{ fontSize: 10 }} minTickGap={60} />
-          <YAxis width={34} domain={[0, 6]} ticks={[0, 3, 6]} tick={{ fontSize: 10 }} />
+          <XAxis dataKey="t" tick={{ fontSize: 12 }} minTickGap={60} />
+          <YAxis width={34} domain={[0, 6]} ticks={[0, 3, 6]} tick={{ fontSize: 12 }} />
           <Tooltip contentStyle={TOOLTIP_STYLE} />
           {highlight ? (
             <ReferenceArea x1={highlight.x1} x2={highlight.x2} strokeOpacity={0} fill="rgba(94,234,212,0.20)" stroke="rgba(94,234,212,0.45)" />
