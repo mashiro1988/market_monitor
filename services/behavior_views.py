@@ -111,8 +111,8 @@ def daily_series(session: Session, symbol: str, days: int = 14) -> BehaviorDaily
 
 def linkage(session: Session, symbol: str, hours: int = 48,
             start: datetime | None = None, end: datetime | None = None) -> BehaviorLinkageResponse:
-    """rolling S 曲线。默认贴最新数据回看 hours；显式 start/end（标注页跟随窗口 ±24h，
-    2026-07-10 拍板）时用请求区间，end 超出最新数据则贴到最新点收口。"""
+    """rolling S 曲线。默认贴最新数据回看 hours；显式 start/end（标注页跟随窗口 ±1/6/24h
+    档位，2026-07-20 起默认 ±6h）时用请求区间，end 超出最新数据则贴到最新点收口。"""
     tiers = config.BEHAVIOR_TIERS.get(symbol)
     points = int(config.BEHAVIOR_ROLLING_POINTS)
     if not tiers:

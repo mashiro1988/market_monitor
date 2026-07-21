@@ -230,36 +230,6 @@ export function AnnotationsPage() {
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [batchError, setBatchError] = useState<unknown>(null);
 
-  // 价格区间 hover tooltip：window-item 在 .annotation-pair-panel(overflow:hidden)
-  // 里，原生 title 太丑且 absolute 子元素会被裁；改用 position: fixed 渲染到顶层，
-  // 用 React state 记录鼠标对应行的元数据 + viewport 坐标。
-  const [pricePeek, setPricePeek] = useState<{
-    startPrice: number;
-    endPrice: number;
-    tone: "up" | "down";
-    x: number;
-    y: number;
-  } | null>(null);
-
-  const showPricePeek = (event: React.MouseEvent<HTMLElement>, w: PriceWindow) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    // 默认放右侧；如果靠近视口右边缘就 fallback 到左侧，避免溢出。
-    const tooltipWidth = 200;
-    const wantedLeft = rect.right + 10;
-    const x = wantedLeft + tooltipWidth > window.innerWidth - 12
-      ? rect.left - tooltipWidth - 10
-      : wantedLeft;
-    setPricePeek({
-      startPrice: w.price_start,
-      endPrice: w.price_end,
-      tone: w.change_pct >= 0 ? "up" : "down",
-      x,
-      y: rect.top
-    });
-  };
-
-  const hidePricePeek = () => setPricePeek(null);
-
   const rules = useQuery({ queryKey: ["annotation-rules"], queryFn: api.priceRules });
   const rule = rules.data?.find((item) => item.symbol === SYMBOL);
 
@@ -865,12 +835,14 @@ export function AnnotationsPage() {
                             disabled={locked}
                             title={locked ? "窗口尚未 settle / 走完，稍后再标" : undefined}
                             style={locked ? { opacity: 0.5 } : undefined}
-                            onMouseEnter={(e) => showPricePeek(e, primary)}
-                            onMouseLeave={hidePricePeek}
                           >
                             <span className="window-item-icon"><Circle size={14} /></span>
                             <span className="window-item-time">
                               {primary.window_start.timestamp_bj?.slice(5, 16)} → {primary.window_end.timestamp_bj?.slice(11, 16)}
+                            </span>
+                            {/* 2026-07-20：价格区间起终点直接上行内，替代 hover 浮窗 */}
+                            <span className="window-item-price">
+                              {fmtRefPrice(primary.price_start)} → {fmtRefPrice(primary.price_end)}
                             </span>
                             <span className="window-item-meta">
                               <span className="window-item-pct">
@@ -1138,25 +1110,6 @@ export function AnnotationsPage() {
         {undo.error ? <ErrorState error={undo.error} /> : null}
       </section>
 
-      {pricePeek ? (
-        <div
-          className="price-peek"
-          style={{ left: pricePeek.x, top: pricePeek.y }}
-          role="tooltip"
-        >
-          <div className={`price-peek-head ${pricePeek.tone}`}>
-            {pricePeek.tone === "up" ? "↑" : "↓"} 价格区间
-          </div>
-          <div className="price-peek-row">
-            <span>起点</span>
-            <strong>{pricePeek.startPrice.toLocaleString()}</strong>
-          </div>
-          <div className="price-peek-row">
-            <span>终点</span>
-            <strong>{pricePeek.endPrice.toLocaleString()}</strong>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

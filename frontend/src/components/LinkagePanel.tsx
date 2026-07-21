@@ -44,7 +44,7 @@ export function LinkagePanel({
   highlight?: { x1: string; x2: string } | null;   // 选中窗口区间（bj MM-DD HH:mm）
   refreshMs?: number;
 }) {
-  const [padH, setPadH] = useState<number>(24);
+  const [padH, setPadH] = useState<number>(6);   // 默认 ±6h（2026-07-20 拍板，原 ±24h）
   const range = useMemo(() => {
     if (!windowUtc) return null;
     const shift = (iso: string, mins: number) => {
