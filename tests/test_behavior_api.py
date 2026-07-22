@@ -204,3 +204,42 @@ def test_unsettled_row_still_settles_after_downtime(client_session):
     bc.classify(session, "BTC/USDT", now=now)                      # 9 小时后恢复
     session.refresh(row)
     assert row.classification is not None                          # 补 settle 成功
+
+
+def test_day_direction_extras_strong_weak_split(client_session):
+    """净幅分层（2026-07-22 设计稿）：强段=tier_idx>=1，弱段=tier_idx==0；
+    空日/单向日返回 0.0；字段经 daily 接口透传。
+    注：net_pct 列非空（models/behavior.py nullable=False），None 进不了库——
+    实现里的 is not None 只是纯防御，不造库内用例（设计稿 §7 第 4 条据此放弃）。"""
+    client, session = client_session
+    from models.behavior import BehaviorSegment
+
+    def seg(start, direction, tier_idx, net):
+        return BehaviorSegment(
+            symbol="BTC/USDT", start_dt=start, end_dt=start + timedelta(minutes=30),
+            direction=direction, tier_idx=tier_idx, tier_max=[0.3, 0.5, 0.8][tier_idx],
+            net_pct=net, amp_pct=abs(net),
+            key_ts=start, classification="count_only", class_version="v2")
+
+    d0 = datetime(2026, 1, 15, 3, 0)
+    session.add_all([
+        seg(d0, +1, 1, 0.55),                        # 强涨（0.5 档压线）
+        seg(d0 + timedelta(hours=1), +1, 2, 1.0),    # 强涨（0.8 档）
+        seg(d0 + timedelta(hours=2), +1, 0, 0.35),   # 弱涨
+        seg(d0 + timedelta(hours=4), -1, 1, -0.6),   # 强跌
+        seg(d0 + timedelta(hours=5), -1, 0, -0.45),  # 弱跌
+        seg(d0 + timedelta(hours=6), -1, 0, -0.9),   # 弱跌
+    ])
+    session.add(seg(datetime(2026, 1, 16, 3, 0), -1, 0, -0.4))   # 单向日：只有弱跌
+    session.commit()
+
+    ex = bc.day_direction_extras(session, "BTC/USDT", "2026-01-15")
+    assert ex["up_net_sum"] == pytest.approx(1.9)
+    assert ex["up_net_sum_strong"] == pytest.approx(1.55)
+    assert ex["down_net_sum_strong"] == pytest.approx(-0.6)
+    ex1 = bc.day_direction_extras(session, "BTC/USDT", "2026-01-16")
+    assert ex1["up_net_sum_strong"] == 0.0 and ex1["down_net_sum_strong"] == 0.0
+    ex2 = bc.day_direction_extras(session, "BTC/USDT", "2026-01-17")   # 空日
+    assert ex2["up_net_sum_strong"] == 0.0 and ex2["down_net_sum_strong"] == 0.0
+    day = client.get("/api/behavior/daily?days=1").json()["days"][0]   # 接口透传（当日无段 → 0.0）
+    assert day["up_net_sum_strong"] == 0.0 and day["down_net_sum_strong"] == 0.0

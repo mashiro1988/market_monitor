@@ -247,13 +247,19 @@ def day_direction_extras(session: Session, symbol: str, utc_date: str) -> dict:
         .all()
     )
     up_sum = 0.0
+    up_strong = down_strong = 0.0
     sent_up = sent_down = 0
     sent_up_sum = sent_down_sum = 0.0
     for r in rows:
         if r.direction > 0 and r.net_pct is not None:
             up_sum += r.net_pct
         if r.tier_idx is None or r.tier_idx < 1:
-            continue                                   # 情绪拆分只看构成段（0.5 档以上）
+            continue                                   # 情绪拆分与强段Σ都只看构成段（0.5 档以上）
+        if r.net_pct is not None:                      # 强段净幅Σ（净幅分层 2026-07-22）
+            if r.direction > 0:
+                up_strong += r.net_pct
+            else:
+                down_strong += r.net_pct
         effective = to_window_class(r.human_class) or to_window_class(r.classification)
         if effective != "sentiment_tech":
             continue
@@ -265,6 +271,8 @@ def day_direction_extras(session: Session, symbol: str, utc_date: str) -> dict:
             sent_down_sum += r.net_pct or 0.0
     return {
         "up_net_sum": round(up_sum, 4),
+        "up_net_sum_strong": round(up_strong, 4),
+        "down_net_sum_strong": round(down_strong, 4),
         "sent_up": sent_up,
         "sent_down": sent_down,
         "sent_up_net_sum": round(sent_up_sum, 4),
