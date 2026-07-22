@@ -1480,7 +1480,11 @@ PENDING.md（回补已完成记录 + "解封后二次收尾回补"待办）。HT
 
 Run: `ssh -o BatchMode=yes mmon "cd /opt/market_monitor && ./deploy.sh"`
 （deploy.sh 自带 VACUUM INTO 备份 → git pull → pip → npm build → restart）
-Expected: 备份 ok、restart 完成
+Expected: 备份 ok、restart 完成。**本次部署顺带验证备份重构遗留项（2026-07-22）：**
+- 输出含 `SQLite backup written & verified: backups/market_monitor_<ts>.db (~283 MB)`；
+- 部署后 `ls backups/market_monitor_*.db | wc -l` == 10（keep-10 首次生效，剪 33 份老备份，
+  目录 13G → ~3.3G）；`pre_backfill_*.db` 在 glob 外不受影响；
+- 已知无害残留：被剪 .db 的孤儿 `-shm/-wal` 侧车（~1MB 总量）不在本次清理范围。
 
 - [ ] **Step 4: 线上观察 2~3 轮（10~15 分钟）**
 
