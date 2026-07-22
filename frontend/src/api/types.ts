@@ -214,6 +214,8 @@ export type BehaviorDailySchema = {
   sent_down: number | null;
   sent_up_net_sum: number | null;
   sent_down_net_sum: number | null;
+  up_net_sum_strong: number | null;
+  down_net_sum_strong: number | null;
   computed_at: TimeFields;
   live: boolean;
 };

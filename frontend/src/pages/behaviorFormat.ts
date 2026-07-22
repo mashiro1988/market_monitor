@@ -23,6 +23,10 @@ export type DailyRow = {
   sentRatio: number | null;  // 情绪占比%（分母<5 → null 不读）
   downSumNeg: number;  // 跌段净幅合计（负值，柱图向下）
   upSum: number;       // 涨段净幅合计（正值）
+  upSumStrong: number;      // 强段(0.5档+)涨净幅Σ（≥0，亮层）
+  upSumWeak: number;        // 弱段(0.3档)涨净幅Σ（≥0，暗层=总−强，钳位到 0）
+  downSumStrongNeg: number; // 强段跌净幅Σ（≤0，亮层）
+  downSumWeakNeg: number;   // 弱段跌净幅Σ（≤0，暗层）
   t05Up: number; t05Down: number;    // 0.5 档 涨/跌段数
   t08Up: number; t08Down: number;
   sentUp: number; sentDown: number;  // 情绪·技术面 涨/跌段数（0.5 档以上）
@@ -64,6 +68,10 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       sentRatio: comp >= 5 ? Math.round((three.sentiment_tech / comp) * 100) : null,
       downSumNeg: -Math.abs(d.down_net_sum ?? 0),
       upSum: Math.abs(d.up_net_sum ?? 0),
+      upSumStrong: Math.abs(d.up_net_sum_strong ?? 0),
+      upSumWeak: Math.max(0, Math.abs(d.up_net_sum ?? 0) - Math.abs(d.up_net_sum_strong ?? 0)),
+      downSumStrongNeg: -Math.abs(d.down_net_sum_strong ?? 0),
+      downSumWeakNeg: Math.min(0, Math.abs(d.down_net_sum_strong ?? 0) - Math.abs(d.down_net_sum ?? 0)),
       t05Up: d.counts["0.5"]?.up ?? 0,
       t05Down: d.counts["0.5"]?.down ?? 0,
       t08Up: d.counts["0.8"]?.up ?? 0,

@@ -20,6 +20,7 @@ describe("buildDailyRows", () => {
         counts: { "0.3": { up: 5, down: 8 }, "0.5": { up: 2, down: 3 }, "0.8": { up: 1, down: 1 } },
         composition: { macro_news: 3, pure_resonance: 1, industry_news: 1, sentiment: 2, no_ref_news: 0, no_ref_pending: 0 },
         down_net_sum: -3.87, up_net_sum: 2.41,
+        up_net_sum_strong: 1.55, down_net_sum_strong: -0.6,
         sent_up: 1, sent_down: 2, sent_up_net_sum: 0.9, sent_down_net_sum: -1.4,
         computed_at: tf("2026-07-09T00:05:00", "2026-07-09 08:05:00"),
       }],
@@ -33,6 +34,25 @@ describe("buildDailyRows", () => {
       sentUpNet: 0.9, sentDownNet: -1.4, sentNetAmp: -0.5,
       sentUpRatio: 14, sentDownRatio: 29,
     });
+    expect(rows[0].upSumStrong).toBe(1.55);
+    expect(rows[0].upSumWeak).toBeCloseTo(0.86, 4);
+    expect(rows[0].downSumStrongNeg).toBe(-0.6);
+    expect(rows[0].downSumWeakNeg).toBeCloseTo(-3.27, 4);
+  });
+
+  it("clamps weak layer at zero when rounding residue flips sign", () => {
+    const rows = buildDailyRows({
+      symbol: "BTC/USDT",
+      days: [{
+        utc_date: "2026-07-09", day_type: "weekday", live: true,
+        counts: {}, composition: {},
+        down_net_sum: -0.5, up_net_sum: 1.0,
+        up_net_sum_strong: 1.0001, down_net_sum_strong: -0.5001,
+        computed_at: tf("2026-07-09T10:00:00", "2026-07-09 18:00:00"),
+      }],
+    } as any);
+    expect(rows[0].upSumWeak).toBe(0);
+    expect(rows[0].downSumWeakNeg).toBe(0);
   });
 });
 
