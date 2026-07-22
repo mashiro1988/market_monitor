@@ -124,6 +124,12 @@ SCAN_INTERVALS = {
 # （原 gap_repair 的覆盖搬进主路径）；停机更久时窗口按库内游标自动拉长（见 sync_window_start）。
 SYNC_MIN_LOOKBACK_HOURS = int(os.getenv("SYNC_MIN_LOOKBACK_HOURS", "24"))
 
+# ── yfinance 请求整形（2026-07-22 治本：告别 16 并发突发；参数可环境变量覆盖）──
+YF_REQUEST_TIMEOUT_SEC = int(os.getenv("YF_REQUEST_TIMEOUT_SEC", "10"))    # 单请求超时
+YF_STAGE_BUDGET_SEC = int(os.getenv("YF_STAGE_BUDGET_SEC", "180"))         # 阶段软预算，保 5min 周期
+YF_JITTER_MIN_SEC = float(os.getenv("YF_JITTER_MIN_SEC", "0.3"))           # 品种间随机抖动下限
+YF_JITTER_MAX_SEC = float(os.getenv("YF_JITTER_MAX_SEC", "0.8"))           # 品种间随机抖动上限
+
 # 预测市场图表的「活跃」宽限期（分钟）：最后一笔快照落后于表内最新快照超过该值的市场，
 # 视为已停止跟踪（软删除后快照断流），整体从 /predictions 与 families 图表消失。
 # 基准取表内最新快照时间而非墙钟，调度器宕机时不会误杀全部市场。

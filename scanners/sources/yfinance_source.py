@@ -2,12 +2,18 @@
 yfinance 数据源 - 股指、期货、商品、部分债券
 取最近一根已收盘的 5 分钟 K 线收盘价（非即时报价）。
 """
+import random
+import time as _time
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import yfinance as yf
 from loguru import logger
+from scanners import market_sessions
 from scanners.base import BaseSource, PriceRecord
 import config
+
+_sleep = _time.sleep          # 测试可注入
+_monotonic = _time.monotonic  # 测试可注入
 
 
 class YFinancePriceSource(BaseSource):
@@ -113,16 +119,20 @@ class YFinancePriceSource(BaseSource):
         return records
 
     def _all_tickers(self) -> dict[str, tuple[str, str]]:
-        """symbol -> (asset_class, name)，把所有资产组拍平、合并为一次 yf.download。
+        """symbol -> (asset_class, name)，把所有资产组拍平为统一清单。
 
-        注意：合并**不减少** HTTP 请求数（yf.download 内部对每 ticker 各发一次 chart
-        请求，无批量端点）。合并的真实价值是消除「单品种资产组」落入单 ticker 取列
-        坏分支的结构性风险（见 _close_series_for），并让全品种共享同一条失败/解析路径。"""
+        2026-07-22 起 fetch_history 逐品种串行下载（治本改造），但清单仍统一维护：
+        全品种共享同一条解析路径（_close_series_for 处理单 ticker MultiIndex 列形态）。"""
         out: dict[str, tuple[str, str]] = {}
         for asset_class, symbols in self.symbol_groups.items():
             for name, symbol in symbols.items():
                 out[symbol] = (asset_class, name)
         return out
+
+    def active_tickers(self, now_utc: datetime) -> dict[str, tuple[str, str]]:
+        """本轮应拉取的 symbol -> (asset_class, name)；供 fetch_history 与 PriceScanner 共用。"""
+        return {s: meta for s, meta in self._all_tickers().items()
+                if market_sessions.should_fetch(s, now_utc)}
 
     @staticmethod
     def _close_series_for(df: pd.DataFrame, symbol: str) -> pd.Series:
@@ -139,7 +149,11 @@ class YFinancePriceSource(BaseSource):
         return close
 
     def fetch_history(self, start_ts: datetime, end_ts: datetime) -> list[PriceRecord]:
-        """批量拉取时间窗内的历史 5m K 线收盘价，用于中断后回补。"""
+        """逐品种串行拉取窗口内 5m 收盘价：会话过滤 + 抖动 + 单请求超时 + 阶段软预算。
+
+        2026-07-22 治本改造：原 16 ticker 单次并发批量（threads=True）是 Yahoo 封 IP 的
+        直接诱因；改串行后每轮只拉开市品种，全休市轮零请求，超软预算的品种交给
+        下一轮游标窗口自愈。"""
         if start_ts.tzinfo is not None:
             start_ts = start_ts.astimezone(timezone.utc).replace(tzinfo=None)
         if end_ts.tzinfo is not None:
@@ -147,49 +161,46 @@ class YFinancePriceSource(BaseSource):
         if start_ts >= end_ts:
             return []
 
-        records: list[PriceRecord] = []
-        tickers = self._all_tickers()
+        tickers = self.active_tickers(end_ts)
         if not tickers:
-            return records
-        ticker_list = list(tickers)
+            return []
 
-        try:
-            # yfinance 对 naive datetime 按本地时区解释，必须传 tz-aware UTC（游标同步 2026-07-14）
-            df = yf.download(
-                ticker_list,
-                start=start_ts.replace(tzinfo=timezone.utc),
-                end=end_ts.replace(tzinfo=timezone.utc),
-                interval=self.INTERVAL,
-                prepost=False,
-                auto_adjust=True,
-                progress=False,
-                threads=True,
-                session=self._session,
-            )
-        except Exception as e:
-            logger.error(f"yfinance 历史批量下载失败: {e}")
-            return records
-
-        if df.empty:
-            logger.warning("yfinance 历史 5m 批量下载返回空数据")
-            return records
-
-        for symbol in ticker_list:
-            asset_class, name = tickers[symbol]
+        records: list[PriceRecord] = []
+        deadline = _monotonic() + config.YF_STAGE_BUDGET_SEC
+        skipped: list[str] = []
+        items = list(tickers.items())
+        for i, (symbol, (asset_class, name)) in enumerate(items):
+            if _monotonic() >= deadline:
+                skipped = [s for s, _ in items[i:]]
+                break
             try:
+                # yfinance 对 naive datetime 按本地时区解释，必须传 tz-aware UTC（游标同步 2026-07-14）
+                df = yf.download(
+                    [symbol],
+                    start=start_ts.replace(tzinfo=timezone.utc),
+                    end=end_ts.replace(tzinfo=timezone.utc),
+                    interval=self.INTERVAL,
+                    prepost=False,
+                    auto_adjust=True,
+                    progress=False,
+                    threads=False,
+                    session=self._session,
+                    timeout=config.YF_REQUEST_TIMEOUT_SEC,
+                )
+                if df.empty:
+                    continue
                 close_series = self._close_series_for(df, symbol)
-
                 records.extend(self._records_from_close_series(
-                    asset_class=asset_class,
-                    symbol=symbol,
-                    name=name,
-                    close_series=close_series,
-                    start_ts=start_ts,
-                    end_ts=end_ts,
-                ))
+                    asset_class=asset_class, symbol=symbol, name=name,
+                    close_series=close_series, start_ts=start_ts, end_ts=end_ts))
             except Exception as e:
-                logger.error(f"yfinance 历史解析 {symbol} 失败: {e}")
+                logger.error(f"yfinance {symbol} 拉取失败: {type(e).__name__}: {e}")
+            if i < len(items) - 1:
+                _sleep(random.uniform(config.YF_JITTER_MIN_SEC, config.YF_JITTER_MAX_SEC))
 
+        if skipped:
+            logger.warning(f"yfinance 阶段超软预算({config.YF_STAGE_BUDGET_SEC}s)，"
+                           f"本轮放弃 {len(skipped)} 品种: {', '.join(skipped)}（下一轮游标窗口自愈）")
         return records
 
     def health_check(self) -> bool:
