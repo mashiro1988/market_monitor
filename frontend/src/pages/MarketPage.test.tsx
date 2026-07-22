@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildOverviewCards, deriveShadedBands } from "./MarketPage";
+import { buildOverviewCards, deriveShadedBands, freshnessBadgeSpec } from "./MarketPage";
 
 describe("deriveShadedBands", () => {
   it("derives a band from contiguous gapfill points using existing time strings", () => {
@@ -66,5 +66,28 @@ describe("buildOverviewCards", () => {
       { symbol: "QQQ-USDT-SWAP", name: "纳指代理永续", asset_class: "perp" }
     ] as any;
     expect(buildOverviewCards(items, "futures")).toEqual([]);
+  });
+});
+
+describe("freshnessBadgeSpec", () => {
+  it("stale → 黄标带滞后分钟数", () => {
+    const spec = freshnessBadgeSpec({ freshness: "stale", stale_minutes: 23 } as any);
+    expect(spec?.label).toBe("滞后 23 分钟");
+  });
+
+  it("source_down → 红标「源中断」", () => {
+    const spec = freshnessBadgeSpec({ freshness: "source_down", stale_minutes: 95 } as any);
+    expect(spec?.label).toBe("源中断");
+  });
+
+  it("closed → 灰标「休市」", () => {
+    const spec = freshnessBadgeSpec({ freshness: "closed", stale_minutes: null } as any);
+    expect(spec?.label).toBe("休市");
+  });
+
+  it("live 与未知值 → 无徽标", () => {
+    expect(freshnessBadgeSpec({ freshness: "live", stale_minutes: null } as any)).toBeNull();
+    expect(freshnessBadgeSpec({ freshness: "whatever", stale_minutes: null } as any)).toBeNull();
+    expect(freshnessBadgeSpec({} as any)).toBeNull();
   });
 });

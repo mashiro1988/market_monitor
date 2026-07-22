@@ -328,6 +328,8 @@ export type MarketLatestItem = {
   change_5m: number | null;
   change_1h: number | null;
   change_24h: number | null;
+  freshness: string;
+  stale_minutes: number | null;
 };
 
 export type MarketLatestResponse = {

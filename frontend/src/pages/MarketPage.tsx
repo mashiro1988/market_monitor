@@ -87,6 +87,54 @@ function marketHours(symbol: string, assetClass: string): string {
   return MARKET_HOURS_BY_SYMBOL[symbol] ?? MARKET_HOURS_BY_CLASS[assetClass] ?? "—";
 }
 
+// 卡片 freshness 四态徽标（后端 /market/latest 判定，前端只渲染，不自算时差）
+const FRESHNESS_BADGES: Record<
+  string,
+  { label: (m: number | null) => string; title: string; color: string; bg: string; border: string } | undefined
+> = {
+  stale: {
+    label: (m) => `滞后 ${m ?? "?"} 分钟`,
+    title: "开市中但最新K线滞后，数据源可能被限流",
+    color: "#d97706", bg: "rgba(217,119,6,0.14)", border: "1px solid rgba(217,119,6,0.35)"
+  },
+  source_down: {
+    label: () => "源中断",
+    title: "数据源持续无返回或报错，当前显示为最后可得旧价",
+    color: "#dc2626", bg: "rgba(220,38,38,0.14)", border: "1px solid rgba(220,38,38,0.35)"
+  },
+  closed: {
+    label: () => "休市",
+    title: "该市场当前不在交易时段",
+    color: "#94a3b8", bg: "rgba(148,163,184,0.12)", border: "1px solid rgba(148,163,184,0.25)"
+  }
+};
+
+export function freshnessBadgeSpec(
+  item: Pick<MarketLatestItem, "freshness" | "stale_minutes">
+): { label: string; title: string; color: string; bg: string; border: string } | null {
+  const spec = FRESHNESS_BADGES[item?.freshness ?? ""];
+  if (!spec) return null;   // live 或未知值 → 无徽标
+  return { label: spec.label(item.stale_minutes ?? null), title: spec.title,
+           color: spec.color, bg: spec.bg, border: spec.border };
+}
+
+function FreshnessBadge({ item }: { item: MarketLatestItem }) {
+  const spec = freshnessBadgeSpec(item);
+  if (!spec) return null;
+  return (
+    <span
+      className={`badge-freshness badge-${item.freshness}`}
+      title={spec.title}
+      style={{
+        alignSelf: "flex-start", fontSize: 13, lineHeight: 1.4, padding: "1px 6px",
+        borderRadius: 4, color: spec.color, background: spec.bg, border: spec.border
+      }}
+    >
+      {spec.label}
+    </span>
+  );
+}
+
 const CHART_SYMBOLS_STORAGE_KEY = "market-chart-symbols";
 
 function loadChartSymbols(): string[] {
@@ -177,6 +225,7 @@ function MarketAssetCard({ primary, perp }: OverviewCard) {
         <code>{item.symbol}</code>
       </div>
       <strong>{formatPrice(item)}</strong>
+      <FreshnessBadge item={item} />
       {item.source?.startsWith(OKX_GAPFILL_SOURCE) && (
         <span
           className="badge-proxy"
