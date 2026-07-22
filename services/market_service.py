@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 import config
 from chart_utils import normalize_prices
 from models.price import PriceSnapshot
+from scanners import market_sessions
 from schemas.common import Page, TimeFields
 from schemas.market import (
     MarketHistoryPoint,
@@ -66,6 +67,43 @@ def _change_pct_from_latest(snaps: list[PriceSnapshot], latest_snap: PriceSnapsh
     return (latest_snap.price - best.price) / best.price * 100
 
 
+def _failed_price_scanner_names() -> set[str]:
+    """最近一轮扫描中报错（ok=False）的价格 scanner 名。单 worker 内存态，无扫描历史时为空。"""
+    try:
+        from services.scan_runtime import run_scan_once
+        statuses = getattr(run_scan_once, "last_source_statuses", {}) or {}
+        return {s["source"] for s in statuses.get("price", []) if not s.get("ok", True)}
+    except Exception:
+        return set()
+
+
+# snapshot.source 前缀 → scanner 状态名（scanners/sources/*.py 的 name 属性）
+_SNAPSHOT_SOURCE_TO_SCANNER = (
+    ("yfinance", "yfinance"),
+    ("okx", "okx"),                      # okx_swap_5m / okx_spot_5m / okx_gapfill*
+    ("cnbc_bond_quote", "cnbc_bond_quote"),
+)
+
+
+def _freshness_for(symbol: str, snapshot_source: str, ts: datetime | None,
+                   now: datetime, failed_scanners: set[str]) -> tuple[str, int | None]:
+    """卡片四态：closed（休市）→ source_down（扫描报错直判）→ live/stale/source_down（按滞后）。"""
+    if ts is None:
+        return "source_down", None
+    if not market_sessions.is_open(symbol, now):
+        return "closed", None
+    lag_min = max(0, int((now - ts).total_seconds() // 60))
+    scanner = next((sc for prefix, sc in _SNAPSHOT_SOURCE_TO_SCANNER
+                    if snapshot_source.startswith(prefix)), None)
+    if scanner and scanner in failed_scanners:
+        return "source_down", lag_min
+    if lag_min <= config.FRESHNESS_STALE_MINUTES:
+        return "live", None
+    if lag_min <= config.FRESHNESS_DOWN_MINUTES:
+        return "stale", lag_min
+    return "source_down", lag_min
+
+
 def get_latest_prices(session: Session) -> MarketLatestResponse:
     cutoff = utc_now_naive() - timedelta(days=10)
     snapshots = (
@@ -80,6 +118,8 @@ def get_latest_prices(session: Session) -> MarketLatestResponse:
 
     allowed_crypto = {f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})}
     items: list[MarketLatestItem] = []
+    now = utc_now_naive()
+    failed_scanners = _failed_price_scanner_names()
     for symbol, snaps in by_symbol.items():
         if not snaps:
             continue
@@ -87,6 +127,8 @@ def get_latest_prices(session: Session) -> MarketLatestResponse:
         # 市场概览加密区只显示当前配置的币种（如 BTC/ETH）；已停采的 alt 立刻消失
         if latest.asset_class == "crypto" and symbol not in allowed_crypto:
             continue
+        freshness, stale_minutes = _freshness_for(
+            symbol, latest.source, latest.timestamp, now, failed_scanners)
         items.append(
             MarketLatestItem(
                 name=latest.name,
@@ -99,6 +141,8 @@ def get_latest_prices(session: Session) -> MarketLatestResponse:
                 change_5m=_change_pct_from_latest(snaps, latest, 5),
                 change_1h=_change_pct_from_latest(snaps, latest, 60),
                 change_24h=_change_pct_from_latest(snaps, latest, 1440),
+                freshness=freshness,
+                stale_minutes=stale_minutes,
                 **timestamp_pair(latest.timestamp),
             )
         )

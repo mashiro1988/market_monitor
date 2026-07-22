@@ -16,6 +16,8 @@ class MarketLatestItem(TimeFields):
     change_5m: float | None = None
     change_1h: float | None = None
     change_24h: float | None = None
+    freshness: str = "live"              # live | stale | source_down | closed
+    stale_minutes: int | None = None     # stale/source_down 时的滞后分钟数
 
 
 class MarketLatestResponse(BaseModel):

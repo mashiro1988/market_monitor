@@ -130,6 +130,10 @@ YF_STAGE_BUDGET_SEC = int(os.getenv("YF_STAGE_BUDGET_SEC", "180"))         # 阶
 YF_JITTER_MIN_SEC = float(os.getenv("YF_JITTER_MIN_SEC", "0.3"))           # 品种间随机抖动下限
 YF_JITTER_MAX_SEC = float(os.getenv("YF_JITTER_MAX_SEC", "0.8"))           # 品种间随机抖动上限
 
+# ── 市场概览卡片 freshness 标注阈值（分钟）──
+FRESHNESS_STALE_MINUTES = int(os.getenv("FRESHNESS_STALE_MINUTES", "15"))   # 开市中滞后→黄标
+FRESHNESS_DOWN_MINUTES = int(os.getenv("FRESHNESS_DOWN_MINUTES", "60"))    # 开市中滞后→红标"源中断"
+
 # 预测市场图表的「活跃」宽限期（分钟）：最后一笔快照落后于表内最新快照超过该值的市场，
 # 视为已停止跟踪（软删除后快照断流），整体从 /predictions 与 families 图表消失。
 # 基准取表内最新快照时间而非墙钟，调度器宕机时不会误杀全部市场。
