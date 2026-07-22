@@ -198,28 +198,6 @@ function MarketAssetCard({ primary, perp }: OverviewCard) {
 
   return (
     <article className="asset-card">
-      {perp ? (
-        <div className="asset-tabs" role="tablist" aria-label={`${primary.name}行情类型`}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "primary"}
-            className={activeTab === "primary" ? "active" : ""}
-            onClick={() => setActiveTab("primary")}
-          >
-            期货
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "perp"}
-            className={activeTab === "perp" ? "active" : ""}
-            onClick={() => setActiveTab("perp")}
-          >
-            Perp
-          </button>
-        </div>
-      ) : null}
       <div className="asset-meta">
         <span>{item.name}</span>
         <code>{item.symbol}</code>
@@ -249,6 +227,28 @@ function MarketAssetCard({ primary, perp }: OverviewCard) {
         <Stat label="1h" value={pct(item.change_1h)} tone={tone(item.change_1h)} />
         <Stat label="24h" value={pct(item.change_24h)} tone={tone(item.change_24h)} />
       </div>
+      {perp ? (
+        <div className="asset-tabs" role="tablist" aria-label={`${primary.name}行情类型`}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "primary"}
+            className={activeTab === "primary" ? "active" : ""}
+            onClick={() => setActiveTab("primary")}
+          >
+            期货
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "perp"}
+            className={activeTab === "perp" ? "active" : ""}
+            onClick={() => setActiveTab("perp")}
+          >
+            Perp
+          </button>
+        </div>
+      ) : null}
       <div className="card-foot">
         <small>{item.timestamp_bj}</small>
         <small className="market-hours">开市 {marketHours(item.symbol, item.asset_class)}</small>
