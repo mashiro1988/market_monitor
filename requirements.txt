@@ -21,6 +21,7 @@ apscheduler>=3.10.4,<4.0
 # 工具库
 python-dotenv>=1.0.0,<2.0
 loguru>=0.7.2,<1.0
+tzdata>=2024.1,<2027   # zoneinfo 时区数据（scanners/market_sessions.py；Windows 本地开发必需，Linux 冗余无害）
 
 # 额外依赖
 setuptools>=68.0.0,<81.0
