@@ -17,7 +17,7 @@
 **Files:**
 - Create: `C:\Users\Lenovo\AppData\Local\Temp\claude\D--market-monitor--claude-worktrees-recursing-haslett-4b017b\0ba559e5-4c08-4ecc-aeed-43867f9a00d6\scratchpad\test_backup_sqlite.sh`（临时测试，不进仓库）
 
-- [ ] **Step 1: 写测试脚本**（提取 deploy.sh 里真实的 `backup_sqlite` 函数体执行；用例 1 = 正常备份+校验+保留 10 份，用例 2 = 损坏源库 → 非零退出且 backups/ 无 `.db` 残留）
+- [x] **Step 1: 写测试脚本**（提取 deploy.sh 里真实的 `backup_sqlite` 函数体执行；用例 1 = 正常备份+校验+保留 10 份，用例 2 = 损坏源库 → 非零退出且 backups/ 无 `.db` 残留）
 
 ```bash
 #!/usr/bin/env bash
@@ -79,7 +79,7 @@ echo "用例2 PASS: 损坏源库 → 非零退出，无 .db 残留"
 echo "ALL PASS"
 ```
 
-- [ ] **Step 2: 对当前 deploy.sh 运行，确认 RED**
+- [x] **Step 2: 对当前 deploy.sh 运行，确认 RED**
 
 Run: `bash <scratchpad>/test_backup_sqlite.sh <repo_dir>`
 Expected: FAIL —— 现行函数无保留策略，用例 1 数出 12 份 ≠ 10（现行 `backup()` 对损坏源库同样会栈错误退出，用例 2 可能恰好通过，不影响 RED 结论）。
@@ -89,7 +89,7 @@ Expected: FAIL —— 现行函数无保留策略，用例 1 数出 12 份 ≠ 1
 **Files:**
 - Modify: `deploy.sh:7-33`（整个 `backup_sqlite()` 函数体）
 
-- [ ] **Step 1: 用下面内容整体替换 7–33 行的函数**
+- [x] **Step 1: 用下面内容整体替换 7–33 行的函数**
 
 ```bash
 backup_sqlite() {
@@ -143,12 +143,12 @@ PY
 }
 ```
 
-- [ ] **Step 2: 语法检查 + 跑 harness，确认 GREEN**
+- [x] **Step 2: 语法检查 + 跑 harness，确认 GREEN**
 
 Run: `bash -n deploy.sh && bash <scratchpad>/test_backup_sqlite.sh <repo_dir>`
 Expected: `用例1 PASS` + `用例2 PASS` + `ALL PASS`。若 `VACUUM INTO ?` 参数绑定报错（老 SQLite 不支持绑定时的备选），改为拼接单引号转义字面量：`con.execute("VACUUM INTO '%s'" % dst.replace("'", "''"))`，重跑至 PASS。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add deploy.sh
@@ -161,7 +161,7 @@ git commit -m "fix(deploy): backup via VACUUM INTO + integrity verify + keep-10 
 - Modify: `docs/superpowers/specs/2026-07-22-yfinance-throttle-and-backfill-design.md:50-51`
 - Modify: `docs/specs/deployment.md:282-283`
 
-- [ ] **Step 1: yfinance 设计稿 §3.2 —— 把**
+- [x] **Step 1: yfinance 设计稿 §3.2 —— 把**
 
 ```
 - **写库前置动作：线上库快照备份**（现成 `sqlite3.Connection.backup()` 在线备份流程，
@@ -177,7 +177,7 @@ git commit -m "fix(deploy): backup via VACUUM INTO + integrity verify + keep-10 
   各留一份）。这是对生产库写操作的后悔药。
 ```
 
-- [ ] **Step 2: deployment.md §6 —— 把**
+- [x] **Step 2: deployment.md §6 —— 把**
 
 ```
 - **备份**：备份目录不会自动建，先 `mkdir -p /opt/market_monitor/backup`；
@@ -195,7 +195,7 @@ git commit -m "fix(deploy): backup via VACUUM INTO + integrity verify + keep-10 
   快照含告警日志与人工标注。
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-07-22-yfinance-throttle-and-backfill-design.md docs/specs/deployment.md
@@ -206,13 +206,13 @@ git commit -m "docs: backup guidance switched to VACUUM INTO (backup()/.backup d
 
 **Files:** 无仓库改动；临时文件 `<scratchpad>/snippet.py` 与服务器 `/tmp/mm_rehearsal.db`
 
-- [ ] **Step 1: 从 deploy.sh 提取 heredoc python 片段**（保证彩排代码与上线代码逐字节一致）
+- [x] **Step 1: 从 deploy.sh 提取 heredoc python 片段**（保证彩排代码与上线代码逐字节一致）
 
 ```bash
 awk "/<<'PY'/{f=1;next} /^PY$/{f=0} f" deploy.sh > <scratchpad>/snippet.py
 ```
 
-- [ ] **Step 2: 在服务器对活库执行，计时**
+- [x] **Step 2: 在服务器对活库执行，计时**
 
 ```bash
 time ssh mmon "cd /opt/market_monitor && nice -n 10 .venv/bin/python - market_monitor.db /tmp/mm_rehearsal.db" < <scratchpad>/snippet.py
@@ -220,13 +220,23 @@ time ssh mmon "cd /opt/market_monitor && nice -n 10 .venv/bin/python - market_mo
 
 Expected: `SQLite backup written & verified: /tmp/mm_rehearsal.db (~300 MB)`，总耗时 < 3 分钟（预估 30–90s）。若报 `/tmp/mm_rehearsal.db` 已存在，先 `ssh mmon "rm -f /tmp/mm_rehearsal.db*"` 再跑。
 
-- [ ] **Step 3: 清理彩排产物**
+- [x] **Step 3: 清理彩排产物**
 
 ```bash
 ssh mmon "rm -f /tmp/mm_rehearsal.db /tmp/mm_rehearsal.db.corrupt"
 ```
 
-- [ ] **Step 4: 勾掉计划复选框并最终报告**（抽查结论、RED→GREEN 证据、彩排耗时、上线路径：merge 到 main → 服务器下次 `./deploy.sh` 生效并首跑滚存量）
+- [x] **Step 4: 勾掉计划复选框并最终报告**（抽查结论、RED→GREEN 证据、彩排耗时、上线路径：merge 到 main → 服务器下次 `./deploy.sh` 生效并首跑滚存量）
+
+## 执行结果（2026-07-22）
+
+- RED：现行函数无保留策略，沙箱数出 12 份 ≠ 10。
+- 执行中发现并修复：函数在非 errexit 语境（如 `if backup_sqlite`）下 python 失败会被吞、
+  继续跑保留清理——heredoc 调用挂 `|| return 1`，失败显式非零返回且不进清理。
+- GREEN：`bash -n` 通过；用例 1/2 全 PASS（本地 anaconda SQLite 亦接受 `VACUUM INTO ?` 绑定）。
+- 服务器彩排：301MB 活库全流程 **13s**，产物 283MB、integrity_check ok（VACUUM 顺带压实
+  ~18MB 碎片），/tmp 产物已清理。部署加时远低于预估的 1 分钟。
+- 待下次真实部署人工确认：备份产出+校验、存量 43 份滚到 10 份（释放 ~10GB）。
 
 ## Self-Review 结论
 
