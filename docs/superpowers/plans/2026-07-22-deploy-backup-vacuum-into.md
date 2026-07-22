@@ -112,9 +112,9 @@ backup_sqlite() {
 
   # 活跃写入下 sqlite3.Connection.backup() 会概率性产出"混时态"损坏快照（2026-07-22
   # 实证，见 docs/superpowers/specs/2026-07-22-deploy-backup-vacuum-into-design.md），
-  # 改用 VACUUM INTO 并校验产物；失败则把产物改名 .corrupt 留现场、非零退出，
-  # set -e 使部署在 git pull 之前中止。
-  "$py" - "$db_path" "$backup_dir/market_monitor_${ts}.db" <<'PY'
+  # 改用 VACUUM INTO 并校验产物；失败则把产物改名 .corrupt 留现场、函数显式非零返回
+  # （不依赖调用方 errexit，失败也绝不进入下面的保留清理），set -e 使部署在 git pull 之前中止。
+  "$py" - "$db_path" "$backup_dir/market_monitor_${ts}.db" <<'PY' || return 1
 import os
 import sqlite3
 import sys

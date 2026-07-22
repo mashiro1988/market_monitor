@@ -47,8 +47,10 @@
 
 ### 3.2 服务器导入 `scripts/import_price_dump.py`（服务器 venv python）
 
-- **写库前置动作：线上库快照备份**（现成 `sqlite3.Connection.backup()` 在线备份流程，
-  备份文件服务器 `/tmp` 与本地各留一份）。这是对生产库写操作的后悔药。
+- **写库前置动作：线上库快照备份**（用 `VACUUM INTO` 产快照并跑 `PRAGMA integrity_check`
+  校验；活跃写入下 `sqlite3.Connection.backup()` 会概率性产损坏快照，2026-07-22 实证，
+  见 2026-07-22-deploy-backup-vacuum-into-design.md。备份文件服务器 `/tmp` 与本地
+  各留一份）。这是对生产库写操作的后悔药。
 - 导入**复用 `PriceScanner._save_records`**（实例化 PriceScanner 调用，不复制写逻辑）：
   幂等跳重（撞 (symbol, timestamp) 唯一索引即跳过）、prev_price/change_pct 链条自动衔接、
   真实覆盖 gapfill 合成点的既有语义原样生效。

@@ -279,8 +279,12 @@ sudo systemctl --no-pager status market-monitor
 ## 8. 运维
 
 - **更新**：`deploy.sh`（git pull → pip → 构建前端 → 重启）。
-- **备份**：备份目录不会自动建，先 `mkdir -p /opt/market_monitor/backup`；
-  再定期 `sqlite3 market_monitor.db ".backup '/opt/market_monitor/backup/mm-$(date +%F).db'"`（WAL 安全，会自动 checkpoint，**别**改成 `cp`），含告警日志与人工标注。
+- **备份**：`deploy.sh` 每次部署前自动 `VACUUM INTO` 快照到 `/opt/market_monitor/backups/`
+  并跑 `PRAGMA integrity_check`（失败即中止部署），默认保留最近 10 份（约 3GB，
+  `MARKET_MONITOR_DB_BACKUP_KEEP` 可覆盖）。如需手动快照同样用 `VACUUM INTO`：
+  活跃写入下 `sqlite3.Connection.backup()` / CLI `.backup` 会概率性产出损坏快照
+  （2026-07-22 实证，见 superpowers/specs 同日设计稿），**也别**用 `cp`。
+  快照含告警日志与人工标注。
 - **日志**：`journalctl -u market-monitor`（应用 stdout→journald）。
 - **证书**：certbot 自带 `systemd timer` 自动续期，无需手动。
 
