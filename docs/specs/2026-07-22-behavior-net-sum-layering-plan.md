@@ -38,7 +38,9 @@
 ```python
 def test_day_direction_extras_strong_weak_split(client_session):
     """净幅分层（2026-07-22 设计稿）：强段=tier_idx>=1，弱段=tier_idx==0；
-    net_pct=None 按 0；空日/单向日返回 0.0；字段经 daily 接口透传。"""
+    空日/单向日返回 0.0；字段经 daily 接口透传。
+    注：net_pct 列非空（models/behavior.py nullable=False），None 进不了库——
+    实现里的 is not None 只是纯防御，不造库内用例（设计稿 §7 第 4 条据此放弃）。"""
     client, session = client_session
     from models.behavior import BehaviorSegment
 
@@ -46,7 +48,7 @@ def test_day_direction_extras_strong_weak_split(client_session):
         return BehaviorSegment(
             symbol="BTC/USDT", start_dt=start, end_dt=start + timedelta(minutes=30),
             direction=direction, tier_idx=tier_idx, tier_max=[0.3, 0.5, 0.8][tier_idx],
-            net_pct=net, amp_pct=abs(net) if net is not None else None,
+            net_pct=net, amp_pct=abs(net),
             key_ts=start, classification="count_only", class_version="v2")
 
     d0 = datetime(2026, 1, 15, 3, 0)
@@ -54,7 +56,6 @@ def test_day_direction_extras_strong_weak_split(client_session):
         seg(d0, +1, 1, 0.55),                        # 强涨（0.5 档压线）
         seg(d0 + timedelta(hours=1), +1, 2, 1.0),    # 强涨（0.8 档）
         seg(d0 + timedelta(hours=2), +1, 0, 0.35),   # 弱涨
-        seg(d0 + timedelta(hours=3), +1, 0, None),   # net 缺失 → 按 0
         seg(d0 + timedelta(hours=4), -1, 1, -0.6),   # 强跌
         seg(d0 + timedelta(hours=5), -1, 0, -0.45),  # 弱跌
         seg(d0 + timedelta(hours=6), -1, 0, -0.9),   # 弱跌
@@ -308,13 +309,15 @@ ssh -o BatchMode=yes mmon "rm -f /tmp/mm_snapshot.db"
   "configurations": [{
     "name": "mm-live-snapshot",
     "runtimeExecutable": "cmd",
-    "runtimeArgs": ["/c", "set DATABASE_URL=sqlite:///data/mm-live.db&& D:\\anaconda\\python.exe run.py app"],
+    "runtimeArgs": ["/c", "set DATABASE_URL=sqlite:///D:/market_monitor/data/mm-live.db&& D:\\anaconda\\python.exe run.py app"],
     "port": 8000
   }]
 }
 ```
 
 preview_start `{name: "mm-live-snapshot"}` → 浏览器开 `http://127.0.0.1:8000` 行为面板页。
+备注：`run.py app` 启动会执行 create_tables（对快照只补建缺失表、只加不删，无数据风险）
+并尝试自动弹系统浏览器——均属预期，不用排查。
 
 - [ ] **Step 3: 对账 07-20**
 
