@@ -45,6 +45,9 @@ frontend/vite.config.d.ts
 building-a-project-map/
 
 # ===== Remote data integration (本地缓存 / 一次性研究产物 / 待整合素材) =====
+# data/ 整目录 = 本地数据产物（回补 CSV、库快照、预览 scratch），不入公开仓库；
+# 要公开哪份由所有者显式 git add -f
+data/
 data/remote_cache/
 Pending_functions/
 scripts/probe_*.py
