@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy import func
 from database import get_session
 from models.price import PriceSnapshot
-from scanners.base import BaseSource, PriceRecord, SourceHealthMixin
+from scanners.base import BaseSource, PriceRecord, SourceFetchStatus, SourceHealthMixin
 from scanners.sources.yfinance_source import YFinancePriceSource
 from scanners.sources.okx_source import OkxPriceSource
 from scanners.sources.cnbc_bond_source import CnbcBondQuoteSource
@@ -64,19 +64,28 @@ class PriceScanner(SourceHealthMixin):
 
         session = get_session()
         try:
-            yf_latest = _latest_by_symbol(session, list(self.yfinance._all_tickers()))
+            # 游标窗口只看本轮活跃品种（2026-07-22 治本）：休市品种游标老旧属正常，
+            # 不应把窗口拖长；重开时其游标落后会自然把窗口拉长补掉休市断档。
+            yf_active = self.yfinance.active_tickers(scan_time)
+            yf_latest = _latest_by_symbol(session, list(yf_active)) if yf_active else {}
             okx_symbols = [f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})]
             okx_symbols.extend(config.PRICE_SOURCES.get("perp_proxy", {}).values())
             okx_latest = _latest_by_symbol(session, okx_symbols)
         finally:
             session.close()
-        yf_start = sync_window_start(yf_latest, scan_time, cap_hours=self.yfinance.CAP_HOURS)
         okx_start = sync_window_start(okx_latest, scan_time,
                                       cap_hours=float(config.PRICE_BACKFILL_MAX_HOURS))
 
-        # 1. yfinance: 股指、期货、亚洲指数、商品（至少回看 24h，停机自动拉长，封顶 7d）
-        inserted.extend(self._save_records(
-            self._fetch_history_safe(self.yfinance, yf_start, scan_time), scan_time))
+        # 1. yfinance: 只拉开市品种（至少回看 24h，停机自动拉长，封顶 7d）；
+        #    全休市轮次记 closed 状态、零请求
+        if yf_active:
+            yf_start = sync_window_start(yf_latest, scan_time, cap_hours=self.yfinance.CAP_HOURS)
+            inserted.extend(self._save_records(
+                self._fetch_history_safe(self.yfinance, yf_start, scan_time), scan_time))
+        else:
+            logger.info("[PriceScanner] yfinance 全品种休市，本轮跳过")
+            self.source_statuses.append(SourceFetchStatus(
+                source=self.yfinance.name, ok=True, record_count=0, empty=True, stage="closed"))
 
         # 2. OKX 加密货币 + 独立代理永续：同一窗口公式（封顶 72h）
         okx_records = self._fetch_history_safe(self.okx, okx_start, scan_time)

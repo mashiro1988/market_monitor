@@ -220,6 +220,7 @@ def test_scan_invokes_gapfiller_after_save(monkeypatch):
     scanner.yfinance = SimpleNamespace(
         fetch_history=lambda start, end: [], name="yfinance",
         CAP_HOURS=168, _all_tickers=lambda: {},
+        active_tickers=lambda now: {},
     )
     scanner.okx = SimpleNamespace(fetch_history=lambda start, end: [], name="okx")
     scanner.cnbc_bonds = SimpleNamespace(fetch=lambda: [], name="cnbc_bonds")

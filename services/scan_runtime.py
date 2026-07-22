@@ -261,7 +261,8 @@ def _source_status_payload(scanner) -> list[dict]:
 def _log_source_statuses(source_statuses: dict[str, list[dict]]) -> None:
     for group, statuses in source_statuses.items():
         failed = [s for s in statuses if not s["ok"]]
-        empty = [s for s in statuses if s["ok"] and s["empty"]]
+        # stage=closed 是"全品种休市主动跳过"，不是 0 行异常，不进告警噪音
+        empty = [s for s in statuses if s["ok"] and s["empty"] and s.get("stage") != "closed"]
         if failed:
             names = ", ".join(f"{s['source']} ({s['error']})" for s in failed)
             logger.warning("[ScanSource] {} failed: {}", group, names)

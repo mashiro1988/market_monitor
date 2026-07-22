@@ -104,6 +104,7 @@ def _make_scanner(make_session, monkeypatch, yf_rounds, okx_rounds):
     scanner = PriceScanner()
     yf = FakeHistorySource("yfinance", yf_rounds)
     yf._all_tickers = lambda: {"NQ=F": ("futures", "纳指期货")}
+    yf.active_tickers = lambda now: yf._all_tickers()   # 窗口公式测试：视为恒开市
     yf.CAP_HOURS = 168
     scanner.yfinance = yf
     scanner.okx = FakeHistorySource("okx", okx_rounds)
@@ -197,3 +198,56 @@ def test_latest_by_symbol_reads_max_ts_and_none_for_missing(make_session):
     assert latest["BTC/USDT"] == NOW - timedelta(minutes=5)
     assert latest["ETH/USDT"] is None
     s.close()
+
+
+# ---------- 会话过滤集成（2026-07-22 治本） ----------
+
+def test_scan_window_uses_active_tickers_only(make_session, monkeypatch):
+    """游标窗口只看活跃品种：休市品种的老游标不该把窗口拖长。"""
+    from datetime import timezone as _tz
+    Session = make_session
+    s = Session()
+    real_now = datetime.now(_tz.utc).replace(tzinfo=None)
+    s.add_all([
+        PriceSnapshot(timestamp=real_now - timedelta(hours=60), asset_class="asian_index",
+                      symbol="^N225", name="日经225", price=40000.0, source="yfinance"),
+        PriceSnapshot(timestamp=real_now - timedelta(minutes=10), asset_class="futures",
+                      symbol="ES=F", name="S&P500期货", price=6000.0, source="yfinance"),
+    ])
+    s.commit(); s.close()
+
+    monkeypatch.setattr(ps_module, "get_session", Session)
+    scanner = PriceScanner()
+    monkeypatch.setattr(scanner.yfinance, "active_tickers",
+                        lambda now: {"ES=F": ("futures", "S&P500期货")})
+    captured = {}
+
+    def fake_fetch(start_ts, end_ts):
+        captured["start"] = start_ts
+        return []
+
+    monkeypatch.setattr(scanner.yfinance, "fetch_history", fake_fetch)
+    monkeypatch.setattr(scanner.okx, "fetch_history", lambda *a: [])
+    monkeypatch.setattr(scanner.cnbc_bonds, "fetch", lambda: [])
+    scanner.scan()
+    # 只看 ES=F（10min 前）→ 窗口应是 24h 地板，而不是被休市的 ^N225 拖到 60h+
+    assert captured["start"] >= real_now - timedelta(hours=25)
+
+
+def test_scan_all_closed_records_closed_status(make_session, monkeypatch):
+    """全品种休市：零请求 + 状态记 stage=closed（区别于 0 行异常）。"""
+    Session = make_session
+    monkeypatch.setattr(ps_module, "get_session", Session)
+    scanner = PriceScanner()
+    monkeypatch.setattr(scanner.yfinance, "active_tickers", lambda now: {})
+
+    def boom(*a, **k):
+        raise AssertionError("closed round must not fetch yfinance")
+
+    monkeypatch.setattr(scanner.yfinance, "fetch_history", boom)
+    monkeypatch.setattr(scanner.okx, "fetch_history", lambda *a: [])
+    monkeypatch.setattr(scanner.cnbc_bonds, "fetch", lambda: [])
+    scanner.scan()
+    yf_status = [st for st in scanner.source_statuses if st.source == "yfinance"]
+    assert len(yf_status) == 1
+    assert yf_status[0].stage == "closed" and yf_status[0].ok and yf_status[0].empty
