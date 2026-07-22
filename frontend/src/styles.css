@@ -271,6 +271,38 @@ textarea {
   gap: 8px;
   color: var(--muted);
   font-size: 13.5px;
+  /* 行高锁死：有无内联页签，名字行同高，保证相邻卡片下方数字横向对齐 */
+  min-height: 26px;
+}
+
+.asset-meta-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 内联版页签（放在品种名字旁边）：压扁、去掉原顶部布局的下边距 */
+.asset-tabs-inline {
+  margin-bottom: 0;
+  padding: 1px;
+}
+
+.asset-tabs-inline button {
+  font-size: 12px;
+  padding: 1px 7px;
+}
+
+/* 价格 + 状态徽标同行：徽标有无不改变卡片垂直节奏 */
+.price-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.price-row strong {
+  font-size: 23px;
 }
 
 .asset-meta code,

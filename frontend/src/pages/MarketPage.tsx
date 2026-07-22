@@ -51,6 +51,7 @@ const MARKET_HOURS_BY_SYMBOL: Record<string, string> = {
   "ES=F": "周一 06:00 — 周六 05:00 (夏令)",
   "NQ=F": "周一 06:00 — 周六 05:00 (夏令)",
   "YM=F": "周一 06:00 — 周六 05:00 (夏令)",
+  "NIY=F": "周一 06:00 — 周六 05:00 (夏令)",
   "CL=F": "周一 06:00 — 周六 05:00 (夏令)",
   "GC=F": "周一 06:00 — 周六 05:00 (夏令)",
   "SI=F": "周一 06:00 — 周六 05:00 (夏令)",
@@ -126,7 +127,7 @@ function FreshnessBadge({ item }: { item: MarketLatestItem }) {
       className={`badge-freshness badge-${item.freshness}`}
       title={spec.title}
       style={{
-        alignSelf: "flex-start", fontSize: 13, lineHeight: 1.4, padding: "1px 6px",
+        fontSize: 13, lineHeight: 1.4, padding: "1px 6px",
         borderRadius: 4, color: spec.color, background: spec.bg, border: spec.border
       }}
     >
@@ -199,56 +200,59 @@ function MarketAssetCard({ primary, perp }: OverviewCard) {
   return (
     <article className="asset-card">
       <div className="asset-meta">
-        <span>{item.name}</span>
+        <span className="asset-meta-left">
+          <span>{item.name}</span>
+          {perp ? (
+            <div className="asset-tabs asset-tabs-inline" role="tablist" aria-label={`${primary.name}行情类型`}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "primary"}
+                className={activeTab === "primary" ? "active" : ""}
+                onClick={() => setActiveTab("primary")}
+              >
+                期货
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "perp"}
+                className={activeTab === "perp" ? "active" : ""}
+                onClick={() => setActiveTab("perp")}
+              >
+                Perp
+              </button>
+            </div>
+          ) : null}
+        </span>
         <code>{item.symbol}</code>
       </div>
-      <strong>{formatPrice(item)}</strong>
-      <FreshnessBadge item={item} />
-      {item.source?.startsWith(OKX_GAPFILL_SOURCE) && (
-        <span
-          className="badge-proxy"
-          title="OKX 永续休市代理价"
-          style={{
-            alignSelf: "flex-start",
-            fontSize: 13,
-            lineHeight: 1.4,
-            padding: "1px 6px",
-            borderRadius: 4,
-            color: "#94a3b8",
-            background: "rgba(148,163,184,0.16)",
-            border: "1px solid rgba(148,163,184,0.3)"
-          }}
-        >
-          代理价
-        </span>
-      )}
+      <div className="price-row">
+        <strong>{formatPrice(item)}</strong>
+        <FreshnessBadge item={item} />
+        {item.source?.startsWith(OKX_GAPFILL_SOURCE) && (
+          <span
+            className="badge-proxy"
+            title="OKX 永续休市代理价"
+            style={{
+              fontSize: 13,
+              lineHeight: 1.4,
+              padding: "1px 6px",
+              borderRadius: 4,
+              color: "#94a3b8",
+              background: "rgba(148,163,184,0.16)",
+              border: "1px solid rgba(148,163,184,0.3)"
+            }}
+          >
+            代理价
+          </span>
+        )}
+      </div>
       <div className="mini-stats">
         <Stat label="5m" value={pct(item.change_5m)} tone={tone(item.change_5m)} />
         <Stat label="1h" value={pct(item.change_1h)} tone={tone(item.change_1h)} />
         <Stat label="24h" value={pct(item.change_24h)} tone={tone(item.change_24h)} />
       </div>
-      {perp ? (
-        <div className="asset-tabs" role="tablist" aria-label={`${primary.name}行情类型`}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "primary"}
-            className={activeTab === "primary" ? "active" : ""}
-            onClick={() => setActiveTab("primary")}
-          >
-            期货
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "perp"}
-            className={activeTab === "perp" ? "active" : ""}
-            onClick={() => setActiveTab("perp")}
-          >
-            Perp
-          </button>
-        </div>
-      ) : null}
       <div className="card-foot">
         <small>{item.timestamp_bj}</small>
         <small className="market-hours">开市 {marketHours(item.symbol, item.asset_class)}</small>
