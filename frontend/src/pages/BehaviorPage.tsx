@@ -22,6 +22,8 @@ const SYMBOL = "BTC/USDT";
 const REFRESH_MS = 5 * 60_000;
 const UP = "#5eead4";      // 站内 --up
 const DOWN = "#fb7185";    // 站内 --down
+const UP_DIM = "#2f9e88";    // 弱段涨（暗青）
+const DOWN_DIM = "#ad4159";  // 弱段跌（暗玫红）
 const INK = "#8ea0b6";     // 站内 --muted
 const TEXT = "#dbe7f3";    // 站内 --text
 const C_ND = "#6e97e8";    // 新闻驱动
@@ -80,7 +82,7 @@ export function BehaviorPage() {
                   <Bar isAnimationActive={false} dataKey={(r: { t08Down: number }) => -r.t08Down} name="0.8档跌" stackId="t" fill="#fbbf24" opacity={0.55} />
                 </ComposedChart>
               </ResponsiveContainer>
-              <div className="mini-title">涨/跌段净幅合计（%）</div>
+              <div className="mini-title">涨/跌段净幅合计（%）· 亮=强段(0.5档+) 暗=弱段(0.3档)</div>
               <ResponsiveContainer width="100%" height={100}>
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
@@ -88,8 +90,10 @@ export function BehaviorPage() {
                   <YAxis width={34} tick={{ fontSize: 12 }} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} />
                   <ReferenceLine y={0} stroke={INK} />
-                  <Bar isAnimationActive={false} dataKey="upSum" name="涨段净幅Σ" stackId="n" fill={UP} opacity={0.75} />
-                  <Bar isAnimationActive={false} dataKey="downSumNeg" name="跌段净幅Σ" stackId="n" fill={DOWN} opacity={0.75} />
+                  <Bar isAnimationActive={false} dataKey="upSumStrong" name="涨·强段Σ" stackId="n" fill={UP} />
+                  <Bar isAnimationActive={false} dataKey="upSumWeak" name="涨·弱段Σ" stackId="n" fill={UP_DIM} />
+                  <Bar isAnimationActive={false} dataKey="downSumStrongNeg" name="跌·强段Σ" stackId="n" fill={DOWN} />
+                  <Bar isAnimationActive={false} dataKey="downSumWeakNeg" name="跌·弱段Σ" stackId="n" fill={DOWN_DIM} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
