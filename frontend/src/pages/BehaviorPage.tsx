@@ -56,7 +56,7 @@ export function BehaviorPage() {
             <div className="panel-head"><h2>① 日趋势 · 近 14 个 UTC 日（0.3 档只计数）</h2></div>
             <div className="behavior-daily">
               <div className="mini-title">0.3档 涨跌发散柱 + 净差线（涨−跌）</div>
-              <ResponsiveContainer width="100%" height={120}>
+              <ResponsiveContainer width="100%" height={180}>
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="date" hide />
@@ -69,7 +69,7 @@ export function BehaviorPage() {
                 </ComposedChart>
               </ResponsiveContainer>
               <div className="mini-title">强度 · 0.5/0.8 档段数（上=涨 下=跌 · 亮色=0.8档）</div>
-              <ResponsiveContainer width="100%" height={100}>
+              <ResponsiveContainer width="100%" height={160}>
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="date" hide />
@@ -83,7 +83,7 @@ export function BehaviorPage() {
                 </ComposedChart>
               </ResponsiveContainer>
               <div className="mini-title">涨/跌段净幅合计（%）· 亮=强段(0.5档+) 暗=弱段(0.3档)</div>
-              <ResponsiveContainer width="100%" height={100}>
+              <ResponsiveContainer width="100%" height={160}>
                 <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="2 4" vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 12 }} />
@@ -114,7 +114,7 @@ export function BehaviorPage() {
               </div>
             ) : null}
             <div className="mini-title">14 日构成堆叠</div>
-            <ResponsiveContainer width="100%" height={150}>
+            <ResponsiveContainer width="100%" height={220}>
               <ComposedChart data={dailyRows} margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" hide />
@@ -126,7 +126,7 @@ export function BehaviorPage() {
               </ComposedChart>
             </ResponsiveContainer>
             <div className="mini-title">情绪·技术面 涨/跌段数 + 个数差线</div>
-            <ResponsiveContainer width="100%" height={100}>
+            <ResponsiveContainer width="100%" height={160}>
               <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" hide />
@@ -139,7 +139,7 @@ export function BehaviorPage() {
               </ComposedChart>
             </ResponsiveContainer>
             <div className="mini-title">情绪·技术面 涨/跌净幅Σ（%）+ 净差线</div>
-            <ResponsiveContainer width="100%" height={100}>
+            <ResponsiveContainer width="100%" height={160}>
               <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" hide />
@@ -152,7 +152,7 @@ export function BehaviorPage() {
               </ComposedChart>
             </ResponsiveContainer>
             <div className="mini-title">情绪·技术面 占比 %（上=涨 下=跌 · 分母&lt;5 空）</div>
-            <ResponsiveContainer width="100%" height={100}>
+            <ResponsiveContainer width="100%" height={160}>
               <ComposedChart data={dailyRows} stackOffset="sign" margin={{ top: 4, right: 60, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="2 4" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
