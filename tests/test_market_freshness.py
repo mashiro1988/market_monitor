@@ -21,7 +21,7 @@ def session(monkeypatch):
     Base.metadata.create_all(eng)
     s = sessionmaker(bind=eng)()
     monkeypatch.setattr(ms, "utc_now_naive", lambda: NOW)
-    monkeypatch.setattr(ms, "_failed_price_scanner_names", lambda: set())
+    monkeypatch.setattr(ms, "failed_price_scanner_names", lambda: set())
     yield s
     s.close()
 
@@ -60,7 +60,7 @@ def test_closed_market_is_calm(session, monkeypatch):
 
 def test_scanner_error_forces_down_even_if_fresh(session, monkeypatch):
     monkeypatch.setattr(ms.market_sessions, "is_open", lambda sym, now: True)
-    monkeypatch.setattr(ms, "_failed_price_scanner_names", lambda: {"yfinance"})
+    monkeypatch.setattr(ms, "failed_price_scanner_names", lambda: {"yfinance"})
     _snap(session, "ES=F", 5)
     resp = ms.get_latest_prices(session)
     assert _item(resp, "ES=F").freshness == "source_down"
@@ -68,7 +68,7 @@ def test_scanner_error_forces_down_even_if_fresh(session, monkeypatch):
 
 def test_okx_snapshot_maps_to_okx_scanner_name(session, monkeypatch):
     monkeypatch.setattr(ms.market_sessions, "is_open", lambda sym, now: True)
-    monkeypatch.setattr(ms, "_failed_price_scanner_names", lambda: {"okx"})
+    monkeypatch.setattr(ms, "failed_price_scanner_names", lambda: {"okx"})
     _snap(session, "BTC/USDT", 3, source="okx_swap_5m", asset_class="crypto")
     resp = ms.get_latest_prices(session)
     assert _item(resp, "BTC/USDT").freshness == "source_down"

@@ -138,6 +138,13 @@ YF_BACKOFF_MAX_MINUTES = float(os.getenv("YF_BACKOFF_MAX_MINUTES", "60"))
 FRESHNESS_STALE_MINUTES = int(os.getenv("FRESHNESS_STALE_MINUTES", "15"))   # 开市中滞后→黄标
 FRESHNESS_DOWN_MINUTES = int(os.getenv("FRESHNESS_DOWN_MINUTES", "60"))    # 开市中滞后→红标"源中断"
 
+# 价格源健康告警（2026-07-27 P0）：红标品种/采集异常推企业微信，判定与卡片同源。
+# 不建模交易所假日 → 美股假日当天会误报一次，推送正文已带提示语。
+PRICE_SOURCE_MONITORING_ENABLED = os.getenv("PRICE_SOURCE_MONITORING_ENABLED", "1").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+PRICE_SOURCE_ALERT_COOLDOWN_MINUTES = int(os.getenv("PRICE_SOURCE_ALERT_COOLDOWN_MINUTES", "60"))
+
 # 预测市场图表的「活跃」宽限期（分钟）：最后一笔快照落后于表内最新快照超过该值的市场，
 # 视为已停止跟踪（软删除后快照断流），整体从 /predictions 与 families 图表消失。
 # 基准取表内最新快照时间而非墙钟，调度器宕机时不会误杀全部市场。

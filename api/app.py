@@ -56,6 +56,17 @@ def _start_background_scheduler() -> BackgroundScheduler:
             )
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] scan cycle failed: {}", exc)
+        # 价格源健康告警：独立 try，扫描失败时更要检查（本身就是可告警状态）
+        try:
+            from services.price_source_monitoring import check_price_source_health
+
+            statuses = getattr(run_scan_once, "last_source_statuses", {}) or {}
+            sent = check_price_source_health(source_statuses=statuses)
+            if sent:
+                logger.warning("[FastAPI Scheduler] price source alerts sent: {}",
+                               [s["kind"] for s in sent])
+        except Exception:
+            logger.exception("[FastAPI Scheduler] price source monitor failed")
 
     def hourly_summary() -> None:
         try:

@@ -67,7 +67,7 @@ def _change_pct_from_latest(snaps: list[PriceSnapshot], latest_snap: PriceSnapsh
     return (latest_snap.price - best.price) / best.price * 100
 
 
-def _failed_price_scanner_names() -> set[str]:
+def failed_price_scanner_names() -> set[str]:
     """最近一轮扫描中报错（ok=False）的价格 scanner 名。单 worker 内存态，无扫描历史时为空。"""
     try:
         from services.scan_runtime import run_scan_once
@@ -85,9 +85,12 @@ _SNAPSHOT_SOURCE_TO_SCANNER = (
 )
 
 
-def _freshness_for(symbol: str, snapshot_source: str, ts: datetime | None,
-                   now: datetime, failed_scanners: set[str]) -> tuple[str, int | None]:
-    """卡片四态：closed（休市）→ source_down（扫描报错直判）→ live/stale/source_down（按滞后）。"""
+def freshness_for(symbol: str, snapshot_source: str, ts: datetime | None,
+                  now: datetime, failed_scanners: set[str]) -> tuple[str, int | None]:
+    """卡片四态：closed（休市）→ source_down（扫描报错直判）→ live/stale/source_down（按滞后）。
+
+    公开 API：市场概览卡片与价格源告警（services/price_source_monitoring.py）共用本函数，
+    保证"推送说的"与"页面显示的"永远同一口径。"""
     if ts is None:
         return "source_down", None
     if not market_sessions.is_open(symbol, now):
@@ -119,7 +122,7 @@ def get_latest_prices(session: Session) -> MarketLatestResponse:
     allowed_crypto = {f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})}
     items: list[MarketLatestItem] = []
     now = utc_now_naive()
-    failed_scanners = _failed_price_scanner_names()
+    failed_scanners = failed_price_scanner_names()
     for symbol, snaps in by_symbol.items():
         if not snaps:
             continue
@@ -127,7 +130,7 @@ def get_latest_prices(session: Session) -> MarketLatestResponse:
         # 市场概览加密区只显示当前配置的币种（如 BTC/ETH）；已停采的 alt 立刻消失
         if latest.asset_class == "crypto" and symbol not in allowed_crypto:
             continue
-        freshness, stale_minutes = _freshness_for(
+        freshness, stale_minutes = freshness_for(
             symbol, latest.source, latest.timestamp, now, failed_scanners)
         items.append(
             MarketLatestItem(
