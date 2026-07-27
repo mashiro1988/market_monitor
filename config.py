@@ -129,6 +129,10 @@ YF_REQUEST_TIMEOUT_SEC = int(os.getenv("YF_REQUEST_TIMEOUT_SEC", "10"))    # 单
 YF_STAGE_BUDGET_SEC = int(os.getenv("YF_STAGE_BUDGET_SEC", "180"))         # 阶段软预算，保 5min 周期
 YF_JITTER_MIN_SEC = float(os.getenv("YF_JITTER_MIN_SEC", "0.3"))           # 品种间随机抖动下限
 YF_JITTER_MAX_SEC = float(os.getenv("YF_JITTER_MAX_SEC", "0.8"))           # 品种间随机抖动上限
+# 指数退避（2026-07-27）：开市却取数落空视为限流信号，该品种冷却 5/10/20/40/60 分钟封顶，
+# 成功即归零。游标窗口每轮回看 24h，跳过的轮次会在恢复后自动补齐 → 退避不丢数据。
+YF_BACKOFF_BASE_MINUTES = float(os.getenv("YF_BACKOFF_BASE_MINUTES", "5"))
+YF_BACKOFF_MAX_MINUTES = float(os.getenv("YF_BACKOFF_MAX_MINUTES", "60"))
 
 # ── 市场概览卡片 freshness 标注阈值（分钟）──
 FRESHNESS_STALE_MINUTES = int(os.getenv("FRESHNESS_STALE_MINUTES", "15"))   # 开市中滞后→黄标

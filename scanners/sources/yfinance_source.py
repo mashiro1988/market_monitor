@@ -16,6 +16,11 @@ _sleep = _time.sleep          # 测试可注入
 _monotonic = _time.monotonic  # 测试可注入
 
 
+def _jitter_ratio() -> float:
+    """退避到期时刻的随机偏移比例（0~25%）：避免所有品种齐步重试形成新的请求脉冲。"""
+    return random.uniform(0.0, 0.25)
+
+
 class YFinancePriceSource(BaseSource):
     """通过 yfinance 获取股指/期货/商品价格（5m K 线收盘价口径）"""
 
@@ -42,6 +47,9 @@ class YFinancePriceSource(BaseSource):
         # 浏览器指纹会话：绕过 Yahoo 对数据中心 IP 的 TLS 指纹限流（YFRateLimitError）。
         # 本机住宅 IP 不需要，但部署到云服务器（数据中心 IP）必须，否则 yfinance 全 429。
         self._session = self._build_session()
+        # 指数退避状态（进程内存态，随重启清零）：撞限流后主动泄压，别顶着黑名单硬撞。
+        self._fail_streak: dict[str, int] = {}       # symbol -> 连续失败次数
+        self._skip_until: dict[str, datetime] = {}   # symbol -> 该时刻前不再请求（UTC naive）
 
     @staticmethod
     def _build_session():
@@ -130,9 +138,34 @@ class YFinancePriceSource(BaseSource):
         return out
 
     def active_tickers(self, now_utc: datetime) -> dict[str, tuple[str, str]]:
-        """本轮应拉取的 symbol -> (asset_class, name)；供 fetch_history 与 PriceScanner 共用。"""
+        """本轮应拉取的 symbol -> (asset_class, name)；供 fetch_history 与 PriceScanner 共用。
+
+        只按交易时段过滤，**不含退避**：退避是"本轮先别打扰 Yahoo"，不是"这个品种休市了"。
+        混进来会让 PriceScanner 把退避中的品种误判成全休市（记 stage=closed 并跳过整个源）。"""
         return {s: meta for s, meta in self._all_tickers().items()
                 if market_sessions.should_fetch(s, now_utc)}
+
+    def _in_backoff(self, symbol: str, now_utc: datetime) -> bool:
+        until = self._skip_until.get(symbol)
+        return until is not None and now_utc < until
+
+    def _note_failure(self, symbol: str, now_utc: datetime) -> None:
+        """开市却没拿到数据 → 视为限流信号，退避时长翻倍（5/10/20/40/60 分钟封顶）。
+
+        Yahoo 限流时 yf.download 不抛异常、只返回空 DataFrame，所以"空"就是可观测信号；
+        节假日误判无害（本来也没数据），且游标窗口会在恢复后自动补齐。"""
+        streak = self._fail_streak.get(symbol, 0) + 1
+        self._fail_streak[symbol] = streak
+        base = config.YF_BACKOFF_BASE_MINUTES * (2 ** (streak - 1))
+        delay = min(base, config.YF_BACKOFF_MAX_MINUTES)
+        delay *= 1 + _jitter_ratio()
+        self._skip_until[symbol] = now_utc + timedelta(minutes=delay)
+        logger.warning(f"yfinance {symbol} 第 {streak} 次取数落空，退避 {delay:.1f} 分钟"
+                       f"（游标窗口会在恢复后自动补齐）")
+
+    def _note_success(self, symbol: str) -> None:
+        self._fail_streak.pop(symbol, None)
+        self._skip_until.pop(symbol, None)
 
     @staticmethod
     def _close_series_for(df: pd.DataFrame, symbol: str) -> pd.Series:
@@ -168,7 +201,10 @@ class YFinancePriceSource(BaseSource):
         records: list[PriceRecord] = []
         deadline = _monotonic() + config.YF_STAGE_BUDGET_SEC
         skipped: list[str] = []
-        items = list(tickers.items())
+        items = [(s, meta) for s, meta in tickers.items() if not self._in_backoff(s, end_ts)]
+        backed_off = len(tickers) - len(items)
+        if backed_off:
+            logger.info(f"yfinance 本轮有 {backed_off} 个品种处于退避冷却期，跳过")
         for i, (symbol, (asset_class, name)) in enumerate(items):
             if _monotonic() >= deadline:
                 skipped = [s for s, _ in items[i:]]
@@ -188,13 +224,17 @@ class YFinancePriceSource(BaseSource):
                     timeout=config.YF_REQUEST_TIMEOUT_SEC,
                 )
                 if df.empty:
+                    # 开市却空手 = Yahoo 限流的可观测信号（0.2.x 不抛异常只返回空表）
+                    self._note_failure(symbol, end_ts)
                     continue
                 close_series = self._close_series_for(df, symbol)
                 records.extend(self._records_from_close_series(
                     asset_class=asset_class, symbol=symbol, name=name,
                     close_series=close_series, start_ts=start_ts, end_ts=end_ts))
+                self._note_success(symbol)
             except Exception as e:
                 logger.error(f"yfinance {symbol} 拉取失败: {type(e).__name__}: {e}")
+                self._note_failure(symbol, end_ts)
             if i < len(items) - 1:
                 _sleep(random.uniform(config.YF_JITTER_MIN_SEC, config.YF_JITTER_MAX_SEC))
 
