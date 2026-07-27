@@ -94,9 +94,6 @@ class FakeQuoteSource:
         return []
 
 
-class NoopGapFiller:
-    def run(self, session, okx_source, scan_time):
-        return 0
 
 
 def _make_scanner(make_session, monkeypatch, yf_rounds, okx_rounds):
@@ -109,7 +106,6 @@ def _make_scanner(make_session, monkeypatch, yf_rounds, okx_rounds):
     scanner.yfinance = yf
     scanner.okx = FakeHistorySource("okx", okx_rounds)
     scanner.cnbc_bonds = FakeQuoteSource()
-    scanner.gap_filler = NoopGapFiller()
     monkeypatch.setattr(config, "PRICE_SOURCES",
                         {**config.PRICE_SOURCES, "crypto": {"BTC": "BTCUSDT"}})
     return scanner

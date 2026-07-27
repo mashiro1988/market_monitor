@@ -315,24 +315,13 @@ PRICE_SOURCES = {
 }
 
 # ============================================================
-# 旧休市补点（gap-fill）：阶段 1 默认关闭；保留配置与代码用于短期回滚。
-# OKX 永续现按 PRICE_SOURCES["perp_proxy"] 作为独立行情入库。
-# 详见 docs/superpowers/specs/2026-06-28-okx-gapfill-market-overview-design.md
+# 休市补点（gap-fill）已于 2026-07-27 退役并删除采集代码（用户拍板）。
+# OKX 永续现按 PRICE_SOURCES["perp_proxy"] 作为独立行情入库，不再合成代理价。
+# 下面这个哨兵常量**必须保留**：库内仍有 2026-07-02~07-15 的 4,163 行历史合成点
+# （填的是休市空档，无真实数据可替代），后端据此识别、前端据此标「代理价」。
+# 历史退役记录见 docs/superpowers/specs/2026-06-28-okx-gapfill-market-overview-design.md
 # ============================================================
-ONCHAIN_GAPFILL = {
-    "NQ=F": {"okx_inst": "QQQ-USDT-SWAP"},   # 纳指100：QQQ ETF 永续（同底层指数）
-    "CL=F": {"okx_inst": "CL-USDT-SWAP"},    # WTI 原油
-    "GC=F": {"okx_inst": "XAU-USDT-SWAP"},   # 现货黄金
-}
-GAPFILL_SOURCE = "okx_gapfill"   # 合成点 source 哨兵；后端一律引用本常量
-GAPFILL_ENABLED = os.getenv("GAPFILL_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
-# 2026-07-12 用户拍板 60→20：每日 CME 1h 维护段原来恰好躲过补点判定（判定生效时市场已重开），
-# 联动曲线每天北京 05-06 点留洞；降到 20min 后洞缩到 ~20min。误判风险可控：真实 bar 一回来
-# 就按 source-aware UPDATE 覆盖同槽代理点。
-GAPFILL_STALENESS_MINUTES = int(os.getenv("GAPFILL_STALENESS_MINUTES", "20"))   # 真实 bar 超此分钟数判休市
-GAPFILL_PERP_FRESH_MINUTES = int(os.getenv("GAPFILL_PERP_FRESH_MINUTES", "12")) # perp 自身新鲜度
-GAPFILL_STEP_PCT = float(os.getenv("GAPFILL_STEP_PCT", "0.05"))   # 单根 5m 跳变上限（抓坏价）
-GAPFILL_SEAM_PCT = float(os.getenv("GAPFILL_SEAM_PCT", "0.15"))   # 补点段首点 seam 上限（抓坏锚点）
+GAPFILL_SOURCE = "okx_gapfill"   # 历史合成点 source 哨兵；后端一律引用本常量
 
 # ============================================================
 # 新闻源配置

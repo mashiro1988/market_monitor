@@ -7,7 +7,6 @@ from models.prediction import PredictionMarket
 from models.alert_log import AlertLog
 from models.tracked_market import TrackedMarket
 from models.sector import CmcSymbolCategory, SectorReturn
-from models.gapfill_anchor import GapfillAnchor
 from models.behavior import BehaviorSegment, BehaviorDailySummary
 
 
