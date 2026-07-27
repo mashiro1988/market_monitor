@@ -107,8 +107,11 @@ def collect_price_source_findings(
 
     # ② 开市却长时间没有新数据：与卡片红标同一判定
     failed_scanners = market_service.failed_price_scanner_names()
+    tracked = tracked_symbols()
     down_by_source: dict[str, list[tuple[str, int | None]]] = {}
     for symbol, ts, snapshot_source in _latest_rows(session):
+        if symbol not in tracked:
+            continue
         if not market_sessions.is_open(symbol, now):
             continue
         freshness, lag = market_service.freshness_for(
@@ -128,6 +131,26 @@ def collect_price_source_findings(
         ))
 
     return findings
+
+
+def tracked_symbols() -> set[str]:
+    """当前仍在采集的品种全集，与市场概览卡片同一口径。
+
+    必须过滤：price_snapshots 里留着历史上采过、config 早已删掉的品种（2026-06 前的
+    一批 alt 币），它们的时间戳永远落后，而 `/USDT` 在时段表里恒为"开市"——不过滤就是
+    每小时一条永久误报（2026-07-27 告警上线首轮实证：19 个老币刷了两条推送）。"""
+    from scanners.sources.cnbc_bond_source import CnbcBondQuoteSource
+    from scanners.sources.yfinance_source import configured_symbol_groups
+
+    tracked: set[str] = set()
+    for group in configured_symbol_groups().values():
+        tracked |= set(group.values())
+    tracked |= {f"{base}/USDT" for base in config.PRICE_SOURCES.get("crypto", {})}
+    tracked |= set(config.PRICE_SOURCES.get("perp_proxy", {}).values())
+    tracked |= set(config.PRICE_SOURCES.get("bonds", {}))
+    # 利差是 CNBC 源现算派生的品种，不在 config.bonds 里，但同样在采
+    tracked |= {pair[0] for pair in CnbcBondQuoteSource.SPREAD_PAIRS}
+    return tracked
 
 
 def _latest_rows(session) -> list[tuple[str, datetime, str]]:

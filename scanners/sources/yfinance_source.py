@@ -21,6 +21,25 @@ def _jitter_ratio() -> float:
     return random.uniform(0.0, 0.25)
 
 
+def configured_symbol_groups() -> dict[str, dict[str, str]]:
+    """config 里归 yfinance 管的资产组：asset_class -> {显示名: symbol}。
+
+    独立于类，供"只要品种清单、不需要会话"的调用方（如价格源告警）直接取用，
+    避免为拿一份清单去构造 curl_cffi 会话，也避免清单定义分叉。"""
+    return {
+        "stock_index": config.PRICE_SOURCES.get("us_indices", {}),
+        "futures": config.PRICE_SOURCES.get("us_futures", {}),
+        "asian_index": config.PRICE_SOURCES.get("asian_indices", {}),
+        "commodity": config.PRICE_SOURCES.get("commodities", {}),
+        "currency": config.PRICE_SOURCES.get("currencies", {}),
+        "bond": {
+            name: info["symbol"]
+            for name, info in config.PRICE_SOURCES.get("bonds", {}).items()
+            if info.get("source") == "yfinance"
+        },
+    }
+
+
 class YFinancePriceSource(BaseSource):
     """通过 yfinance 获取股指/期货/商品价格（5m K 线收盘价口径）"""
 
@@ -32,18 +51,7 @@ class YFinancePriceSource(BaseSource):
     CAP_HOURS = 168
 
     def __init__(self):
-        self.symbol_groups = {
-            "stock_index": config.PRICE_SOURCES.get("us_indices", {}),
-            "futures": config.PRICE_SOURCES.get("us_futures", {}),
-            "asian_index": config.PRICE_SOURCES.get("asian_indices", {}),
-            "commodity": config.PRICE_SOURCES.get("commodities", {}),
-            "currency": config.PRICE_SOURCES.get("currencies", {}),
-            "bond": {
-                name: info["symbol"]
-                for name, info in config.PRICE_SOURCES.get("bonds", {}).items()
-                if info.get("source") == "yfinance"
-            },
-        }
+        self.symbol_groups = configured_symbol_groups()
         # 浏览器指纹会话：绕过 Yahoo 对数据中心 IP 的 TLS 指纹限流（YFRateLimitError）。
         # 本机住宅 IP 不需要，但部署到云服务器（数据中心 IP）必须，否则 yfinance 全 429。
         self._session = self._build_session()

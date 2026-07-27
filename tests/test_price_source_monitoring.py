@@ -83,6 +83,27 @@ def test_stale_yellow_does_not_alert(session):
     assert psm.collect_price_source_findings(session, now=NOW) == []
 
 
+def test_retired_symbols_never_alert(session):
+    """已停采品种不得告警。
+
+    price_snapshots 保留着历史上采过、config 里早已删掉的品种（2026-06 前的一批 alt 币）。
+    它们的时间戳永远落后，且 /USDT 在时段表里恒为"开市" → 不过滤就是永久误报。
+    2026-07-27 告警上线第一轮就被这 19 个老币刷了两条推送，此测试锁住修复。"""
+    _snap(session, "DOGE/USDT", 68860, source="okx_swap_5m", asset_class="crypto")
+    _snap(session, "SOL/USDT", 68860, source="okx_swap_5m", asset_class="crypto")
+    _snap(session, "FET/USDT", 68860, source="okx_spot_5m", asset_class="crypto")
+    _snap(session, "BTC/USDT", 3, source="okx_swap_5m", asset_class="crypto")   # 在采、新鲜
+    assert psm.collect_price_source_findings(session, now=NOW) == []
+
+
+def test_bond_spreads_are_tracked(session):
+    """债券利差是 CNBC 源派生出来的品种（不在 config.PRICE_SOURCES['bonds'] 里），
+    仍属在采范围，必须纳入监控。"""
+    _snap(session, "US_SPREAD", 90, source="cnbc_bond_quote", asset_class="bond")
+    findings = psm.collect_price_source_findings(session, now=NOW)
+    assert len(findings) == 1 and "US_SPREAD" in findings[0].content
+
+
 def test_scanner_exception_is_its_own_finding(session):
     _snap(session, "ES=F", 3)                        # 数据新鲜，但扫描器本轮抛错
     statuses = {"price": [{"source": "yfinance", "ok": False, "empty": False,
