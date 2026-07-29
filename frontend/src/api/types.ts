@@ -204,7 +204,7 @@ export type BehaviorDailyResponse = {
 };
 
 export type BehaviorDailySchema = {
-  utc_date: string;
+  bj_date: string;
   day_type: string;
   counts: Record<string, Record<string, number>>;
   composition: Record<string, number>;
