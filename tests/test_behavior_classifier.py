@@ -132,14 +132,14 @@ def test_daily_summary_pit(session):
     btc = _btc_with_push()
     _seed_prices(session, "BTC/USDT", btc)
     bc.classify(session, "BTC/USDT", now=_now_after(btc))
-    d = T0.strftime("%Y-%m-%d")
+    d = bc.bj_date_of(T0)                        # 段起点所属的北京日
     bc.write_daily_summary(session, "BTC/USDT", d, now=T0 + timedelta(hours=13))
     bc.write_daily_summary(session, "BTC/USDT", d, now=T0 + timedelta(hours=14))
-    rows = session.query(BehaviorDailySummary).filter_by(utc_date=d).all()
+    rows = session.query(BehaviorDailySummary).filter_by(bucket_date=d, date_basis="bj").all()
     assert len(rows) == 2                        # PIT 追加不覆盖
     counts = json.loads(rows[-1].counts)
     assert counts["0.5"]["up"] == 1
-    assert rows[-1].day_type == "weekday"        # 2026-07-08 周三
+    assert rows[-1].day_type == bc.day_type_of(d)
 
 
 def test_window_class_mapping_and_merge():

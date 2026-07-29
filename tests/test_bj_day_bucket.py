@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from database import Base
-from models.behavior import BehaviorSegment
+from models.behavior import BehaviorDailySummary, BehaviorSegment
 from services import behavior_classifier as bc
 from services.time_utils import bj_date_of, bj_day_bounds
 
@@ -80,3 +80,22 @@ def test_day_type_follows_beijing_date(session):
     # 2026-07-25 是周六；UTC 日口径下 07-24 16:30 属于 UTC 周五，北京口径属于周六
     assert bc.day_type_of("2026-07-25") == "weekend"
     assert bc.day_type_of("2026-07-24") == "weekday"
+
+
+def test_write_daily_summary_marks_bj_basis(session):
+    session.add(_seg(datetime(2026, 7, 28, 16, 1)))
+    session.commit()
+    row = bc.write_daily_summary(session, "BTC/USDT", "2026-07-29",
+                                 now=datetime(2026, 7, 29, 16, 5))
+    assert row.bucket_date == "2026-07-29"
+    assert row.date_basis == "bj"
+    assert json.loads(row.counts)["0.5"] == {"up": 1, "down": 0}
+
+
+def test_summary_target_is_the_beijing_day_that_just_ended():
+    # 正点：UTC 16:05 = 北京次日 00:05，刚结束的北京日是 07-29
+    assert bc.summary_target_bj_date(datetime(2026, 7, 29, 16, 5)) == "2026-07-29"
+    # 延迟到 UTC 23:00（北京 07:00）才跑，目标仍是 07-29
+    assert bc.summary_target_bj_date(datetime(2026, 7, 29, 23, 0)) == "2026-07-29"
+    # 提前到 UTC 15:55（北京 23:55，07-29 还没走完）：退回汇总 07-28，绝不汇总未完成的日子
+    assert bc.summary_target_bj_date(datetime(2026, 7, 29, 15, 55)) == "2026-07-28"

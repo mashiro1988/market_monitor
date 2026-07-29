@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -286,13 +286,13 @@ def day_type_of(bj_date: str) -> str:
     return "weekend" if datetime.strptime(bj_date, "%Y-%m-%d").weekday() >= 5 else "weekday"
 
 
-def write_daily_summary(session: Session, symbol: str, utc_date: str,
+def write_daily_summary(session: Session, symbol: str, bj_date: str,
                         now: datetime | None = None) -> BehaviorDailySummary:
-    """append 一条 PIT 记录（追加不覆盖，读取取 computed_at 最新）。"""
+    """append 一条 PIT 记录（追加不覆盖，读取取 computed_at 最新）。口径固定 'bj'（北京日）。"""
     now = now or datetime.utcnow()
-    counts, composition, down_sum = aggregate_day(session, symbol, utc_date)
+    counts, composition, down_sum = aggregate_day(session, symbol, bj_date)
     summary = BehaviorDailySummary(
-        symbol=symbol, utc_date=utc_date, day_type=day_type_of(utc_date),
+        symbol=symbol, bucket_date=bj_date, date_basis="bj", day_type=day_type_of(bj_date),
         counts=json.dumps(counts), composition=json.dumps(composition),
         down_net_sum=down_sum, computed_at=now,
     )
@@ -312,13 +312,20 @@ def run_behavior_cycle() -> dict:
         session.close()
 
 
-def run_daily_summary() -> dict:
-    """UTC 00:05 汇总昨日（PIT 追加）。"""
+def summary_target_bj_date(now: datetime) -> str:
+    """日报 job 的目标北京日 = 传入时刻往回一整天所属的北京日。
+    正点（UTC 16:05 = 北京 00:05）取到刚结束那天；提前触发则退回上一天，绝不汇总未完成的日子。"""
+    return bj_date_of(now - timedelta(days=1))
+
+
+def run_daily_summary(now: datetime | None = None) -> dict:
+    """北京 00:05（= UTC 16:05）汇总刚结束的那个北京日（PIT 追加）。"""
     from database import SessionLocal
+    now = now or datetime.utcnow()
     session = SessionLocal()
     try:
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-        row = write_daily_summary(session, "BTC/USDT", yesterday)
-        return {"utc_date": row.utc_date, "computed_at": row.computed_at.isoformat()}
+        target = summary_target_bj_date(now)
+        row = write_daily_summary(session, "BTC/USDT", target)
+        return {"bj_date": row.bucket_date, "computed_at": row.computed_at.isoformat()}
     finally:
         session.close()
