@@ -49,7 +49,7 @@ class BehaviorSegmentsResponse(BaseModel):
 
 
 class BehaviorDailySchema(BaseModel):
-    utc_date: str                         # UTC 日界 = 北京 8 点
+    bj_date: str                          # 北京日界（北京 00:00–24:00 = UTC 16:00–16:00）
     day_type: str                         # weekday / weekend（分桶互比）
     counts: dict[str, dict[str, int]]     # {tier: {up, down}}
     composition: dict[str, int]           # 六类构成（0.5 档以上）

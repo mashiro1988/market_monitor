@@ -97,12 +97,13 @@ def test_review_confirm_override_and_daily_priority(client_session):
     # 确认（机器六类归并三类写入：pure_resonance → pure_resonance）
     r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": target["classification"]})
     assert r.status_code == 200 and r.json()["human_class"] == "pure_resonance"
-    # 段落在哪个 UTC 日取决于运行时刻（UTC 午夜后 utcnow-6h 落昨日）——按段起点日期取行
-    seg_date = target["start"]["timestamp_utc"][:10]
+    # 段落在哪个北京日取决于运行时刻（北京午夜后 utcnow-6h 落昨日）——按段起点算北京日取行
+    from services.time_utils import bj_date_of
+    seg_date = bj_date_of(datetime.fromisoformat(target["start"]["timestamp_utc"]))
 
     def _seg_day():
         days = client.get("/api/behavior/daily?days=2").json()["days"]
-        return next(d for d in days if d["utc_date"] == seg_date)
+        return next(d for d in days if d["bj_date"] == seg_date)
 
     # 改判 → 构成聚合优先人工结论（三类口径）
     r = client.patch(f"/api/behavior/segments/{target['id']}", json={"human_class": "sentiment_tech"})

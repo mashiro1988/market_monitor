@@ -29,7 +29,7 @@ from schemas.behavior import (
 from schemas.common import TimeFields
 from services.behavior_classifier import _points, aggregate_day, day_direction_extras, day_type_of, merge_composition, to_window_class
 from services.resonance_score import chg_map, rolling_s
-from services.time_utils import timestamp_pair
+from services.time_utils import bj_date_of, timestamp_pair
 
 _REF_LABELS = {t[0]: t[1] for t in config.ANNOTATION_REFERENCE_ASSETS}
 
@@ -78,30 +78,32 @@ def list_segments(session: Session, symbol: str, days: int = 2) -> BehaviorSegme
 
 
 def daily_series(session: Session, symbol: str, days: int = 14) -> BehaviorDailyResponse:
-    """最近 N 个 UTC 日：优先取每日最新 PIT 行；没有（当日盘中/历史缺口）按同口径现算 live=True。"""
+    """最近 N 个北京日：优先取每日最新 PIT 行（只认 date_basis='bj'）；
+    没有（当日盘中/历史缺口/口径切换前）按同口径现算 live=True。"""
     now = datetime.utcnow()
+    today_bj = datetime.strptime(bj_date_of(now), "%Y-%m-%d")
     out: list[BehaviorDailySchema] = []
     for offset in range(days - 1, -1, -1):
-        utc_date = (now - timedelta(days=offset)).strftime("%Y-%m-%d")
+        bj_date = (today_bj - timedelta(days=offset)).strftime("%Y-%m-%d")
         row = (
             session.query(BehaviorDailySummary)
-            .filter_by(symbol=symbol, utc_date=utc_date)
+            .filter_by(symbol=symbol, bucket_date=bj_date, date_basis="bj")
             .order_by(BehaviorDailySummary.computed_at.desc())
             .first()
         )
-        extras = day_direction_extras(session, symbol, utc_date)
+        extras = day_direction_extras(session, symbol, bj_date)
         if row is not None:
             out.append(BehaviorDailySchema(
-                utc_date=utc_date, day_type=row.day_type,
+                bj_date=bj_date, day_type=row.day_type,
                 counts=json.loads(row.counts),
                 composition=merge_composition(json.loads(row.composition)),   # 历史六类 PIT 行读取归并
                 down_net_sum=row.down_net_sum, computed_at=_tf(row.computed_at), live=False,
                 **extras,
             ))
         else:
-            counts, composition, down_sum = aggregate_day(session, symbol, utc_date)
+            counts, composition, down_sum = aggregate_day(session, symbol, bj_date)
             out.append(BehaviorDailySchema(
-                utc_date=utc_date, day_type=day_type_of(utc_date),
+                bj_date=bj_date, day_type=day_type_of(bj_date),
                 counts=counts, composition=composition,
                 down_net_sum=down_sum, computed_at=_tf(now), live=True,
                 **extras,

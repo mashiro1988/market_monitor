@@ -99,3 +99,38 @@ def test_summary_target_is_the_beijing_day_that_just_ended():
     assert bc.summary_target_bj_date(datetime(2026, 7, 29, 23, 0)) == "2026-07-29"
     # 提前到 UTC 15:55（北京 23:55，07-29 还没走完）：退回汇总 07-28，绝不汇总未完成的日子
     assert bc.summary_target_bj_date(datetime(2026, 7, 29, 15, 55)) == "2026-07-28"
+
+
+def test_daily_series_ignores_legacy_utc_rows(session):
+    """同一 bucket_date 上 utc 行与 bj 行并存时，读层只认 bj 行。"""
+    from services import behavior_views
+
+    today_bj = bj_date_of(datetime.utcnow())
+    session.add(BehaviorDailySummary(
+        symbol="BTC/USDT", bucket_date=today_bj, date_basis="utc", day_type="weekday",
+        counts=json.dumps({"0.3": {"up": 99, "down": 99}}), composition=json.dumps({}),
+        down_net_sum=-9.99, computed_at=datetime.utcnow(),
+    ))
+    session.commit()
+
+    resp = behavior_views.daily_series(session, "BTC/USDT", days=1)
+    day = resp.days[-1]
+    assert day.bj_date == today_bj
+    assert day.live is True                          # 没有 bj 行 → 现算，而不是读到那条 utc 行
+    assert day.counts.get("0.3", {}).get("up", 0) != 99
+
+
+def test_daily_series_reads_bj_row_when_present(session):
+    from services import behavior_views
+
+    today_bj = bj_date_of(datetime.utcnow())
+    session.add(BehaviorDailySummary(
+        symbol="BTC/USDT", bucket_date=today_bj, date_basis="bj", day_type="weekday",
+        counts=json.dumps({"0.3": {"up": 7, "down": 2}}), composition=json.dumps({}),
+        down_net_sum=-1.23, computed_at=datetime.utcnow(),
+    ))
+    session.commit()
+
+    day = behavior_views.daily_series(session, "BTC/USDT", days=1).days[-1]
+    assert day.live is False
+    assert day.counts["0.3"]["up"] == 7
