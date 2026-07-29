@@ -36,6 +36,19 @@ def timestamp_pair(value: datetime | None) -> dict[str, str | None]:
     }
 
 
+def bj_date_of(value: datetime | None) -> str | None:
+    """naive UTC 时刻 → 它属于哪个北京日 'YYYY-MM-DD'。"""
+    bj = to_bj_naive(value)
+    return bj.strftime("%Y-%m-%d") if bj else None
+
+
+def bj_day_bounds(bj_date: str) -> tuple[datetime, datetime]:
+    """北京日 'YYYY-MM-DD' → [start, end) 的 naive UTC 边界。
+    北京日 D 的 00:00 = UTC (D-1) 16:00；中国无夏令时，固定 +8 偏移成立。"""
+    start = datetime.strptime(bj_date, "%Y-%m-%d") - BJ_OFFSET
+    return start, start + timedelta(days=1)
+
+
 def parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
