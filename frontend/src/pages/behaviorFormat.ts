@@ -51,7 +51,7 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
     const comp = three.news_driven + three.pure_resonance + three.sentiment_tech;
     const noRef = d.composition["no_ref"] ?? 0;
     return {
-      date: d.utc_date.slice(5),
+      date: d.bj_date.slice(5),
       weekend: d.day_type === "weekend",
       live: d.live,
       up,

@@ -53,7 +53,7 @@ export function BehaviorPage() {
         <>
           {/* ① 日趋势（保留） */}
           <section className="panel">
-            <div className="panel-head"><h2>① 日趋势 · 近 14 个 UTC 日（0.3 档只计数）</h2></div>
+            <div className="panel-head"><h2>① 日趋势 · 近 14 个北京日（0.3 档只计数）</h2></div>
             <div className="behavior-daily">
               <div className="mini-title">0.3档 涨跌发散柱 + 净差线（涨−跌）</div>
               <ResponsiveContainer width="100%" height={180}>

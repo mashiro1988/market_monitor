@@ -3,8 +3,9 @@
 
 - BehaviorSegment：异动段（归因与计数的唯一单位），S 证据/新闻命中/分类落库——段是原始数据，
   分类规则改版可全历史重跑（classification 可重写，class_version 记口径）。
-- BehaviorDailySummary：日汇总 **point-in-time 追加表**——同一 utc_date 每次重算都新增一行，
-  读取取 computed_at 最新一条；历史读数永久可回溯（回测校准的前提）。
+- BehaviorDailySummary：日汇总 **point-in-time 追加表**——同一 (bucket_date, date_basis) 每次重算
+  都新增一行，读取取 computed_at 最新一条；历史读数永久可回溯（回测校准的前提）。
+  date_basis 区分日界口径：'utc' = 2026-07-29 之前的 UTC 日桶（只读存档），'bj' = 北京日桶（现行）。
 """
 from datetime import datetime
 
@@ -51,7 +52,9 @@ class BehaviorDailySummary(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String(30), nullable=False)
-    utc_date = Column(String(10), nullable=False)        # "YYYY-MM-DD"（UTC 日界 = 北京 8 点）
+    bucket_date = Column(String(10), nullable=False)     # "YYYY-MM-DD"，含义由 date_basis 决定
+    # server_default 管旧行（DDL 层），default 管 ORM 新建行（Python 层）——两者故意不同
+    date_basis = Column(String(3), nullable=False, server_default="utc", default="bj")
     day_type = Column(String(10), nullable=False)        # weekday / weekend（分桶互比）
     counts = Column(Text, nullable=False)                # JSON {tier_pct: {up, down}}（0.3 档=计数层全量）
     composition = Column(Text, nullable=False)           # JSON {macro_news/pure_resonance/industry_news/sentiment/no_ref_news/no_ref_pending}
@@ -59,5 +62,5 @@ class BehaviorDailySummary(Base):
     computed_at = Column(DateTime, nullable=False)       # PIT 戳：追加不覆盖，读取取最新
 
     __table_args__ = (
-        Index("ix_behavior_daily_pit", "symbol", "utc_date", "computed_at", unique=True),
+        Index("ix_behavior_daily_pit", "symbol", "bucket_date", "date_basis", "computed_at", unique=True),
     )

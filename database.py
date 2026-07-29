@@ -125,6 +125,37 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE sector_returns ADD COLUMN {column_name} FLOAT"))
 
+        # behavior_daily_summaries：北京日口径切换（2026-07-29 spec）——列改名 + 口径标记 + 索引重建。
+        if "behavior_daily_summaries" in table_names:
+            migrate_behavior_daily_basis(conn)
+
+
+def migrate_behavior_daily_basis(conn) -> bool:
+    """behavior_daily_summaries 北京日口径切换（2026-07-29）：
+    utc_date 改名 bucket_date + 新增 date_basis（存量标 'utc'）+ 唯一索引重建为四列。
+    幂等：已迁移则全部 no-op。返回本次是否发生结构变更。"""
+    insp = inspect(conn)
+    if "behavior_daily_summaries" not in insp.get_table_names():
+        return False
+    cols = {col["name"] for col in insp.get_columns("behavior_daily_summaries")}
+    changed = False
+    if "utc_date" in cols and "bucket_date" not in cols:
+        conn.execute(text("ALTER TABLE behavior_daily_summaries RENAME COLUMN utc_date TO bucket_date"))
+        changed = True
+    if "date_basis" not in cols:
+        conn.execute(text("ALTER TABLE behavior_daily_summaries "
+                          "ADD COLUMN date_basis VARCHAR(3) NOT NULL DEFAULT 'utc'"))
+        changed = True
+    want = ["symbol", "bucket_date", "date_basis", "computed_at"]
+    pit = next((idx for idx in inspect(conn).get_indexes("behavior_daily_summaries")
+                if idx["name"] == "ix_behavior_daily_pit"), None)
+    if pit is None or list(pit["column_names"]) != want or not pit.get("unique"):
+        conn.execute(text("DROP INDEX IF EXISTS ix_behavior_daily_pit"))
+        conn.execute(text("CREATE UNIQUE INDEX ix_behavior_daily_pit ON behavior_daily_summaries "
+                          "(symbol, bucket_date, date_basis, computed_at)"))
+        changed = True
+    return changed
+
 
 # v2.0 → v2.1 枚举映射（2026-06-11 与用户定稿：角色不分主次、反应类型收敛为驱动源单轴）
 _ROLE_UPGRADE = {

@@ -61,7 +61,7 @@ def test_segment_unique_span(session):
 
 def test_daily_summary_pit_append(session):
     mk = lambda at: BehaviorDailySummary(
-        symbol="BTC/USDT", utc_date="2026-07-08", day_type="weekday",
+        symbol="BTC/USDT", bucket_date="2026-07-08", date_basis="bj", day_type="weekday",
         counts=json.dumps({"0.3": {"up": 8, "down": 11}}),
         composition=json.dumps({"sentiment": 3}),
         down_net_sum=-3.87, computed_at=at,
@@ -72,7 +72,7 @@ def test_daily_summary_pit_append(session):
     session.add(mk(datetime(2026, 7, 9, 6, 5)))
     session.commit()
     rows = (session.query(BehaviorDailySummary)
-            .filter_by(symbol="BTC/USDT", utc_date="2026-07-08")
+            .filter_by(symbol="BTC/USDT", bucket_date="2026-07-08", date_basis="bj")
             .order_by(BehaviorDailySummary.computed_at.desc()).all())
     assert len(rows) == 2
     assert rows[0].computed_at == datetime(2026, 7, 9, 6, 5)   # 读取取最新

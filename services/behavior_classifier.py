@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from models.news import NewsItem
 from models.price import PriceSnapshot
 from services.behavior_segments import Segment, detect_segments
 from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, rolling_peak
+from services.time_utils import bj_date_of, bj_day_bounds
 
 CLASS_VERSION = "v2"   # v2 = ESS 地板 + coverage 0.5 定稿口径（2026-07-12）；换版可全历史重跑
 DETECT_LOOKBACK_HOURS = 48       # 上下文水库：保证 WRITE_HORIZON 内结束的段起点上下文必然完整
@@ -205,15 +206,15 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
 
 # ---------- 日汇总（point-in-time 追加） ----------
 
-def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, dict, float]:
-    """按段的 start_dt 归日聚合 → (counts, composition, down_net_sum)。
+def aggregate_day(session: Session, symbol: str, bj_date: str) -> tuple[dict, dict, float]:
+    """按段的 start_dt 归**北京日**聚合 → (counts, composition, down_net_sum)。
     PIT 写入与当日盘中 live 读数（behavior_views）共用同一口径。"""
-    day = datetime.strptime(utc_date, "%Y-%m-%d")
+    day_start, day_end = bj_day_bounds(bj_date)
     rows = (
         session.query(BehaviorSegment)
         .filter(BehaviorSegment.symbol == symbol,
-                BehaviorSegment.start_dt >= day,
-                BehaviorSegment.start_dt < day + timedelta(days=1))
+                BehaviorSegment.start_dt >= day_start,
+                BehaviorSegment.start_dt < day_end)
         .all()
     )
     counts: dict[str, dict[str, int]] = {}
@@ -234,16 +235,16 @@ def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, d
     return counts, composition, round(down_sum, 4)
 
 
-def day_direction_extras(session: Session, symbol: str, utc_date: str) -> dict:
+def day_direction_extras(session: Session, symbol: str, bj_date: str) -> dict:
     """方向拆分读数（2026-07-10 行为面板重画）：涨段净幅合计 + 情绪·技术面段的
     涨/跌个数与净幅。**compute-on-read**、不进 PIT——净幅只依赖段原始数据（settle 后不变），
     情绪归属按"人工优先"的当前结论（人工改判要立刻反映到趋势图，冻结旧结论反而误导）。"""
-    day = datetime.strptime(utc_date, "%Y-%m-%d")
+    day_start, day_end = bj_day_bounds(bj_date)
     rows = (
         session.query(BehaviorSegment)
         .filter(BehaviorSegment.symbol == symbol,
-                BehaviorSegment.start_dt >= day,
-                BehaviorSegment.start_dt < day + timedelta(days=1))
+                BehaviorSegment.start_dt >= day_start,
+                BehaviorSegment.start_dt < day_end)
         .all()
     )
     up_sum = 0.0
@@ -280,17 +281,18 @@ def day_direction_extras(session: Session, symbol: str, utc_date: str) -> dict:
     }
 
 
-def day_type_of(utc_date: str) -> str:
-    return "weekend" if datetime.strptime(utc_date, "%Y-%m-%d").weekday() >= 5 else "weekday"
+def day_type_of(bj_date: str) -> str:
+    """北京日 'YYYY-MM-DD' → weekday / weekend（分桶互比用）。"""
+    return "weekend" if datetime.strptime(bj_date, "%Y-%m-%d").weekday() >= 5 else "weekday"
 
 
-def write_daily_summary(session: Session, symbol: str, utc_date: str,
+def write_daily_summary(session: Session, symbol: str, bj_date: str,
                         now: datetime | None = None) -> BehaviorDailySummary:
-    """append 一条 PIT 记录（追加不覆盖，读取取 computed_at 最新）。"""
+    """append 一条 PIT 记录（追加不覆盖，读取取 computed_at 最新）。口径固定 'bj'（北京日）。"""
     now = now or datetime.utcnow()
-    counts, composition, down_sum = aggregate_day(session, symbol, utc_date)
+    counts, composition, down_sum = aggregate_day(session, symbol, bj_date)
     summary = BehaviorDailySummary(
-        symbol=symbol, utc_date=utc_date, day_type=day_type_of(utc_date),
+        symbol=symbol, bucket_date=bj_date, date_basis="bj", day_type=day_type_of(bj_date),
         counts=json.dumps(counts), composition=json.dumps(composition),
         down_net_sum=down_sum, computed_at=now,
     )
@@ -310,13 +312,20 @@ def run_behavior_cycle() -> dict:
         session.close()
 
 
-def run_daily_summary() -> dict:
-    """UTC 00:05 汇总昨日（PIT 追加）。"""
+def summary_target_bj_date(now: datetime) -> str:
+    """日报 job 的目标北京日 = 传入时刻往回一整天所属的北京日。
+    正点（UTC 16:05 = 北京 00:05）取到刚结束那天；提前触发则退回上一天，绝不汇总未完成的日子。"""
+    return bj_date_of(now - timedelta(days=1))
+
+
+def run_daily_summary(now: datetime | None = None) -> dict:
+    """北京 00:05（= UTC 16:05）汇总刚结束的那个北京日（PIT 追加）。"""
     from database import SessionLocal
+    now = now or datetime.utcnow()
     session = SessionLocal()
     try:
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-        row = write_daily_summary(session, "BTC/USDT", yesterday)
-        return {"utc_date": row.utc_date, "computed_at": row.computed_at.isoformat()}
+        target = summary_target_bj_date(now)
+        row = write_daily_summary(session, "BTC/USDT", target)
+        return {"bj_date": row.bucket_date, "computed_at": row.computed_at.isoformat()}
     finally:
         session.close()

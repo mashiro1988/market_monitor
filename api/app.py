@@ -128,7 +128,7 @@ def _start_background_scheduler() -> BackgroundScheduler:
             logger.exception("[FastAPI Scheduler] behavior_cycle failed: {}", exc)
 
     def behavior_daily_summary() -> None:
-        """UTC 00:05 汇总昨日行为日报（point-in-time 追加，不覆盖历史读数）。"""
+        """北京 00:05（= UTC 16:05）汇总刚结束的北京日行为日报（point-in-time 追加，不覆盖历史读数）。"""
         try:
             from services.behavior_classifier import run_daily_summary
 
@@ -220,7 +220,7 @@ def _start_background_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
-    # 价格行为引擎：与价格采集同节奏（5min），错峰 +2min 让本轮快照先落库；日报 UTC 00:05 汇总昨日。
+    # 价格行为引擎：与价格采集同节奏（5min），错峰 +2min 让本轮快照先落库；日报北京 00:05 汇总刚结束的北京日。
     scheduler.add_job(
         behavior_cycle,
         IntervalTrigger(minutes=price_interval,
@@ -232,7 +232,7 @@ def _start_background_scheduler() -> BackgroundScheduler:
     )
     scheduler.add_job(
         behavior_daily_summary,
-        CronTrigger(hour=0, minute=5),
+        CronTrigger(hour=16, minute=5),          # UTC 16:05 = 北京 00:05
         id="behavior_daily_summary",
         replace_existing=True,
         max_instances=1,

@@ -16,7 +16,7 @@ describe("buildDailyRows", () => {
     const rows = buildDailyRows({
       symbol: "BTC/USDT",
       days: [{
-        utc_date: "2026-07-08", day_type: "weekday", live: false,
+        bj_date: "2026-07-08", day_type: "weekday", live: false,
         counts: { "0.3": { up: 5, down: 8 }, "0.5": { up: 2, down: 3 }, "0.8": { up: 1, down: 1 } },
         composition: { macro_news: 3, pure_resonance: 1, industry_news: 1, sentiment: 2, no_ref_news: 0, no_ref_pending: 0 },
         down_net_sum: -3.87, up_net_sum: 2.41,
@@ -44,7 +44,7 @@ describe("buildDailyRows", () => {
     const rows = buildDailyRows({
       symbol: "BTC/USDT",
       days: [{
-        utc_date: "2026-07-09", day_type: "weekday", live: true,
+        bj_date: "2026-07-09", day_type: "weekday", live: true,
         counts: {}, composition: {},
         down_net_sum: -0.5, up_net_sum: 1.0,
         up_net_sum_strong: 1.0001, down_net_sum_strong: -0.5001,
