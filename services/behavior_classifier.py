@@ -22,6 +22,7 @@ from models.news import NewsItem
 from models.price import PriceSnapshot
 from services.behavior_segments import Segment, detect_segments
 from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, rolling_peak
+from services.time_utils import bj_date_of, bj_day_bounds
 
 CLASS_VERSION = "v2"   # v2 = ESS 地板 + coverage 0.5 定稿口径（2026-07-12）；换版可全历史重跑
 DETECT_LOOKBACK_HOURS = 48       # 上下文水库：保证 WRITE_HORIZON 内结束的段起点上下文必然完整
@@ -205,15 +206,15 @@ def classify(session: Session, symbol: str = "BTC/USDT", now: datetime | None = 
 
 # ---------- 日汇总（point-in-time 追加） ----------
 
-def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, dict, float]:
-    """按段的 start_dt 归日聚合 → (counts, composition, down_net_sum)。
+def aggregate_day(session: Session, symbol: str, bj_date: str) -> tuple[dict, dict, float]:
+    """按段的 start_dt 归**北京日**聚合 → (counts, composition, down_net_sum)。
     PIT 写入与当日盘中 live 读数（behavior_views）共用同一口径。"""
-    day = datetime.strptime(utc_date, "%Y-%m-%d")
+    day_start, day_end = bj_day_bounds(bj_date)
     rows = (
         session.query(BehaviorSegment)
         .filter(BehaviorSegment.symbol == symbol,
-                BehaviorSegment.start_dt >= day,
-                BehaviorSegment.start_dt < day + timedelta(days=1))
+                BehaviorSegment.start_dt >= day_start,
+                BehaviorSegment.start_dt < day_end)
         .all()
     )
     counts: dict[str, dict[str, int]] = {}
@@ -234,16 +235,16 @@ def aggregate_day(session: Session, symbol: str, utc_date: str) -> tuple[dict, d
     return counts, composition, round(down_sum, 4)
 
 
-def day_direction_extras(session: Session, symbol: str, utc_date: str) -> dict:
+def day_direction_extras(session: Session, symbol: str, bj_date: str) -> dict:
     """方向拆分读数（2026-07-10 行为面板重画）：涨段净幅合计 + 情绪·技术面段的
     涨/跌个数与净幅。**compute-on-read**、不进 PIT——净幅只依赖段原始数据（settle 后不变），
     情绪归属按"人工优先"的当前结论（人工改判要立刻反映到趋势图，冻结旧结论反而误导）。"""
-    day = datetime.strptime(utc_date, "%Y-%m-%d")
+    day_start, day_end = bj_day_bounds(bj_date)
     rows = (
         session.query(BehaviorSegment)
         .filter(BehaviorSegment.symbol == symbol,
-                BehaviorSegment.start_dt >= day,
-                BehaviorSegment.start_dt < day + timedelta(days=1))
+                BehaviorSegment.start_dt >= day_start,
+                BehaviorSegment.start_dt < day_end)
         .all()
     )
     up_sum = 0.0
@@ -280,8 +281,9 @@ def day_direction_extras(session: Session, symbol: str, utc_date: str) -> dict:
     }
 
 
-def day_type_of(utc_date: str) -> str:
-    return "weekend" if datetime.strptime(utc_date, "%Y-%m-%d").weekday() >= 5 else "weekday"
+def day_type_of(bj_date: str) -> str:
+    """北京日 'YYYY-MM-DD' → weekday / weekend（分桶互比用）。"""
+    return "weekend" if datetime.strptime(bj_date, "%Y-%m-%d").weekday() >= 5 else "weekday"
 
 
 def write_daily_summary(session: Session, symbol: str, utc_date: str,
