@@ -28,7 +28,7 @@ from schemas.behavior import (
 )
 from schemas.common import TimeFields
 from services.behavior_classifier import _points, aggregate_day, day_direction_extras, day_type_of, merge_composition, to_window_class
-from services.resonance_score import chg_map, rolling_s
+from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, rolling_s
 from services.time_utils import bj_date_of, timestamp_pair
 
 _REF_LABELS = {t[0]: t[1] for t in config.ANNOTATION_REFERENCE_ASSETS}
@@ -119,6 +119,7 @@ def linkage(session: Session, symbol: str, hours: int = 48,
     points = int(config.BEHAVIOR_ROLLING_POINTS)
     if not tiers:
         return BehaviorLinkageResponse(symbol=symbol, hours=hours, rolling_points=points,
+                                       read_tail_minutes=BIG_WINDOW_MINUTES,
                                        series=[], breadth=[])
     now = datetime.utcnow()
     pad = timedelta(minutes=5 * (points - 1) + 15)
@@ -127,6 +128,7 @@ def linkage(session: Session, symbol: str, hours: int = 48,
     btc_points = _points(session, symbol, req_start - pad, req_end)
     if not btc_points:
         return BehaviorLinkageResponse(symbol=symbol, hours=hours, rolling_points=points,
+                                       read_tail_minutes=BIG_WINDOW_MINUTES,
                                        series=[], breadth=[])
     btc_chg = chg_map(btc_points)
     t_btc = float(tiers[0])
@@ -139,6 +141,7 @@ def linkage(session: Session, symbol: str, hours: int = 48,
         start = req_start
     if start >= end:
         return BehaviorLinkageResponse(symbol=symbol, hours=hours, rolling_points=points,
+                                       read_tail_minutes=BIG_WINDOW_MINUTES,
                                        series=[], breadth=[])
     series: list[LinkageSeries] = []
     aligned: list[list[float | None]] = []
@@ -163,6 +166,7 @@ def linkage(session: Session, symbol: str, hours: int = 48,
         count = sum(1 for v in vals if abs(v) >= config.BEHAVIOR_S_MID) if vals else None
         breadth.append(BreadthPoint(t=_tf(t), count=count))
     return BehaviorLinkageResponse(symbol=symbol, hours=hours, rolling_points=points,
+                                   read_tail_minutes=BIG_WINDOW_MINUTES,
                                    series=series, breadth=breadth)
 
 

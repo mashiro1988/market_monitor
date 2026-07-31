@@ -92,6 +92,8 @@ class BehaviorLinkageResponse(BaseModel):
     symbol: str
     hours: int
     rolling_points: int                   # 滚动窗口点数（config BEHAVIOR_ROLLING_POINTS）
+    read_tail_minutes: int                # 段读数窗在段止之后延伸多少分钟（rolling_peak 的 tail_min）；
+                                          # 前端据此把高亮带画成"深=事件段 + 浅=尾窗"，不写死 60
     series: list[LinkageSeries]
     breadth: list[BreadthPoint]
 

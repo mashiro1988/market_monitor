@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { EmptyState, ErrorState, LoadingState } from "./StateViews";
-import { buildLinkageFrames } from "../pages/behaviorFormat";
+import { buildLinkageFrames, readWindowBands, type ReadWindowBands } from "../pages/behaviorFormat";
 
 const INK = "#8ea0b6";
 const TEXT = "#dbe7f3";
@@ -31,17 +31,32 @@ const TOOLTIP_STYLE = { background: "#0f172a", border: "1px solid #263142", colo
 
 const PAD_CHOICES = [1, 6, 24] as const;   // 窗口 ±N 小时（2026-07-11 用户拍板三档）
 
+// 读数窗色带（2026-07-31）：深=事件段，浅=尾窗。面板 S 是整条带内的 |S| 峰值，
+// 峰值常落在浅带里——只涂深带会让人对不上数（见 behaviorFormat.readWindowBands 注释）。
+function bandAreas(bands: ReadWindowBands | null, segFill: string, segStroke: string, tailFill: string) {
+  if (!bands) return null;
+  const areas = [
+    <ReferenceArea key="seg" x1={bands.seg.x1} x2={bands.seg.x2}
+      strokeOpacity={0} fill={segFill} stroke={segStroke} />,
+  ];
+  if (bands.tail) {
+    areas.push(
+      <ReferenceArea key="tail" x1={bands.tail.x1} x2={bands.tail.x2}
+        strokeOpacity={0} fill={tailFill} stroke="none" />,
+    );
+  }
+  return areas;
+}
+
 export function LinkagePanel({
   symbol,
   hours = 48,
   windowUtc,
-  highlight,
   refreshMs = 5 * 60_000,
 }: {
   symbol: string;
   hours?: number;
-  windowUtc?: { startUtc: string; endUtc: string } | null;   // 标注窗口原始区间；配合 ±N 档位取数
-  highlight?: { x1: string; x2: string } | null;   // 选中窗口区间（bj MM-DD HH:mm）
+  windowUtc?: { startUtc: string; endUtc: string } | null;   // 标注窗口原始区间；配合 ±N 档位取数 + 画读数窗色带
   refreshMs?: number;
 }) {
   const [padH, setPadH] = useState<number>(6);   // 默认 ±6h（2026-07-20 拍板，原 ±24h）
@@ -65,6 +80,11 @@ export function LinkagePanel({
     () => (linkage.data ? buildLinkageFrames(linkage.data) : { frames: [], symbols: [] }),
     [linkage.data],
   );
+  const bands = useMemo(
+    () => (linkage.data ? readWindowBands(linkage.data, windowUtc) : null),
+    [linkage.data, windowUtc],
+  );
+  const tailMin = linkage.data?.read_tail_minutes ?? 0;
   if (linkage.isLoading) return <LoadingState />;
   if (linkage.error) return <ErrorState error={linkage.error} />;
   if (!link.frames.length) return <EmptyState title="暂无联动数据" />;
@@ -72,7 +92,14 @@ export function LinkagePanel({
   return (
     <div className="linkage-panel">
       <div className="mini-title linkage-title-row">
-        <span>相关性强度（|S|≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立）</span>
+        <span>
+          相关性强度（|S|≥0.5 共振 · 0.3–0.5 弱 · &lt;0.3 独立）
+          {bands ? (
+            <em className="band-legend">
+              绿带=读数窗（深:事件段 · 浅:尾窗+{tailMin}min，面板 S 取整条带内 |S| 峰值）
+            </em>
+          ) : null}
+        </span>
         {windowUtc ? (
           <span className="pad-switch">
             {PAD_CHOICES.map((h) => (
@@ -87,9 +114,7 @@ export function LinkagePanel({
           <XAxis dataKey="t" hide />
           <YAxis width={34} domain={[0, 1]} tick={{ fontSize: 12 }} />
           <Tooltip contentStyle={TOOLTIP_STYLE} />
-          {highlight ? (
-            <ReferenceArea x1={highlight.x1} x2={highlight.x2} strokeOpacity={0} fill="rgba(94,234,212,0.22)" stroke="rgba(94,234,212,0.55)" />
-          ) : null}
+          {bandAreas(bands, "rgba(94,234,212,0.22)", "rgba(94,234,212,0.55)", "rgba(94,234,212,0.08)")}
           <ReferenceLine y={0.5} strokeDasharray="4 3" stroke={INK} />
           <ReferenceLine y={0.3} strokeDasharray="2 3" stroke={INK} />
           <Line dataKey="maxAbs" name="max|S|" stroke={TEXT} strokeWidth={2} dot={false} connectNulls={false} />
@@ -101,9 +126,7 @@ export function LinkagePanel({
             <XAxis dataKey="t" hide />
             <YAxis width={34} domain={[-1, 1]} ticks={[0]} tick={{ fontSize: 11 }} />
             <Tooltip contentStyle={TOOLTIP_STYLE} />
-            {highlight ? (
-              <ReferenceArea x1={highlight.x1} x2={highlight.x2} strokeOpacity={0} fill="rgba(94,234,212,0.20)" stroke="rgba(94,234,212,0.45)" />
-            ) : null}
+            {bandAreas(bands, "rgba(94,234,212,0.20)", "rgba(94,234,212,0.45)", "rgba(94,234,212,0.07)")}
             <ReferenceLine y={0} stroke="#263142" />
             <Line dataKey={refSym} name={label} stroke={REF_COLORS[refSym] ?? INK} strokeWidth={1.6} dot={false} connectNulls={false} />
           </LineChart>
@@ -115,9 +138,7 @@ export function LinkagePanel({
           <XAxis dataKey="t" tick={{ fontSize: 12 }} minTickGap={60} />
           <YAxis width={34} domain={[0, 6]} ticks={[0, 3, 6]} tick={{ fontSize: 12 }} />
           <Tooltip contentStyle={TOOLTIP_STYLE} />
-          {highlight ? (
-            <ReferenceArea x1={highlight.x1} x2={highlight.x2} strokeOpacity={0} fill="rgba(94,234,212,0.20)" stroke="rgba(94,234,212,0.45)" />
-          ) : null}
+          {bandAreas(bands, "rgba(94,234,212,0.20)", "rgba(94,234,212,0.45)", "rgba(94,234,212,0.07)")}
           <Line dataKey="breadth" name="同步品种数" type="stepAfter" stroke={INK} strokeWidth={1.5} dot={false} connectNulls={false} />
         </LineChart>
       </ResponsiveContainer>

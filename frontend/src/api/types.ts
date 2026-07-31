@@ -224,6 +224,7 @@ export type BehaviorLinkageResponse = {
   symbol: string;
   hours: number;
   rolling_points: number;
+  read_tail_minutes: number;
   series: LinkageSeries[];
   breadth: BreadthPoint[];
 };

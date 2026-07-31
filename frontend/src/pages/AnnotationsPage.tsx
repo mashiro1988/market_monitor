@@ -56,6 +56,9 @@ function fmtRef(ref: ReferenceChange): { text: string; cls: string } {
 // 品种窗口相关性面板（2026-07-10 设计；2026-07-19 简化：改名 + 三列分块 + ESS 挂 BTC 块）：
 // 每格 = 参照的绝对起终点 + 窗口涨跌 + 该参照的 rolling |S| 峰值读数（ESS<5 标证据薄）。
 // 这是 DeepSeek 判 driver 用的同一套证据，人工审核所见即所判。
+// 2026-07-31：读数窗 = 段起→段止+1h（rolling_peak 的 tail），不是段本身——峰值常落在段止之后，
+// 浮窗把这件事说清楚，时序图那边同步画成"深带+浅带"。"1h" 对应后端 BIG_WINDOW_MINUTES；
+// 色带宽度走接口 read_tail_minutes，这里是纯文案，改了尾窗记得一起改。
 function sBadge(entry: { s: number; ess: number } | undefined): { text: string; cls: string; title: string } {
   if (!entry) return { text: "S —", cls: "s-badge none", title: "无对照（休市/数据缺）" };
   const a = Math.abs(entry.s);
@@ -64,7 +67,8 @@ function sBadge(entry: { s: number; ess: number } | undefined): { text: string; 
   return {
     text: `S ${sTxt}`,
     cls,
-    title: "段窗内 rolling |S| 峰值读数 · ≥0.5 共振 / 0.3–0.5 弱 / <0.3 独立",
+    title: "读数窗 = 段起 → 段止+1h 的 rolling |S| 峰值（峰值常落在时序图的浅色尾窗里，不一定在段内）"
+      + " · ≥0.5 共振 / 0.3–0.5 弱 / <0.3 独立",
   };
 }
 
@@ -791,10 +795,6 @@ export function AnnotationsPage() {
                 windowUtc={activeWindow.window_start.timestamp_utc && activeWindow.window_end.timestamp_utc ? {
                   startUtc: activeWindow.window_start.timestamp_utc,
                   endUtc: activeWindow.window_end.timestamp_utc,
-                } : null}
-                highlight={activeWindow.window_start.timestamp_bj && activeWindow.window_end.timestamp_bj ? {
-                  x1: activeWindow.window_start.timestamp_bj.slice(5, 16),
-                  x2: activeWindow.window_end.timestamp_bj.slice(5, 16),
                 } : null}
               />
             </div>

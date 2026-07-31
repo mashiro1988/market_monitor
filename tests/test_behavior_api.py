@@ -13,6 +13,7 @@ from api.deps import get_db
 from database import Base
 from models.price import PriceSnapshot
 from services import behavior_classifier as bc
+from services.resonance_score import BIG_WINDOW_MINUTES
 
 
 @pytest.fixture()
@@ -82,6 +83,8 @@ def test_daily_live_and_linkage_shape(client_session):
     assert seeded[0]["sent_up"] == 0 and seeded[0]["sent_down"] == 0   # 机器类 pure_resonance
     linkage = client.get("/api/behavior/linkage?hours=6").json()
     assert linkage["rolling_points"] >= 10
+    # 读数窗尾长（2026-07-31）：前端据此把高亮带画成"深=事件段 + 浅=尾窗"，与 rolling_peak 同源
+    assert linkage["read_tail_minutes"] == BIG_WINDOW_MINUTES
     syms = [s["symbol"] for s in linkage["series"]]
     assert "NQ=F" in syms
     nq = next(s for s in linkage["series"] if s["symbol"] == "NQ=F")

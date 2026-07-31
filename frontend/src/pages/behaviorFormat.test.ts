@@ -5,6 +5,7 @@ import {
   classMeta,
   fmtS,
   medianOf,
+  readWindowBands,
   stripBlocks,
   tierName,
 } from "./behaviorFormat";
@@ -90,6 +91,61 @@ describe("buildLinkageFrames", () => {
     expect(symbols.map((s) => s.symbol)).toEqual(["NQ=F", "DX-Y.NYB"]);
     expect(frames[0]).toMatchObject({ t: "07-08 21:30", breadth: 2, "NQ=F": 0.77, maxAbs: 0.77 });
     expect(frames[1].maxAbs).toBeCloseTo(0.9);   // 反向也按 |S| 取强
+  });
+});
+
+describe("readWindowBands", () => {
+  // 5min 网格：后端 timestamp_utc 是 naive UTC（无 Z），timestamp_bj 是 UTC+8 空格分隔
+  const grid = (fromUtcMs: number, count: number) =>
+    Array.from({ length: count }, (_, i) => {
+      const ms = fromUtcMs + i * 5 * 60_000;
+      return {
+        t: {
+          timestamp_utc: new Date(ms).toISOString().slice(0, 19),
+          timestamp_bj: new Date(ms + 8 * 3600_000).toISOString().slice(0, 19).replace("T", " "),
+        },
+        count: 0,
+      };
+    });
+  const resp = (breadth: unknown[], tailMinutes = 60) =>
+    ({ symbol: "BTC/USDT", hours: 48, rolling_points: 30, read_tail_minutes: tailMinutes, series: [], breadth }) as any;
+  // 段 = 2026-07-29 18:30–18:55 UTC（北京 07-30 02:30–02:55），线上实例
+  const WIN = { startUtc: "2026-07-29T18:30:00", endUtc: "2026-07-29T18:55:00" };
+  const T = (hhmm: string) => Date.parse(`2026-07-29T${hhmm}:00Z`);
+
+  it("splits into segment band and read-tail band", () => {
+    const bands = readWindowBands(resp(grid(T("16:30"), 73)), WIN);   // 16:30 ~ 22:30
+    expect(bands).toEqual({
+      seg: { x1: "07-30 02:30", x2: "07-30 02:55" },
+      tail: { x1: "07-30 02:55", x2: "07-30 03:55" },                 // 段止 +60min
+    });
+  });
+
+  it("clamps the tail band to the last available point", () => {
+    const bands = readWindowBands(resp(grid(T("16:30"), 35)), WIN);   // 数据只到 19:20
+    expect(bands?.tail).toEqual({ x1: "07-30 02:55", x2: "07-30 03:20" });
+  });
+
+  it("drops the tail band when data ends at the segment end", () => {
+    const bands = readWindowBands(resp(grid(T("16:30"), 30)), WIN);   // 数据止于 18:55
+    expect(bands?.seg.x2).toBe("07-30 02:55");
+    expect(bands?.tail).toBeNull();
+  });
+
+  it("clamps the segment band to the first point when the window starts off-chart", () => {
+    const bands = readWindowBands(resp(grid(T("18:40"), 24)), WIN);   // 图从段中间起
+    expect(bands?.seg).toEqual({ x1: "07-30 02:40", x2: "07-30 02:55" });
+  });
+
+  it("returns null without a window, without data, or when the window is off-chart", () => {
+    expect(readWindowBands(resp(grid(T("16:30"), 73)), null)).toBeNull();
+    expect(readWindowBands(resp([]), WIN)).toBeNull();
+    expect(readWindowBands(resp(grid(T("06:00"), 12)), WIN)).toBeNull();   // 图早于段
+  });
+
+  it("honours the tail length reported by the API", () => {
+    const bands = readWindowBands(resp(grid(T("16:30"), 73), 30), WIN);
+    expect(bands?.tail?.x2).toBe("07-30 03:25");                      // 段止 +30min
   });
 });
 

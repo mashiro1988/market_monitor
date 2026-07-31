@@ -1455,6 +1455,8 @@ code {
 
 /* 联动曲线 ±N 档位切换（2026-07-11） */
 .linkage-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+/* 读数窗色带图例（2026-07-31）：说明深带=事件段、浅带=尾窗 */
+.band-legend { font-style: normal; font-weight: 400; color: var(--muted); margin-left: 8px; }
 .pad-switch { display: inline-flex; gap: 4px; }
 .pad-btn {
   font: inherit; font-size: 13px; padding: 1px 8px; border-radius: 4px; cursor: pointer;

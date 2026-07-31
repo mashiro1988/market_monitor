@@ -195,6 +195,45 @@ export function buildLinkageFrames(resp: BehaviorLinkageResponse): {
   return { frames, symbols };
 }
 
+// 读数窗色带（2026-07-31）：面板那个 S 不是"段内的相关性"，而是「段起 → 段止+尾窗」整条
+// rolling 曲线的 |S| 峰值（services/resonance_score.py rolling_peak，tail=BIG_WINDOW_MINUTES）。
+// 只把段本身涂绿，会让读数落在色带之外——实例：07-30 02:30 那段带内最高 0.705，面板却写 0.90，
+// 那个 0.90 在 03:55（段止+1h）。所以色带按读数窗画两段：深=事件段，浅=尾窗。
+// 尾窗长度由接口 read_tail_minutes 带下来，不在前端写死。
+export type ReadBand = { x1: string; x2: string };
+export type ReadWindowBands = { seg: ReadBand; tail: ReadBand | null };
+
+export function readWindowBands(
+  resp: BehaviorLinkageResponse,
+  windowUtc: { startUtc: string; endUtc: string } | null | undefined,
+): ReadWindowBands | null {
+  if (!windowUtc) return null;
+  const startMs = parseUtc(windowUtc.startUtc);
+  const endMs = parseUtc(windowUtc.endUtc);
+  if (startMs === null || endMs === null) return null;
+  // X 轴是分类轴（recharts 按值精确匹配），色带端点必须是曲线上真实存在的那一格标签
+  const grid: { ms: number; label: string }[] = [];
+  for (const b of resp.breadth) {
+    const ms = parseUtc(b.t.timestamp_utc);
+    if (ms !== null && b.t.timestamp_bj) grid.push({ ms, label: b.t.timestamp_bj.slice(5, 16) });
+  }
+  if (!grid.length) return null;
+  const firstAtOrAfter = (ms: number) => grid.find((g) => g.ms >= ms) ?? null;
+  const lastAtOrBefore = (ms: number) => {
+    for (let i = grid.length - 1; i >= 0; i -= 1) if (grid[i].ms <= ms) return grid[i];
+    return null;
+  };
+  const segStart = firstAtOrAfter(startMs);          // 段起早于图起点 → 贴到第一格
+  const segEnd = lastAtOrBefore(endMs);              // 段止晚于图终点 → 贴到最后一格
+  if (!segStart || !segEnd || segStart.ms > segEnd.ms) return null;   // 段整个在图外
+  const tailEnd = lastAtOrBefore(endMs + resp.read_tail_minutes * 60_000);
+  return {
+    seg: { x1: segStart.label, x2: segEnd.label },
+    // 数据还没长到段止之后（最新段/盘中）→ 没有尾窗可画
+    tail: tailEnd && tailEnd.ms > segEnd.ms ? { x1: segEnd.label, x2: tailEnd.label } : null,
+  };
+}
+
 export function medianOf(values: number[]): number | null {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
