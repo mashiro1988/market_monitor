@@ -43,9 +43,27 @@ from schemas.predictions import (
     TrackedMarketSchema,
     TrackedMarketUpdate,
 )
+from schemas.research import (
+    BackscanRequest,
+    BackscanResponse,
+    LinkCreateRequest,
+    LinkPatchRequest,
+    LinkResponse,
+    NewsLinksResponse,
+    BufferResponse,
+    ResearchEventCreateRequest,
+    ResearchEventItem,
+    ResearchEventPatchRequest,
+    ResearchEventsResponse,
+    ResearchStats,
+    RevivalResponse,
+    SuggestKeywordsRequest,
+    SuggestKeywordsResponse,
+    TimelineResponse,
+)
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, behavior_views, market_service, news_service, news_tagging, prediction_service, sector_service, task_service
+from services import alerts_service, annotation_service, behavior_views, event_linking, event_pool, market_service, news_service, news_tagging, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -463,3 +481,142 @@ def sectors_leaderboard(db: Session = Depends(get_db)) -> SectorLeaderboardRespo
 def sectors_tokens(category: str, db: Session = Depends(get_db)) -> SectorTokensResponse:
     """某板块下所有 symbol 的当前涨跌（从本地 pivot 缓存现算）。"""
     return sector_service.get_sector_tokens(db, category)
+
+
+# ============================================================
+# 研究事件池(docs/specs/news-research-phase1-event-pool.md §9.3)
+# ============================================================
+
+def _event_item(db: Session, event_id: int) -> ResearchEventItem:
+    row = next((r for r in event_pool.list_events(db) if r["id"] == event_id), None)
+    if row is None:
+        raise ApiError("NOT_FOUND", f"事件 #{event_id} 不存在", status_code=404)
+    ts = row.pop("last_evidence_at")
+    row["last_evidence_at"] = ts.isoformat(timespec="seconds") if ts else None
+    return ResearchEventItem(**row)
+
+
+@router.get("/research/events", response_model=ResearchEventsResponse)
+def research_events_list(status: str | None = Query(default=None),
+                         q: str | None = Query(default=None),
+                         db: Session = Depends(get_db)) -> ResearchEventsResponse:
+    rows = event_pool.list_events(db, status=status, q=q)
+    for r in rows:
+        ts = r.pop("last_evidence_at")
+        r["last_evidence_at"] = ts.isoformat(timespec="seconds") if ts else None
+    return ResearchEventsResponse(items=[ResearchEventItem(**r) for r in rows])
+
+
+@router.post("/research/events", response_model=ResearchEventItem)
+def research_event_create(request: ResearchEventCreateRequest,
+                          db: Session = Depends(get_db)) -> ResearchEventItem:
+    try:
+        e = event_pool.create_event(db, request.name, request.news_ids,
+                                    gate_keywords=request.gate_keywords,
+                                    created_from=request.created_from)
+    except ValueError as exc:
+        raise ApiError("INVALID_EVENT", str(exc), status_code=400) from exc
+    return _event_item(db, e.id)
+
+
+@router.patch("/research/events/{event_id}", response_model=ResearchEventItem)
+def research_event_patch(event_id: int, request: ResearchEventPatchRequest,
+                         db: Session = Depends(get_db)) -> ResearchEventItem:
+    try:
+        if request.name is not None:
+            event_pool.rename_event(db, event_id, request.name)
+        if request.gate_keywords is not None:
+            event_pool.set_keywords(db, event_id, request.gate_keywords,
+                                    backscan=request.keywords_backscan)
+        if request.merge_into_id is not None:
+            event_pool.merge_event(db, source_id=event_id, target_id=request.merge_into_id)
+        elif request.status == "closed":
+            event_pool.close_event(db, event_id, reason=request.closed_reason)
+        elif request.status == "active":
+            event_pool.reopen_event(db, event_id)
+    except ValueError as exc:
+        raise ApiError("INVALID_EVENT_OP", str(exc), status_code=400) from exc
+    return _event_item(db, event_id)
+
+
+@router.post("/research/events/suggest-keywords", response_model=SuggestKeywordsResponse)
+def research_suggest_keywords(request: SuggestKeywordsRequest,
+                              db: Session = Depends(get_db)) -> SuggestKeywordsResponse:
+    try:
+        kws = event_linking.suggest_keywords(db, request.name, request.news_ids)
+    except (ValueError, RuntimeError) as exc:
+        raise ApiError("SUGGEST_FAILED", str(exc), status_code=400) from exc
+    return SuggestKeywordsResponse(keywords=kws)
+
+
+@router.post("/research/events/{event_id}/backscan", response_model=BackscanResponse)
+def research_event_backscan(event_id: int, request: BackscanRequest,
+                            db: Session = Depends(get_db)) -> BackscanResponse:
+    # event_id 仅作语义定位(回扫是全池行为,spec §6.3);校验事件存在即可
+    try:
+        event_pool._get_event(db, event_id)
+    except ValueError as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    cleared = event_linking.clear_link_cursor(db, hours=request.days * 24)
+    return BackscanResponse(cleared=cleared)
+
+
+@router.get("/research/events/{event_id}/timeline", response_model=TimelineResponse)
+def research_event_timeline(event_id: int, db: Session = Depends(get_db)) -> TimelineResponse:
+    try:
+        data = event_pool.event_timeline(db, event_id)
+    except ValueError as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    return TimelineResponse(**data)
+
+
+@router.post("/research/links", response_model=LinkResponse)
+def research_link_create(request: LinkCreateRequest, db: Session = Depends(get_db)) -> LinkResponse:
+    try:
+        link = event_pool.attach_news(db, request.event_id, request.news_id)
+    except ValueError as exc:
+        raise ApiError("INVALID_LINK", str(exc), status_code=400) from exc
+    return LinkResponse(id=link.id, event_id=link.event_id, news_id=link.news_id,
+                        link_source=link.link_source, detached=link.detached)
+
+
+@router.patch("/research/links/{link_id}", response_model=LinkResponse)
+def research_link_patch(link_id: int, request: LinkPatchRequest,
+                        db: Session = Depends(get_db)) -> LinkResponse:
+    try:
+        if request.event_id is not None:
+            link = event_pool.reassign_link(db, link_id, request.event_id)
+        elif request.detached:
+            link = event_pool.detach_link(db, link_id, request.detach_reason)
+        else:
+            raise ValueError("PATCH 必须传 event_id(改归属)或 detached=true(摘下)")
+    except ValueError as exc:
+        raise ApiError("INVALID_LINK_OP", str(exc), status_code=400) from exc
+    return LinkResponse(id=link.id, event_id=link.event_id, news_id=link.news_id,
+                        link_source=link.link_source, detached=link.detached)
+
+
+@router.get("/research/news/{news_id}/links", response_model=NewsLinksResponse)
+def research_news_links(news_id: int, db: Session = Depends(get_db)) -> NewsLinksResponse:
+    return NewsLinksResponse(items=event_pool.news_links(db, news_id))
+
+
+@router.get("/research/buffer", response_model=BufferResponse)
+def research_buffer(days: int = Query(default=3, ge=1, le=30),
+                    min_score: int | None = Query(default=None),
+                    q: str | None = Query(default=None),
+                    drivers_only: bool = Query(default=False),
+                    db: Session = Depends(get_db)) -> BufferResponse:
+    return BufferResponse(items=event_pool.buffer_news(
+        db, days=days, min_score=min_score, q=q, drivers_only=drivers_only))
+
+
+@router.get("/research/revival", response_model=RevivalResponse)
+def research_revival(days: int = Query(default=7, ge=1, le=30),
+                     db: Session = Depends(get_db)) -> RevivalResponse:
+    return RevivalResponse(items=event_pool.revival_matches(db, days=days))
+
+
+@router.get("/research/stats", response_model=ResearchStats)
+def research_stats(db: Session = Depends(get_db)) -> ResearchStats:
+    return ResearchStats(**event_pool.daily_stats(db))

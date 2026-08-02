@@ -198,6 +198,14 @@ export type AutoAnnotateResponse = {
   candidate_count: number;
 };
 
+export type BackscanRequest = {
+  days: number;
+};
+
+export type BackscanResponse = {
+  cleared: number;
+};
+
 export type BehaviorDailyResponse = {
   symbol: string;
   days: BehaviorDailySchema[];
@@ -272,6 +280,10 @@ export type BreadthPoint = {
   count: number | null;
 };
 
+export type BufferResponse = {
+  items: NewsItemSchema[];
+};
+
 export type ContextNewsResponse = {
   items: NewsItemSchema[];
 };
@@ -279,6 +291,39 @@ export type ContextNewsResponse = {
 export type DeleteAnnotationResponse = {
   id: number;
   deleted: boolean;
+};
+
+export type DriverBadge = {
+  symbol: string;
+  change_pct: number | null;
+};
+
+export type LinkBrief = {
+  id: number;
+  link_source: string;
+  auto_event_id: number | null;
+  confidence: number | null;
+  prompt_version: string | null;
+  detached: boolean;
+};
+
+export type LinkCreateRequest = {
+  event_id: number;
+  news_id: number;
+};
+
+export type LinkPatchRequest = {
+  event_id: number | null;
+  detached: boolean | null;
+  detach_reason: string | null;
+};
+
+export type LinkResponse = {
+  id: number;
+  event_id: number;
+  news_id: number;
+  link_source: string;
+  detached: boolean;
 };
 
 export type LinkagePoint = {
@@ -357,6 +402,13 @@ export type MarketTableRow = {
   source: string;
 };
 
+export type NewsEventLinkBrief = {
+  link_id: number;
+  event_id: number;
+  event_name: string;
+  event_status: string;
+};
+
 export type NewsItemSchema = {
   timestamp_utc: string | null;
   timestamp_bj: string | null;
@@ -378,6 +430,10 @@ export type NewsItemSchema = {
   news_direction: string | null;
 };
 
+export type NewsLinksResponse = {
+  items: NewsEventLinkBrief[];
+};
+
 export type NewsResponse = {
   items: NewsItemSchema[];
   total: number;
@@ -397,6 +453,14 @@ export type NewsTagUpdateRequest = {
   topic: string | null;
   magnitude_tier: string | null;
   news_direction: string | null;
+};
+
+export type ObsResult = {
+  status: string;
+  net_pct: number | null;
+  actual_minutes: number | null;
+  start: number | null;
+  end: number | null;
 };
 
 export type PredictionFamily = {
@@ -482,6 +546,60 @@ export type ReferenceChange = {
   is_self: boolean;
 };
 
+export type ResearchEventCreateRequest = {
+  name: string;
+  news_ids: number[];
+  gate_keywords: string | null;
+  created_from: string;
+};
+
+export type ResearchEventItem = {
+  id: number;
+  name: string;
+  status: string;
+  gate_keywords: string | null;
+  created_from: string;
+  merged_into_id: number | null;
+  closed_reason: string | null;
+  evidence_count: number;
+  today_new: number;
+  badge_count: number;
+  days_since_last: number | null;
+  last_evidence_at: string | null;
+};
+
+export type ResearchEventPatchRequest = {
+  name: string | null;
+  gate_keywords: string | null;
+  keywords_backscan: boolean;
+  status: string | null;
+  closed_reason: string | null;
+  merge_into_id: number | null;
+};
+
+export type ResearchEventsResponse = {
+  items: ResearchEventItem[];
+};
+
+export type ResearchStats = {
+  gated_processed_today: number;
+  auto_linked_today: number;
+  link_rate: number | null;
+  corrected_today: number;
+  correction_rate: number | null;
+  pending_relink: number;
+};
+
+export type RevivalItem = {
+  news: NewsItemSchema;
+  event_id: number;
+  event_name: string;
+};
+
+export type RevivalResponse = {
+  items: RevivalItem[];
+};
+
 export type SScoreSchema = {
   s: number;
   ess: number;
@@ -524,6 +642,15 @@ export type SectorTokensResponse = {
   tokens: SectorTokenRow[];
 };
 
+export type SuggestKeywordsRequest = {
+  name: string;
+  news_ids: number[];
+};
+
+export type SuggestKeywordsResponse = {
+  keywords: string[];
+};
+
 export type TaskStatus = {
   task_id: string;
   status: string;
@@ -538,6 +665,31 @@ export type TaskStatus = {
 export type TimeFields = {
   timestamp_utc: string | null;
   timestamp_bj: string | null;
+};
+
+export type TimelineEventHead = {
+  id: number;
+  name: string;
+  status: string;
+  gate_keywords: string | null;
+  created_from: string;
+  closed_reason: string | null;
+  merged_into_id: number | null;
+};
+
+export type TimelineItem = {
+  news: NewsItemSchema;
+  obs: ObsResult;
+  obs_symbol: string;
+  driver_badge: DriverBadge | null;
+  score_miss: boolean;
+  link: LinkBrief;
+};
+
+export type TimelineResponse = {
+  event: TimelineEventHead;
+  items: TimelineItem[];
+  pending_relink: number;
 };
 
 export type TrackedMarketCreate = {
