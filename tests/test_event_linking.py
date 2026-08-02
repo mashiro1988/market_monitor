@@ -210,3 +210,20 @@ def test_scan_runtime_link_hook(monkeypatch):
     monkeypatch.setattr(config, "EVENT_LINK_ENABLED", False)
     scan_runtime._link_new_news()
     assert calls == [200]                 # 开关关:没再调
+
+
+# ---- AI 建议关键词(spec §5.2)----
+
+def test_suggest_keywords_parses_and_caps(session, monkeypatch):
+    n = _news(session, "苹果供应链传出调价")
+    monkeypatch.setattr(event_linking, "_call_keyword_suggester", lambda c: json.dumps(
+        {"keywords": ["苹果", "Apple", "iPhone", "调价", "供应链", "库克", "第七个"]}))
+    out = event_linking.suggest_keywords(session, "苹果调价", [n.id])
+    assert out == ["苹果", "Apple", "iPhone", "调价", "供应链", "库克"]   # 截 6 个
+
+
+def test_suggest_keywords_rejects_bad_json(session, monkeypatch):
+    n = _news(session, "x")
+    monkeypatch.setattr(event_linking, "_call_keyword_suggester", lambda c: "不是JSON")
+    with pytest.raises(ValueError):
+        event_linking.suggest_keywords(session, "e", [n.id])

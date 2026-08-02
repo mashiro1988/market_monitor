@@ -235,6 +235,61 @@ def link_unprocessed(session: Session, limit: int = 200,
     return stats
 
 
+KEYWORD_SUGGEST_PROMPT = (
+    "你是研究助理。给一个宏观研究事件起 3-6 个'免闸关键词',用于从新闻标题+摘要匹配该事件的后续报道。\n"
+    "取词规则(spec §5.2):\n"
+    "1. 实体词优先,中英别名都要(如:苹果、Apple、iPhone——中文源与英文源都要能命中);\n"
+    "2. 每个词单独命中时应大概率与本事件相关('植田'行,'加息'不行——太泛);\n"
+    "3. 禁单字与泛词('油''美股''关税'会让闸门虚设);\n"
+    "4. 3-6 个。\n"
+    '只返回 JSON:{"keywords": ["词1", "词2"]}'
+)
+
+
+def _call_keyword_suggester(user_content: str) -> str:
+    if not config.DEEPSEEK_API_KEY:
+        raise RuntimeError("DEEPSEEK_API_KEY 未配置")
+    payload = {
+        "model": config.DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": KEYWORD_SUGGEST_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 500,
+        "temperature": 0,
+    }
+    result = call_deepseek_chat(
+        payload, api_key=config.DEEPSEEK_API_KEY,
+        timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_READ_TIMEOUT),
+        http_error_prefix="DeepSeek 关键词建议返回", error_preview_chars=200,
+        normalize_error_newlines=False,
+    )
+    if not result.content:
+        raise RuntimeError("DeepSeek 关键词建议返回空 content")
+    return result.content
+
+
+def suggest_keywords(session: Session, name: str, news_ids: list[int]) -> list[str]:
+    """AI 建议关键词(spec §5.2):即用即弃不留痕;落库的永远是人确认后的版本。"""
+    rows = session.query(NewsItem).filter(NewsItem.id.in_(news_ids)).all()
+    items = [{"title": (n.title or "")[:160], "content": (n.content or "")[:200]} for n in rows]
+    user = f"事件名:{name}\n种子新闻:\n{json.dumps(items, ensure_ascii=False)}"
+    raw = _call_keyword_suggester(user).strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw).strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        raise ValueError(f"关键词建议返回非 JSON: {raw[:100]}")
+    kws = data.get("keywords") if isinstance(data, dict) else None
+    if not isinstance(kws, list):
+        raise ValueError("关键词建议缺少 keywords 列表")
+    out = [str(k).strip() for k in kws if str(k).strip()]
+    return out[:6]
+
+
 def clear_link_cursor(session: Session, hours: float, now: datetime | None = None) -> int:
     """回扫=清游标(spec §6.3):范围内**当前够格**(过闸或命中关键词、不在黑名单)
     且**无未摘下挂接**的新闻,游标清空 → 下轮 tick 对着更新后的池子自然重收。
