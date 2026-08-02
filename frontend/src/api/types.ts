@@ -199,7 +199,7 @@ export type AutoAnnotateResponse = {
 };
 
 export type BackscanRequest = {
-  days: number;
+  days?: number;
 };
 
 export type BackscanResponse = {
@@ -313,9 +313,9 @@ export type LinkCreateRequest = {
 };
 
 export type LinkPatchRequest = {
-  event_id: number | null;
-  detached: boolean | null;
-  detach_reason: string | null;
+  event_id?: number | null;
+  detached?: boolean | null;
+  detach_reason?: string | null;
 };
 
 export type LinkResponse = {
@@ -548,9 +548,9 @@ export type ReferenceChange = {
 
 export type ResearchEventCreateRequest = {
   name: string;
-  news_ids: number[];
-  gate_keywords: string | null;
-  created_from: string;
+  news_ids?: number[];
+  gate_keywords?: string | null;
+  created_from?: string;
 };
 
 export type ResearchEventItem = {
@@ -569,12 +569,12 @@ export type ResearchEventItem = {
 };
 
 export type ResearchEventPatchRequest = {
-  name: string | null;
-  gate_keywords: string | null;
-  keywords_backscan: boolean;
-  status: string | null;
-  closed_reason: string | null;
-  merge_into_id: number | null;
+  name?: string | null;
+  gate_keywords?: string | null;
+  keywords_backscan?: boolean;
+  status?: string | null;
+  closed_reason?: string | null;
+  merge_into_id?: number | null;
 };
 
 export type ResearchEventsResponse = {
@@ -644,7 +644,7 @@ export type SectorTokensResponse = {
 
 export type SuggestKeywordsRequest = {
   name: string;
-  news_ids: number[];
+  news_ids?: number[];
 };
 
 export type SuggestKeywordsResponse = {

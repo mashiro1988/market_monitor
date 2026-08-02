@@ -38,6 +38,12 @@ REQUEST_COMPONENTS = {
     "AutoAnnotateRequest",
     "TrackedMarketCreate",
     "TrackedMarketUpdate",
+    # 研究事件池(news-research-phase1):PATCH/建议/回扫都是"传了才动"的部分体
+    "ResearchEventCreateRequest",
+    "ResearchEventPatchRequest",
+    "SuggestKeywordsRequest",
+    "LinkPatchRequest",
+    "BackscanRequest",
 }
 
 

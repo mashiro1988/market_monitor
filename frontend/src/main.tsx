@@ -9,6 +9,7 @@ import { BehaviorPage } from "./pages/BehaviorPage";
 import { MarketPage } from "./pages/MarketPage";
 import { NewsPage } from "./pages/NewsPage";
 import { PredictionsPage } from "./pages/PredictionsPage";
+import { ResearchPage } from "./pages/ResearchPage";
 import { SectorRotationPage } from "./pages/SectorRotationPage";
 import "./styles.css";
 
@@ -33,7 +34,8 @@ const router = createBrowserRouter([
       { path: "predictions", element: <PredictionsPage /> },
       { path: "alerts", element: <AlertsPage /> },
       { path: "annotations", element: <AnnotationsPage /> },
-      { path: "behavior", element: <BehaviorPage /> }
+      { path: "behavior", element: <BehaviorPage /> },
+      { path: "research", element: <ResearchPage /> }
     ]
   }
 ]);

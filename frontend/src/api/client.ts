@@ -176,5 +176,28 @@ export const api = {
   // 板块轮动
   sectorLeaderboard: () => request<SectorLeaderboardResponse>("/sectors/leaderboard"),
   sectorTokens: (category: string) =>
-    request<SectorTokensResponse>(`/sectors/${encodeURIComponent(category)}/tokens`)
+    request<SectorTokensResponse>(`/sectors/${encodeURIComponent(category)}/tokens`),
+  // 研究事件池(news-research-phase1 spec §9.3)
+  researchEvents: (params: { status?: string; q?: string } = {}) =>
+    request<import("./types").ResearchEventsResponse>(`/research/events${buildQuery(params)}`),
+  researchEventCreate: (body: import("./types").ResearchEventCreateRequest) =>
+    request<import("./types").ResearchEventItem>("/research/events", { method: "POST", body: JSON.stringify(body) }),
+  researchEventPatch: (id: number, body: import("./types").ResearchEventPatchRequest) =>
+    request<import("./types").ResearchEventItem>(`/research/events/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  researchSuggestKeywords: (body: import("./types").SuggestKeywordsRequest) =>
+    request<import("./types").SuggestKeywordsResponse>("/research/events/suggest-keywords", { method: "POST", body: JSON.stringify(body) }),
+  researchBackscan: (id: number, days: number) =>
+    request<import("./types").BackscanResponse>(`/research/events/${id}/backscan`, { method: "POST", body: JSON.stringify({ days }) }),
+  researchTimeline: (id: number) =>
+    request<import("./types").TimelineResponse>(`/research/events/${id}/timeline`),
+  researchLinkCreate: (body: import("./types").LinkCreateRequest) =>
+    request<import("./types").LinkResponse>("/research/links", { method: "POST", body: JSON.stringify(body) }),
+  researchLinkPatch: (id: number, body: import("./types").LinkPatchRequest) =>
+    request<import("./types").LinkResponse>(`/research/links/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  researchNewsLinks: (newsId: number) =>
+    request<import("./types").NewsLinksResponse>(`/research/news/${newsId}/links`),
+  researchBuffer: (params: { days?: number; min_score?: number; q?: string; drivers_only?: boolean } = {}) =>
+    request<import("./types").BufferResponse>(`/research/buffer${buildQuery(params)}`),
+  researchRevival: () => request<import("./types").RevivalResponse>("/research/revival"),
+  researchStats: () => request<import("./types").ResearchStats>("/research/stats")
 };
