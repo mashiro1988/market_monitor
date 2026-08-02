@@ -2,7 +2,8 @@
 """研究事件池 API(news-research-phase1 spec §9.3)。
 
 与 test_api.py 不同:这些端点要写库,不能用仓库本地开发库——
-用临时 SQLite + 模块重载隔离(config.DATABASE_URL 在 import 时固化,必须重载)。
+用 FastAPI dependency_overrides 把 get_db 指到临时 SQLite(不动 sys.modules,
+避免污染同进程里其它测试模块)。
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,25 +12,38 @@ from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from api.app import create_app
+from api.deps import get_db
+from database import Base
+from models.news import NewsItem
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'api.db').as_posix()}")
-    for mod in list(sys.modules):
-        if mod in ("database", "config") or mod.startswith(
-                ("models", "api", "services", "schemas", "alerts", "scanners")):
-            sys.modules.pop(mod)
-    from database import create_tables
-    create_tables(run_migrations=True, seed_defaults=False)
-    from api.app import create_app
-    return TestClient(create_app(enable_scheduler=False))
+def client(tmp_path):
+    engine = create_engine(f"sqlite:///{(tmp_path / 'api.db').as_posix()}")
+    Base.metadata.create_all(bind=engine)
+    test_session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+    app = create_app(enable_scheduler=False)
+
+    def override_get_db():
+        s = test_session()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    c = TestClient(app)
+    c.test_sessionmaker = test_session          # 给 _mk_news 直插数据用
+    return c
 
 
-def _mk_news(title="种子新闻"):
-    from database import SessionLocal
-    from models.news import NewsItem
-    s = SessionLocal()
+def _mk_news(client, title="种子新闻"):
+    s = client.test_sessionmaker()
     n = NewsItem(timestamp=datetime(2026, 8, 1, 12, 0), source="jin10", title=title,
                  language="zh", llm_importance=8, tagged_at=datetime(2026, 8, 1, 12, 1))
     s.add(n); s.commit(); nid = n.id; s.close()
@@ -37,7 +51,7 @@ def _mk_news(title="种子新闻"):
 
 
 def test_create_list_timeline_roundtrip(client):
-    nid = _mk_news()
+    nid = _mk_news(client)
     r = client.post("/api/research/events", json={
         "name": "苹果调价", "news_ids": [nid], "gate_keywords": "苹果、Apple",
         "created_from": "manual"})
@@ -56,7 +70,7 @@ def test_create_requires_news(client):
 
 
 def test_patch_close_reopen_merge(client):
-    n1, n2 = _mk_news("a"), _mk_news("b")
+    n1, n2 = _mk_news(client, "a"), _mk_news(client, "b")
     e1 = client.post("/api/research/events", json={"name": "A", "news_ids": [n1]}).json()["id"]
     e2 = client.post("/api/research/events", json={"name": "B", "news_ids": [n2]}).json()["id"]
     assert client.patch(f"/api/research/events/{e1}",
@@ -70,8 +84,8 @@ def test_patch_close_reopen_merge(client):
 
 
 def test_links_attach_detach(client):
-    nid = _mk_news()
-    n2 = _mk_news("第二条")
+    nid = _mk_news(client)
+    n2 = _mk_news(client, "第二条")
     eid = client.post("/api/research/events", json={"name": "E", "news_ids": [nid]}).json()["id"]
     r = client.post("/api/research/links", json={"event_id": eid, "news_id": n2})
     assert r.status_code == 200
@@ -83,7 +97,7 @@ def test_links_attach_detach(client):
 
 
 def test_buffer_revival_stats_endpoints(client):
-    _mk_news()
+    _mk_news(client)
     assert client.get("/api/research/buffer?days=3").status_code == 200
     assert client.get("/api/research/revival").status_code == 200
     stats = client.get("/api/research/stats").json()

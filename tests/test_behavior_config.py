@@ -35,5 +35,7 @@ def test_behavior_cutoffs():
 
 
 def test_retention_extended_for_baseline():
-    # spec 拍板：60-90 天（S 校准/回放需要）；注意仓库目前无清理 job，此值纯声明
-    assert config.DATA_RETENTION["price_snapshots_days"] >= 90
+    # 原拍板:≥90 天(S 校准/回放需要)。2026-08-02 事件池 spec §12 升级为永久保留(None),
+    # 基线需求被超额满足;若未来重新设数值,仍必须 ≥90。
+    days = config.DATA_RETENTION["price_snapshots_days"]
+    assert days is None or days >= 90
