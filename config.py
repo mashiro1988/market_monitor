@@ -583,6 +583,26 @@ def cmc_category_to_group(name: str) -> str | None:
 
 
 # ============================================================
+# 研究事件池(docs/specs/news-research-phase1-event-pool.md)
+# ============================================================
+# 挂接总开关 = 回滚阀(spec §13.5):置 0 停挂接,已建表与数据原地保留。
+EVENT_LINK_ENABLED = os.getenv("EVENT_LINK_ENABLED", "1") == "1"
+# 挂接闸门线:llm_importance ≥ 6 **或未评分放行**(未评分=评分调用失败,不是不重要;
+# 2026-07-28 线上库 30 天校准,71 条人工 driver 召回 96%,见 spec §4.2)。
+EVENT_LINK_MIN_IMPORTANCE = int(os.getenv("EVENT_LINK_MIN_IMPORTANCE", "6"))
+# 挂接黑名单:(来源, 标题正则),命中直接盖游标不发调用。人工维护,
+# **禁止按频率自动生成**(会误杀 FinancialJuice 统一前缀这类真新闻,spec §4.4)。
+NEWS_EVENT_LINK_BLACKLIST = (
+    ("jin10", r"^金十数据整理："),
+    ("jin10", r"^金十数据全球财经早餐"),
+)
+# 观测层(spec §8.1):基线=新闻前最近快照,终点=新闻后 N 分钟内最后快照。
+EVENT_OBS_REACTION_MINUTES = int(os.getenv("EVENT_OBS_REACTION_MINUTES", "10"))
+EVENT_OBS_SYMBOLS = ("BTC/USDT",)
+# 立案/重开自动回扫范围(小时);深回扫由工作台按钮传天数。
+EVENT_BACKSCAN_DEFAULT_HOURS = int(os.getenv("EVENT_BACKSCAN_DEFAULT_HOURS", "72"))
+
+# ============================================================
 # 数据清理配置
 # ============================================================
 DATA_RETENTION = {

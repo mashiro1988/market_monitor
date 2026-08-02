@@ -32,6 +32,7 @@ class NewsItem(Base):
     # 免得"休市发的新闻量不到反应"把更早合格反应饿死（见 services/market_calendar.py）。
     traditional_open = Column(Boolean, nullable=True)
     tagged_at = Column(DateTime, nullable=True)          # 打标时间；NULL = 未打标（回灌待处理）
+    event_linked_at = Column(DateTime, nullable=True)    # 挂接游标:空=待处理;四种结果都盖章(news-research-phase1 spec §3.3)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

@@ -79,6 +79,8 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
             if run_migrations and "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:
                 conn.execute(text("DROP INDEX IF EXISTS ix_news_source_id"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_source_id ON news_items (source, source_id)"))
+            # 研究事件池游标列(补列 + 存量一次性盖章;不能走上面的补列 dict——那条路径不盖章)
+            migrate_news_event_cursor(conn)
 
         # news_price_annotations：补训练数据列（候选集 + LLM 推理 + LLM 摘要 + v2 标签）。
         if "news_price_annotations" in table_names:
@@ -170,6 +172,20 @@ _REACTION_UPGRADE = {
 }
 # news-impact-engine Phase 3a：退场角色（综述/解释/矛盾并入 noise = 从 news_roles 移除）。
 _RETIRED_ROLES = {"post_hoc_explanation", "contradictory"}
+
+
+def migrate_news_event_cursor(conn) -> bool:
+    """news_items.event_linked_at 补列 + 存量一次性盖章(研究事件池,
+    docs/specs/news-research-phase1-event-pool.md §3.3/§13.1)。
+    只在缺列那一次盖章:历史新闻默认"已处理出池",要历史靠回扫清游标召回。
+    新库 create_all 自带该列不走此分支(且新库无存量),幂等。"""
+    from sqlalchemy import inspect as _inspect
+    existing = {col["name"] for col in _inspect(conn).get_columns("news_items")}
+    if "event_linked_at" in existing:
+        return False
+    conn.execute(text("ALTER TABLE news_items ADD COLUMN event_linked_at DATETIME"))
+    conn.execute(text("UPDATE news_items SET event_linked_at = CURRENT_TIMESTAMP"))
+    return True
 
 
 def migrate_legacy_annotations(conn) -> int:
