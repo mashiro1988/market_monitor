@@ -141,3 +141,62 @@ def rank_percentile(value: float, population: list[float]) -> float | None:
     pop = [abs(x) for x in population]
     smaller = sum(1 for x in pop if x < v)
     return smaller / len(pop)
+
+
+# ---- 研究事件池·观测层(docs/specs/news-research-phase1-event-pool.md §8.1)----
+# 与 forward_reaction 的差别:基线取新闻**前**最近快照(容差内),防 5min K 线粒度
+# 把 0-5 分钟冲刺段吃掉;窗口没走完返回 pending(前端显示"计算中",不给半熟数)。
+# 上面的台账函数已冻结为遗留(spec §13.4),一行不动。
+
+OBS_BASELINE_TOLERANCE_MINUTES = 6
+
+
+def observed_reaction_from_rows(rows, news_time: datetime, minutes: int | None = None,
+                                now: datetime | None = None,
+                                tolerance_minutes: int = OBS_BASELINE_TOLERANCE_MINUTES) -> dict:
+    """rows: 时间升序的 (timestamp, price) 序列(单一品种)。纯函数,时间轴批量取数复用。
+    返回 {"status": "pending"} / {"status": "no_data"} /
+    {"status": "ok", "net_pct", "actual_minutes", "start", "end"}。"""
+    import config as _config
+    minutes = minutes or _config.EVENT_OBS_REACTION_MINUTES
+    now = now or utc_now_naive()
+    if now < news_time + timedelta(minutes=minutes):
+        return {"status": "pending"}
+    baseline = None
+    end = None
+    for ts, price in rows:
+        if not price:
+            continue
+        if ts <= news_time:
+            if news_time - ts <= timedelta(minutes=tolerance_minutes):
+                baseline = (ts, price)          # 不断覆盖 → 留下新闻前最近的一根
+        elif ts <= news_time + timedelta(minutes=minutes):
+            end = (ts, price)
+        else:
+            break
+    if baseline is None or end is None:
+        return {"status": "no_data"}
+    return {
+        "status": "ok",
+        "net_pct": (end[1] - baseline[1]) / abs(baseline[1]) * 100,
+        "actual_minutes": round((end[0] - baseline[0]).total_seconds() / 60, 1),
+        "start": baseline[1], "end": end[1],
+    }
+
+
+def observed_reaction(session: Session, symbol: str, news_time: datetime,
+                      minutes: int | None = None, now: datetime | None = None) -> dict:
+    """单条新闻的观测值(自带小范围查库);时间轴批量场景用 observed_reaction_from_rows。"""
+    import config as _config
+    minutes = minutes or _config.EVENT_OBS_REACTION_MINUTES
+    rows = (
+        session.query(PriceSnapshot.timestamp, PriceSnapshot.price)
+        .filter(
+            PriceSnapshot.symbol == symbol,
+            PriceSnapshot.timestamp >= news_time - timedelta(minutes=OBS_BASELINE_TOLERANCE_MINUTES),
+            PriceSnapshot.timestamp <= news_time + timedelta(minutes=minutes),
+        )
+        .order_by(PriceSnapshot.timestamp.asc())
+        .all()
+    )
+    return observed_reaction_from_rows(rows, news_time, minutes=minutes, now=now)

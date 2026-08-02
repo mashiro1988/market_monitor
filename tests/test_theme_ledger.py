@@ -187,3 +187,47 @@ def test_ledger_overview_skips_topics_without_reactions(session):
     _news(session, "加密监管", base)   # 没喂价格
     session.commit()
     assert theme_ledger.ledger_overview(session, "BTC/USDT", n=5) == []
+
+
+# ---------- 观测层(news-research-phase1 spec §8.1) ----------
+
+from services.theme_ledger import observed_reaction, observed_reaction_from_rows
+
+T0 = datetime(2026, 8, 1, 10, 2)   # 新闻时间(两根 5min bar 之间)
+
+
+def _rows(*pairs):
+    """[(分钟偏移, 价格)] → [(timestamp, price)],相对 10:00 整点。"""
+    base = datetime(2026, 8, 1, 10, 0)
+    return [(base + timedelta(minutes=m), p) for m, p in pairs]
+
+
+def test_obs_pending_before_window_completes():
+    r = observed_reaction_from_rows(_rows((0, 100.0)), T0, minutes=10,
+                                    now=T0 + timedelta(minutes=5))
+    assert r == {"status": "pending"}
+
+
+def test_obs_baseline_is_pre_news_snapshot():
+    # 基线=新闻前 10:00 的 100,终点=10:10 的 103 → +3%;冲刺段(10:00→10:05)没被吃掉
+    rows = _rows((0, 100.0), (5, 102.0), (10, 103.0), (15, 999.0))   # 15min 的在窗外
+    r = observed_reaction_from_rows(rows, T0, minutes=10, now=T0 + timedelta(minutes=30))
+    assert r["status"] == "ok"
+    assert abs(r["net_pct"] - 3.0) < 1e-9
+    assert r["actual_minutes"] == 10.0        # 10:00 → 10:10
+
+
+def test_obs_no_baseline_within_tolerance():
+    # 新闻前最近快照在 9:50(距新闻 12min > 容差 6min)→ no_data
+    rows = _rows((-12, 100.0), (5, 102.0), (10, 103.0))
+    r = observed_reaction_from_rows(rows, T0, minutes=10, now=T0 + timedelta(minutes=30))
+    assert r == {"status": "no_data"}
+
+
+def test_obs_session_wrapper(session):
+    base = datetime(2026, 8, 1, 10, 0)
+    for m, p in ((0, 100.0), (5, 102.0), (10, 103.0)):
+        _price(session, "BTC/USDT", base + timedelta(minutes=m), p)
+    session.commit()
+    r = observed_reaction(session, "BTC/USDT", T0, minutes=10, now=T0 + timedelta(minutes=30))
+    assert r["status"] == "ok" and abs(r["net_pct"] - 3.0) < 1e-9
