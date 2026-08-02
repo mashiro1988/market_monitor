@@ -10,6 +10,7 @@ import type { AnnotationListItem, AutoAnnotateBatchItem, AutoAnnotateResponse, N
 const AUTO_BATCH_CHUNK = 1;
 import { Button, PageHeader } from "../components/Controls";
 import { DataTable } from "../components/DataTable";
+import { EventAttach } from "../components/EventAttach";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 import { LinkagePanel, REF_COLORS } from "../components/LinkagePanel";
 import { WindowNetValueChart } from "../components/WindowNetValueChart";
@@ -687,6 +688,13 @@ export function AnnotationsPage() {
           </span>
         );
       }
+    },
+    {
+      key: "event",
+      header: "事件",
+      cell: (row: NewsItem) => (
+        <EventAttach newsId={row.id} isDriver={(newsRoles[row.id] ?? "noise") === "driver"} />
+      )
     },
     { key: "title", header: "标题", cell: (row: NewsItem) => row.title }
   ], [newsRoles, setNewsRole, tagOptions.data, updateTags]);
