@@ -61,3 +61,175 @@ def passes_gate(news: NewsItem, keywords: list[str]) -> bool:
         return True
     text = _news_text(news)
     return any(k.lower() in text for k in keywords)
+
+
+LINK_SYSTEM_PROMPT = (
+    "你是宏观新闻研究助理。下面给你一份【活跃事件池】和一批新闻,判断每条新闻是否是池中某个事件的新证据。\n"
+    "规则:\n"
+    "- 只做归类,不评判新闻重要性;新闻与所有事件都无关 → event_id 给 null(不挂)。\n"
+    "- 不确定就不挂:只有主体与事态确实属于该事件才挂,模糊相似不算。\n"
+    "- 转载/同一起源的重复报道照挂(时间轴自会显示簇拥,人工把关兜底)。\n"
+    "只返回 JSON,不要 Markdown:\n"
+    '{"items": [{"id": 新闻id, "event_id": 事件编号或null, "confidence": 0.9}, ...]}\n'
+    "confidence 三档:0.9=明确属于;0.65=大概率属于;0.3=勉强(倾向不挂)。\n"
+    "每条输入新闻在 items 里有且仅有一项,id 严格对应输入;event_id 必须是池中编号。"
+)
+
+# 版本戳:每次实质性修改 LINK_SYSTEM_PROMPT 时更新;随每条 auto 挂接落库。
+LINK_PROMPT_VERSION = "link-v1-20260802"
+
+VALID_CONFIDENCES = (0.9, 0.65, 0.3)
+
+
+def _pool_summary(session: Session, events: list[ResearchEvent]) -> str:
+    """活跃池摘要:编号+名称+首条证据标题(定义锚)+最近证据日期(spec §4.3)。"""
+    lines = []
+    for e in events:
+        rows = (session.query(NewsItem)
+                .join(ResearchEventLink, ResearchEventLink.news_id == NewsItem.id)
+                .filter(ResearchEventLink.event_id == e.id,
+                        ResearchEventLink.detached.is_(False))
+                .order_by(NewsItem.timestamp.asc()).all())
+        first_title = (rows[0].title or "")[:60] if rows else "(暂无证据)"
+        last_date = rows[-1].timestamp.strftime("%m-%d") if rows else "—"
+        lines.append(f"#{e.id} {e.name} | 首条证据: {first_title} | 最近证据: {last_date}")
+    return "\n".join(lines)
+
+
+def _build_link_payload(pool_summary: str, news_list: list[NewsItem]) -> str:
+    items = [{"id": n.id, "source": n.source, "title": (n.title or "")[:160],
+              "content": (n.content or "")[:200]} for n in news_list]
+    return (f"【活跃事件池】\n{pool_summary}\n\n"
+            f"【新闻,共 {len(items)} 条】\n{json.dumps({'news': items}, ensure_ascii=False)}")
+
+
+def _call_linker(user_content: str) -> str:
+    if not config.DEEPSEEK_API_KEY:
+        raise RuntimeError("DEEPSEEK_API_KEY 未配置,无法挂接")
+    payload = {
+        "model": config.DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": LINK_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+        "max_tokens": 2000,
+        "temperature": 0,
+    }
+    result = call_deepseek_chat(
+        payload, api_key=config.DEEPSEEK_API_KEY,
+        timeout=(config.DEEPSEEK_CONNECT_TIMEOUT, config.DEEPSEEK_READ_TIMEOUT),
+        http_error_prefix="DeepSeek 挂接返回", error_preview_chars=200,
+        normalize_error_newlines=False,
+    )
+    if not result.content:
+        raise RuntimeError("DeepSeek 挂接返回空 content")
+    return result.content
+
+
+def _parse_link_response(raw: str, valid_news_ids: set[int],
+                         valid_event_ids: set[int]) -> dict[int, dict]:
+    """防幻觉(spec §4.3):新闻 id 必须在本批、event_id 必须在池内(或 null)、
+    confidence 必须三档;非法条目整条丢弃(不盖游标,下轮重试)。"""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not m:
+            raise ValueError(f"挂接返回非 JSON: {text[:200]}")
+        data = json.loads(m.group(0))
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("挂接返回缺少 items 列表")
+    out: dict[int, dict] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            nid = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if nid not in valid_news_ids:
+            continue
+        event_id = item.get("event_id")
+        if event_id is None:
+            out[nid] = {"event_id": None, "confidence": None}
+            continue
+        try:
+            event_id = int(event_id)
+        except (TypeError, ValueError):
+            continue
+        if event_id not in valid_event_ids:
+            continue
+        if item.get("confidence") not in VALID_CONFIDENCES:
+            continue
+        out[nid] = {"event_id": event_id, "confidence": float(item["confidence"])}
+    return out
+
+
+def _create_auto_link(session: Session, event_id: int, news_id: int,
+                      confidence: float | None) -> ResearchEventLink:
+    existing = (session.query(ResearchEventLink)
+                .filter_by(event_id=event_id, news_id=news_id).first())
+    if existing:
+        return existing        # 唯一约束:已有挂接(含人工/已摘下)不重复建、不覆盖
+    link = ResearchEventLink(event_id=event_id, news_id=news_id, link_source="auto",
+                             auto_event_id=event_id, confidence=confidence,
+                             prompt_version=LINK_PROMPT_VERSION)
+    session.add(link)
+    return link
+
+
+def link_unprocessed(session: Session, limit: int = 200,
+                     batch_size: int | None = None) -> dict:
+    """tick 入口(spec §4.1):处理游标为空的新闻,四种结果都盖章。
+    返回 {"processed": 盖章数, "linked": 新增挂接数, "called": 进LLM条数}。"""
+    stats = {"processed": 0, "linked": 0, "called": 0}
+    events = _active_events(session)
+    if not events:
+        return stats                     # 池空整段跳过,零调用、游标不动
+    keywords = _keyword_pool(events)
+    todo = (session.query(NewsItem)
+            .filter(NewsItem.tagged_at.isnot(None), NewsItem.event_linked_at.is_(None))
+            .order_by(NewsItem.timestamp.desc())
+            .limit(max(1, limit)).all())
+    now = utc_now_naive()
+    to_llm: list[NewsItem] = []
+    for n in todo:
+        if _is_blacklisted(n) or not passes_gate(n, keywords):
+            n.event_linked_at = now      # 不够格/黑名单:盖章零调用
+            stats["processed"] += 1
+        else:
+            to_llm.append(n)
+    session.commit()
+    if not to_llm:
+        return stats
+    pool_summary = _pool_summary(session, events)
+    valid_event_ids = {int(e.id) for e in events}
+    batch_size = int(batch_size or config.DEEPSEEK_BATCH_SIZE)
+    for i in range(0, len(to_llm), batch_size):
+        chunk = to_llm[i:i + batch_size]
+        stats["called"] += len(chunk)
+        try:
+            raw = _call_linker(_build_link_payload(pool_summary, chunk))
+            parsed = _parse_link_response(raw, {int(n.id) for n in chunk}, valid_event_ids)
+        except Exception as exc:         # 整批失败:不盖游标,下轮重试
+            logger.error(f"[EventLink] 分片挂接失败({len(chunk)} 条): {exc}")
+            continue
+        now = utc_now_naive()
+        by_id = {int(n.id): n for n in chunk}
+        for nid, r in parsed.items():
+            n = by_id.get(nid)
+            if n is None:
+                continue
+            if r["event_id"] is not None:
+                _create_auto_link(session, r["event_id"], nid, r["confidence"])
+                stats["linked"] += 1
+            n.event_linked_at = now      # 只有合法解析条目盖章(含"不挂")
+            stats["processed"] += 1
+        session.commit()
+    return stats
