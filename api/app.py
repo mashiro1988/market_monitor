@@ -174,6 +174,22 @@ def _start_background_scheduler() -> BackgroundScheduler:
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] cmc_refresh failed: {}", exc)
 
+    def research_daily_brief() -> None:
+        """北京 08:10 事件池日报(news-research-phase1 spec §10):纯查库拼文本,零 LLM。"""
+        try:
+            from database import SessionLocal
+            from services.event_pool import daily_brief_text
+            from alerts.channels.wechat_work import WeChatWorkChannel
+
+            session = SessionLocal()
+            try:
+                title, content = daily_brief_text(session)
+            finally:
+                session.close()
+            WeChatWorkChannel().send(title, content)
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] research_daily_brief failed: {}", exc)
+
     price_interval = max(1, int(config.SCAN_INTERVALS.get("price", 5)))
     scheduler.add_job(
         scan_cycle,
@@ -234,6 +250,15 @@ def _start_background_scheduler() -> BackgroundScheduler:
         behavior_daily_summary,
         CronTrigger(hour=16, minute=5),          # UTC 16:05 = 北京 00:05
         id="behavior_daily_summary",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # 事件池日报:北京 08:10 = UTC 00:10,紧跟 08:05 行为日报(news-research-phase1 spec §10)。
+    scheduler.add_job(
+        research_daily_brief,
+        CronTrigger(hour=0, minute=10),
+        id="research_daily_brief",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
