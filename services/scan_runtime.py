@@ -227,6 +227,7 @@ def run_scan_once():
             logger.exception(f"[ScanCatchup] news rolling backfill failed, continuing scan: {exc}")
 
         _tag_new_news()
+        _link_new_news()
 
         logger.info("[Scan] 开始预测市场扫描...")
         pred_scanner = PredictionScanner()
@@ -297,6 +298,25 @@ def _tag_new_news() -> None:
         logger.exception(f"[NewsTagging] 打标失败，不影响本轮扫描: {exc}")
     finally:
         session.close()
+
+def _link_new_news() -> None:
+    """挂接游标为空的新闻到活跃事件池(news-research-phase1 spec §4.1)。
+    与打标同模式:无 key/开关关静默跳过;异常自吞不影响本轮扫描。"""
+    if not getattr(config, "DEEPSEEK_API_KEY", ""):
+        return
+    if not getattr(config, "EVENT_LINK_ENABLED", False):
+        return
+    from services.event_linking import link_unprocessed
+    session = get_session()
+    try:
+        stats = link_unprocessed(session, limit=200)
+        if stats["processed"] or stats["linked"]:
+            logger.info(f"[EventLink] 本轮盖章 {stats['processed']} 条,新挂 {stats['linked']} 条")
+    except Exception as exc:
+        logger.exception(f"[EventLink] 挂接失败,不影响本轮扫描: {exc}")
+    finally:
+        session.close()
+
 
 def run_startup_backfill_once():
     """启动后回补停机期间缺失的新闻；价格由常规扫描的游标同步窗口自愈（2026-07-14 重构）。"""

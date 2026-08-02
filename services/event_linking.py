@@ -233,3 +233,28 @@ def link_unprocessed(session: Session, limit: int = 200,
             stats["processed"] += 1
         session.commit()
     return stats
+
+
+def clear_link_cursor(session: Session, hours: float, now: datetime | None = None) -> int:
+    """回扫=清游标(spec §6.3):范围内**当前够格**(过闸或命中关键词、不在黑名单)
+    且**无未摘下挂接**的新闻,游标清空 → 下轮 tick 对着更新后的池子自然重收。
+    立案/重开/改关键词勾选时用默认 72h;深回扫按钮传更大的 hours。返回清空条数。"""
+    now = now or utc_now_naive()
+    events = _active_events(session)
+    keywords = _keyword_pool(events)
+    cutoff = now - timedelta(hours=hours)
+    linked_ids = {row[0] for row in session.query(ResearchEventLink.news_id)
+                  .filter(ResearchEventLink.detached.is_(False)).all()}
+    rows = (session.query(NewsItem)
+            .filter(NewsItem.timestamp >= cutoff,
+                    NewsItem.event_linked_at.isnot(None)).all())
+    cleared = 0
+    for n in rows:
+        if int(n.id) in linked_ids:
+            continue
+        if _is_blacklisted(n) or not passes_gate(n, keywords):
+            continue
+        n.event_linked_at = None
+        cleared += 1
+    session.commit()
+    return cleared

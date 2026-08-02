@@ -165,3 +165,48 @@ def test_untagged_news_not_picked(session, monkeypatch):
     event_linking.link_unprocessed(session)
     session.refresh(n)
     assert n.event_linked_at is None     # tagged_at 为空的不进挂接(评分未必跑过)
+
+
+# ---- 回扫=清游标(spec §6.3)+ tick 接线 ----
+from datetime import timedelta
+
+
+def test_clear_link_cursor_scope(session):
+    now = datetime(2026, 8, 1, 12, 0)
+    e = _event(session, "苹果调价", keywords="苹果")
+    stamped = datetime(2026, 8, 1, 11, 0)
+    def mk(title, score, ts, linked_to=None):
+        n = _news(session, title, score=score, ts=ts)
+        n.event_linked_at = stamped
+        if linked_to:
+            session.add(ResearchEventLink(event_id=linked_to.id, news_id=n.id,
+                                          link_source="human"))
+        session.commit()
+        return n
+    in_range_ok = mk("苹果的旧证据", 3, now - timedelta(hours=10))       # 命中关键词 → 清
+    in_range_high = mk("高分旧新闻", 8, now - timedelta(hours=10))       # 过闸 → 清
+    in_range_low = mk("低分不命中", 3, now - timedelta(hours=10))        # 不够格 → 不清
+    out_range = mk("范围外的苹果新闻", 8, now - timedelta(hours=100))    # 超 72h → 不清
+    already = mk("已挂过的苹果新闻", 8, now - timedelta(hours=10), linked_to=e)  # 有挂接 → 不清
+
+    cleared = event_linking.clear_link_cursor(session, hours=72, now=now)
+    assert cleared == 2
+    for n, expect in ((in_range_ok, None), (in_range_high, None),
+                      (in_range_low, stamped), (out_range, stamped), (already, stamped)):
+        session.refresh(n)
+        assert n.event_linked_at == expect
+
+
+def test_scan_runtime_link_hook(monkeypatch):
+    """_link_new_news:开关关/无 key 时静默跳过;异常自吞不影响扫描。"""
+    from services import scan_runtime
+    calls = []
+    monkeypatch.setattr("services.event_linking.link_unprocessed",
+                        lambda s, limit=200: calls.append(limit) or {"processed": 0, "linked": 0, "called": 0})
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "k")
+    monkeypatch.setattr(config, "EVENT_LINK_ENABLED", True)
+    scan_runtime._link_new_news()
+    assert calls == [200]
+    monkeypatch.setattr(config, "EVENT_LINK_ENABLED", False)
+    scan_runtime._link_new_news()
+    assert calls == [200]                 # 开关关:没再调
