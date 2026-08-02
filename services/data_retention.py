@@ -15,6 +15,7 @@ from models.alert_log import AlertLog
 from models.news import NewsItem, NewsPriceAnnotation
 from models.prediction import PredictionMarket
 from models.price import PriceSnapshot
+from models.research import ResearchEventLink
 
 
 def cleanup_retained_data(*, session=None, now: datetime | None = None, retention: dict | None = None) -> dict[str, int]:
@@ -104,6 +105,8 @@ def _delete_old_news(session, cutoff: datetime | None) -> int:
 
 
 def _annotation_news_ids(session) -> set[int]:
+    """标注 + 研究事件时间轴引用的新闻都受保护(含已摘下——审计痕迹也要保,
+    news-research-phase1 spec §12:防未来重新开启清理时静默斩断时间轴)。"""
     protected: set[int] = set()
     rows = session.query(
         NewsPriceAnnotation.causal_news_ids,
@@ -114,6 +117,7 @@ def _annotation_news_ids(session) -> set[int]:
         protected.update(_parse_news_ids(causal_ids))
         protected.update(_parse_news_ids(candidate_ids))
         protected.update(_parse_news_ids(news_roles))
+    protected.update(nid for (nid,) in session.query(ResearchEventLink.news_id).all())
     return protected
 
 

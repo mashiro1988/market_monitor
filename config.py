@@ -606,11 +606,13 @@ EVENT_BACKSCAN_DEFAULT_HOURS = int(os.getenv("EVENT_BACKSCAN_DEFAULT_HOURS", "72
 # 数据清理配置
 # ============================================================
 DATA_RETENTION = {
-    # 2026-07-09 用户拍板 30→90：共振分 S 的稀有度锚定/回放校准需要 60-90 天基线。
-    # 每日 03:17 data_retention job 按此清理（services/data_retention.py）；放宽=多留数据，无删数风险，
-    # 远程磁盘容量部署时看一眼。
-    "price_snapshots_days": 90,     # 5分钟快照保留天数
-    "news_items_days": 90,          # 新闻保留天数
+    # 2026-08-02 用户拍板(news-research-phase1 spec §12):价格快照与新闻**永久保留**
+    # (None=永不清理)。年增约 0.7-1GB,不值得为省磁盘毁掉事件池历史;观测层因此维持
+    # 读时现算。预测市场快照(全库最大表,~2.4万行/天)与告警日志和事件历史无关,维持原值。
+    # None 的跳过守卫见 services/data_retention.py::_cutoff。
+    # (历史:2026-07-09 曾拍 30→90 给共振分 S 校准留基线,该需求被永久保留自然覆盖。)
+    "price_snapshots_days": None,   # 永久
+    "news_items_days": None,        # 永久
     "prediction_markets_days": 30,  # 预测市场快照保留天数
     "alert_logs_days": 90,          # 告警日志保留天数
 }

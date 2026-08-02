@@ -108,3 +108,49 @@ def test_cleanup_retained_data_ignores_bad_annotation_json():
         assert session.query(NewsItem).count() == 0
     finally:
         session.close()
+
+
+# ---- 研究事件池引用保护 + 永久保留(news-research-phase1 spec §12)----
+from models.research import ResearchEvent, ResearchEventLink
+
+
+def test_event_linked_news_survives_cleanup():
+    session = _session()
+    try:
+        old_ts = NOW - timedelta(days=120)
+        kept = _news(session, "被事件引用", old_ts)
+        kept_detached = _news(session, "被摘下但留痕", old_ts)
+        gone = _news(session, "无引用", old_ts)
+        e = ResearchEvent(name="E")
+        session.add(e); session.flush()
+        session.add(ResearchEventLink(event_id=e.id, news_id=kept.id, link_source="human"))
+        session.add(ResearchEventLink(event_id=e.id, news_id=kept_detached.id,
+                                      link_source="auto", auto_event_id=e.id, detached=True))
+        session.flush()
+        deleted = cleanup_retained_data(session=session, now=NOW, retention=RETENTION)
+        titles = {t for (t,) in session.query(NewsItem.title).all()}
+        assert "被事件引用" in titles
+        assert "被摘下但留痕" in titles          # 含 detached(审计痕迹也保,spec §12)
+        assert "无引用" not in titles
+        assert deleted["news_items"] == 1
+    finally:
+        session.close()
+
+
+def test_none_retention_skips_table():
+    session = _session()
+    try:
+        _news(session, "很老但永久保留", NOW - timedelta(days=1000))
+        r = dict(RETENTION); r["news_items_days"] = None; r["price_snapshots_days"] = None
+        deleted = cleanup_retained_data(session=session, now=NOW, retention=r)
+        assert deleted["news_items"] == 0 and deleted["price_snapshots"] == 0
+    finally:
+        session.close()
+
+
+def test_config_default_retention_is_permanent_for_news_and_prices():
+    import config
+    assert config.DATA_RETENTION["news_items_days"] is None
+    assert config.DATA_RETENTION["price_snapshots_days"] is None
+    assert config.DATA_RETENTION["prediction_markets_days"] == 30    # 不动
+    assert config.DATA_RETENTION["alert_logs_days"] == 90            # 不动
