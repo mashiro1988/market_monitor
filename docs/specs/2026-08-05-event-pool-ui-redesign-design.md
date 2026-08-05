@@ -25,8 +25,8 @@
 - **排序保持一期 spec §9.1 的"最新证据时间倒序"**(最近活跃在前);卡片上直接显示最新证据时间,让排序自解释。#号仅是立案编号,不承担排序含义。
 - 卡片三行,chip 顺序固定保证跨卡片对齐:
   1. `#id 名称`(超长截断,title 悬停出全名);
-  2. 统计行:`徽章 N`(仅 N>0 显示,固定放首位)→ `今日 +N` → `昨日 +N`(这两个恒显示,0 时灰色);
-  3. 辅助行:`证据 N · 最新 MM-DD HH:MM`;`days_since_last ≥ 3` 时追加灰 chip "N 天无新证据"。
+  2. 统计行:`徽章 N`(仅 N>0 显示,固定放首位)→ `今日 +N` → `昨日 +N`(这两个恒显示,0 时灰色)。对齐指**顺序一致**(徽章有则必在首位),不做跨卡片的严格列对齐(不为 0 徽章预留空位);
+  3. 辅助行:`证据 N · 最新 MM-DD HH:MM`(用 §6.1 新增的北京时间字段 `last_evidence_bj`,**不得**直接切 `last_evidence_at`——那是 naive UTC,直接显示差 8 小时);`days_since_last ≥ 3` 时追加灰 chip "N 天无新证据"。
 - 点卡片选中(accent 边框),下方渲染详情区——保持用户认可的大原则:**上面是事件池标题区,下面是展开区**。再点取消选中。
 - 搜索框(搜事件名/关键词,含已关闭)保留在卡片区上方;已关闭事件维持折叠列表(不卡片化)。
 
@@ -64,6 +64,7 @@
 ### 6.1 GET /api/research/events
 
 - `list_events()` 新增派生字段 `yesterday_new`(昨日北京日,`link.created_at` 计数,与 today_new 同口径);`ResearchEventItem` 加同名字段(默认 0,向后兼容)。
+- 同时新增 `last_evidence_bj`(最新证据的北京时间字符串,用 services/time_utils.py 的 `format_bj`——与 `timestamp_bj` 同一产地),供卡片辅助行显示;现有 naive-UTC 的 `last_evidence_at` 保留不动。
 
 ### 6.2 GET /api/research/events/{id}/timeline
 
@@ -78,6 +79,7 @@
 
 - 执行顺序:天数窗过滤 → 快照批量查询限定在窗内新闻的时间范围(窗口小时查询也小)→ 现算观测 → 分数/波动过滤 → 分页。
 - `TimelineResponse` 新增 `total`(筛后总数)/ `page` / `page_size`(均带默认值,向后兼容);`pending_relink` 口径不变。
+- **默认分页钉在路由层**:服务函数 `event_pool.event_timeline()` 不传分页参数时保持全量输出——`scripts/replay_event_pool.py`(BOJ 沙盒回放,一期 spec §14)直接调用它出"完整时间轴",不能被默认 50 条截断。
 
 ### 6.3 不动清单
 
@@ -87,7 +89,7 @@
 
 - `AppShell.tsx`:导航 label 研究 → 事件池。
 - `ResearchPage.tsx`:按 §1-§4 重构(卡片网格、管理菜单、筛选栏+分页、行布局、摘回缓冲区、缓冲区筛选栏);纯函数(`fmtObs` 加 hot 判定、卡片 chip 函数)保持可测。
-- `client.ts`:`researchTimeline` 加筛选/分页参数。
+- `client.ts`:`researchTimeline` 加筛选/分页参数;时间轴的 react-query 缓存键必须把筛选与页码全部纳入,否则改筛选后会渲染旧缓存页。
 - 类型重新生成:`scripts/generate_openapi_types.py`。
 - 时间显示继续用后端下发的 `timestamp_bj`,不新增 `new Date()` 解析(遵守 timestamp_utc 无 Z 的既有约定)。
 
