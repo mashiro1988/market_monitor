@@ -64,7 +64,7 @@
 ### 6.1 GET /api/research/events
 
 - `list_events()` 新增派生字段 `yesterday_new`(昨日北京日,`link.created_at` 计数,与 today_new 同口径);`ResearchEventItem` 加同名字段(默认 0,向后兼容)。
-- 同时新增 `last_evidence_bj`(最新证据的北京时间字符串,用 services/time_utils.py 的 `format_bj`——与 `timestamp_bj` 同一产地),供卡片辅助行显示;现有 naive-UTC 的 `last_evidence_at` 保留不动。
+- 同时新增 `last_evidence_bj`(最新证据的北京时间字符串,用 services/time_utils.py 的 `format_bj`——与 `timestamp_bj` 同一产地),供卡片辅助行显示;`ResearchEventItem` 加 `last_evidence_bj: str | None = None`(向后兼容,对齐 `last_evidence_at` 的写法);现有 naive-UTC 的 `last_evidence_at` 保留不动。
 
 ### 6.2 GET /api/research/events/{id}/timeline
 
@@ -95,7 +95,7 @@
 
 ## 8. 测试
 
-- 后端 `tests/test_research_api.py`:timeline 的 days/min_score/min_abs_move/分页用例(含未评分排除、pending 排除、total 口径);events 的 yesterday_new 用例(依赖注入隔离,沿用现有测试模式)。
+- 后端 `tests/test_research_api.py`:timeline 的 days/min_score/min_abs_move/分页用例(含未评分排除、pending 排除、total 口径);events 的 yesterday_new 用例(依赖注入隔离,沿用现有测试模式),同一用例顺带断言 `last_evidence_bj` 非空且等于 UTC+8 的渲染。
 - 前端 `ResearchPage.test.tsx`:hot 判定阈值边界(0.29/0.30)、卡片 chip 顺序与 0 值灰显、未评分文案。
 - 全量:pytest + vitest + tsc + eslint 绿。
 
