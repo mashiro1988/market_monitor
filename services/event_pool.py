@@ -308,15 +308,31 @@ def news_links(session: Session, news_id: int) -> list[dict]:
              "event_status": e.status} for l, e in rows]
 
 
+def buffer_predicate(session: Session):
+    """返回"这条新闻算不算缓冲区"的判定函数(spec §6.4:过闸 + 非黑名单 + 无未摘下挂接)。
+
+    口径的唯一来源:缓冲区页签与新闻快讯的"仅看未挂事件"共用它,
+    防两处各写一遍而慢慢漂移(buffer-into-news-page design §1.1)。
+    活跃事件关键词与已挂 news_id 集合在这里查一次,判定本身不再碰库。
+    """
+    keywords = _keyword_pool(_active_events(session))
+    linked = {row[0] for row in session.query(ResearchEventLink.news_id)
+              .filter(ResearchEventLink.detached.is_(False)).all()}
+
+    def _is_buffer(news: NewsItem) -> bool:
+        if int(news.id) in linked:
+            return False
+        return not _is_blacklisted(news) and passes_gate(news, keywords)
+
+    return _is_buffer
+
+
 def buffer_news(session: Session, days: int = 3, min_score: int | None = None,
                 q: str | None = None, drivers_only: bool = False,
                 now: datetime | None = None, limit: int = 200) -> list[dict]:
     """缓冲区(spec §6.4):过闸 + 不在黑名单 + 无未摘下挂接。"""
     now = now or utc_now_naive()
-    events = _active_events(session)
-    keywords = _keyword_pool(events)
-    linked = {row[0] for row in session.query(ResearchEventLink.news_id)
-              .filter(ResearchEventLink.detached.is_(False)).all()}
+    is_buffer = buffer_predicate(session)
     badge_map = _driver_badge_map(session) if drivers_only else {}
     query = (session.query(NewsItem)
              .filter(NewsItem.tagged_at.isnot(None),
@@ -328,9 +344,7 @@ def buffer_news(session: Session, days: int = 3, min_score: int | None = None,
         query = query.filter(NewsItem.title.like(f"%{q}%"))
     out = []
     for n in query.all():
-        if int(n.id) in linked:
-            continue
-        if _is_blacklisted(n) or not passes_gate(n, keywords):
+        if not is_buffer(n):
             continue
         if drivers_only and int(n.id) not in badge_map:
             continue

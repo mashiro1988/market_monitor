@@ -174,18 +174,20 @@ def market_table_csv(
 @router.get("/news", response_model=NewsResponse)
 def news(
     sources: list[str] | None = Query(default=None),
-    min_llm_importance: int = 5,
+    min_llm_importance: int = 5,          # 0 = 不限(含未评分)
     hours_back: int = 24,
     jin10_importance: str = "all",
     search: str | None = None,
     page: int = 1,
     page_size: int = 50,
+    buffer_only: bool = False,            # 仅看未挂事件(= 事件池缓冲区口径)
     db: Session = Depends(get_db),
 ) -> NewsResponse:
     return news_service.get_news(
         db,
         sources=_csv_list(sources),
         min_llm_importance=min_llm_importance,
+        buffer_only=buffer_only,
         hours_back=hours_back,
         jin10_importance=jin10_importance,
         search=search,

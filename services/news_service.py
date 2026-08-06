@@ -37,6 +37,8 @@ def is_jin10_important(item: NewsItem) -> bool:
 
 
 def passes_default_importance_filter(item: NewsItem, min_llm_score: int) -> bool:
+    if min_llm_score <= 0:                       # 不限:未评分也放行(buffer-into-news design §0)
+        return True
     return (item.llm_importance or 0) >= min_llm_score or is_jin10_important(item)
 
 
@@ -71,10 +73,12 @@ def get_news(
     search: str | None = None,
     page: int = 1,
     page_size: int = 50,
+    buffer_only: bool = False,
 ) -> NewsResponse:
     page, page_size = clamp_page(page, page_size)
     hours_back = max(1, min(int(hours_back or 24), 24 * 30))
-    min_llm_importance = max(1, min(int(min_llm_importance or 1), 10))
+    # 0 = 不限(含未评分):未评分是评分调用失败,不是 0 分,设了门槛才该滤掉
+    min_llm_importance = max(0, min(int(min_llm_importance or 0), 10))
     cutoff = utc_now_naive() - timedelta(hours=hours_back)
 
     query = session.query(NewsItem).filter(NewsItem.timestamp >= cutoff)
@@ -93,6 +97,12 @@ def get_news(
     if jin10_importance != "all":
         target = jin10_importance == "important"
         filtered = [item for item in filtered if item.source != "jin10" or is_jin10_important(item) == target]
+
+    if buffer_only:
+        # 缓冲区口径(过闸 + 非黑名单 + 无未摘下挂接)与事件池共用同一谓词,不在这里重写一遍
+        from services.event_pool import buffer_predicate
+        is_buffer = buffer_predicate(session)
+        filtered = [item for item in filtered if is_buffer(item)]
 
     total = len(filtered)
     start = (page - 1) * page_size

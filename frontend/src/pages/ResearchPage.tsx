@@ -278,101 +278,8 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
   );
 }
 
-// ---- 缓冲区(过了闸门但没挂到任何事件的新闻)+ 立案表单 ----
-
-function BufferTab({ onCreated }: { onCreated: () => void }) {
-  const [days, setDays] = useState(3);
-  const [minScore, setMinScore] = useState(0);
-  const [q, setQ] = useState("");
-  const [driversOnly, setDriversOnly] = useState(false);
-  const [picked, setPicked] = useState<number[]>([]);
-  const [name, setName] = useState("");
-  const [keywords, setKeywords] = useState("");
-  const buffer = useQuery({
-    queryKey: ["research-buffer", days, minScore, q, driversOnly],
-    queryFn: () => api.researchBuffer({
-      days, drivers_only: driversOnly,
-      ...(minScore ? { min_score: minScore } : {}),
-      ...(q ? { q } : {}),
-    }),
-  });
-  const events = useQuery({ queryKey: ["research-events", "active"],
-                            queryFn: () => api.researchEvents({ status: "active" }) });
-  const create = useMutation({
-    mutationFn: () => api.researchEventCreate({
-      name, news_ids: picked, gate_keywords: keywords || null, created_from: "manual" }),
-    onSuccess: () => { setPicked([]); setName(""); setKeywords(""); onCreated(); },
-  });
-  const suggest = useMutation({
-    mutationFn: () => api.researchSuggestKeywords({ name, news_ids: picked }),
-    onSuccess: (r) => setKeywords((r.keywords ?? []).join("、")),
-  });
-  const attach = useMutation({
-    mutationFn: (eventId: number) =>
-      Promise.all(picked.map((nid) => api.researchLinkCreate({ event_id: eventId, news_id: nid }))),
-    onSuccess: () => { setPicked([]); onCreated(); },
-  });
-  const rows = buffer.data?.items ?? [];
-  return (
-    <div className="panel">
-      <div className="rp-filters rp-filters-head">
-        <h2>缓冲区</h2>
-        <FilterSelect label="时间窗" value={days}
-                      options={[{ label: "近 1 天", value: 1 }, { label: "近 3 天", value: 3 },
-                                { label: "近 7 天", value: 7 }, { label: "近 30 天", value: 30 }]}
-                      onChange={setDays} />
-        <FilterSelect label="分数" value={minScore} options={SCORE_OPTIONS} onChange={setMinScore} />
-        <label className="rp-filter">
-          <Search size={13} />
-          <input placeholder="搜标题关键词" value={q} onChange={(ev) => setQ(ev.target.value)} />
-        </label>
-        <label className="rp-check">
-          <input type="checkbox" checked={driversOnly}
-                 onChange={(ev) => setDriversOnly(ev.target.checked)} />
-          仅看已确认 driver
-        </label>
-        <span style={{ flex: 1 }} />
-        <span className="muted">{rows.length} 条</span>
-      </div>
-
-      {picked.length > 0 && (
-        <div className="rp-pickbar">
-          <span>已选 {picked.length} 条 →</span>
-          <input placeholder="事件名(一个待重定价的变量;中文短名≤20字)" value={name}
-                 onChange={(ev) => setName(ev.target.value)} style={{ width: 260 }} />
-          <input placeholder="免闸关键词(顿号分隔,可 AI 建议)" value={keywords}
-                 onChange={(ev) => setKeywords(ev.target.value)} style={{ width: 220 }} />
-          <Button kind="secondary" disabled={!name || suggest.isPending}
-                  onClick={() => suggest.mutate()}>AI 建议</Button>
-          <Button disabled={!name || create.isPending} onClick={() => create.mutate()}>立事件</Button>
-          <Dropdown label="挂到事件">
-            {(events.data?.items ?? []).map((o) => (
-              <MenuItem key={o.id} onClick={() => attach.mutate(o.id)}>#{o.id} {o.name}</MenuItem>
-            ))}
-          </Dropdown>
-        </div>
-      )}
-
-      {buffer.isLoading && <LoadingState label="加载缓冲区" />}
-      {buffer.isError && <ErrorState error={buffer.error} />}
-      {rows.map((n: NewsItem) => {
-        const score = fmtScore(n.llm_importance);
-        return (
-          <label key={n.id} className="rp-row rp-row-buffer">
-            <input type="checkbox" checked={picked.includes(n.id)}
-                   onChange={(ev) => setPicked(ev.target.checked
-                     ? [...picked, n.id] : picked.filter((x) => x !== n.id))} />
-            <span className="rp-time">{fmtBjShort(n.timestamp_bj)}</span>
-            <span className="rp-source">{n.source}</span>
-            <span className={score.cls}>{score.text}</span>
-            <span className="rp-title" title={n.title}>{n.title}</span>
-          </label>
-        );
-      })}
-      {!buffer.isLoading && rows.length === 0 && <EmptyState title="缓冲区为空" />}
-    </div>
-  );
-}
+// 缓冲区已并入新闻快讯(勾选立案在那边的「紧凑 + 仅看未挂事件」下,
+// docs/specs/2026-08-06-buffer-into-news-page-design.md);这里不再有缓冲区页签。
 
 // ---- 旧事重提(沉睡监听,spec §7)----
 
@@ -408,7 +315,7 @@ function RevivalTab({ onChanged }: { onChanged: () => void }) {
 export function ResearchPage() {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<number | null>(null);
-  const [tab, setTab] = useState<"events" | "buffer" | "revival">("events");
+  const [tab, setTab] = useState<"events" | "revival">("events");
   const [q, setQ] = useState("");
   const events = useQuery({ queryKey: ["research-events", "all", q],
                             queryFn: () => api.researchEvents(q ? { q } : {}) });
@@ -440,18 +347,22 @@ export function ResearchPage() {
         )}
         <span style={{ flex: 1 }} />
         <Button kind={tab === "events" ? "primary" : "ghost"} onClick={() => setTab("events")}>事件</Button>
-        <Button kind={tab === "buffer" ? "primary" : "ghost"} onClick={() => setTab("buffer")}>缓冲区</Button>
         <Button kind={tab === "revival" ? "primary" : "ghost"} onClick={() => setTab("revival")}>旧事重提</Button>
       </div>
 
-      {tab === "buffer" && <BufferTab onCreated={refresh} />}
       {tab === "revival" && <RevivalTab onChanged={refresh} />}
       {tab === "events" && (
         <div className="panel">
           <div className="panel-head">
             <h2><FolderSearch size={16} /> 进行中({active.length})</h2>
-            <input placeholder="搜事件名/关键词(含已关闭)" value={q}
-                   onChange={(ev) => setQ(ev.target.value)} />
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <a href="/news" className="muted" style={{ fontSize: 13 }}
+                 title="缓冲区已并入新闻快讯:在那边选「紧凑 + 仅看未挂事件」勾选立案">
+                去新闻快讯挑证据 →
+              </a>
+              <input placeholder="搜事件名/关键词(含已关闭)" value={q}
+                     onChange={(ev) => setQ(ev.target.value)} />
+            </span>
           </div>
           {events.isLoading && <LoadingState label="加载事件" />}
           {events.isError && <ErrorState error={events.error} />}

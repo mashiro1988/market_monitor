@@ -1535,8 +1535,10 @@ code {
 }
 .rp-row:nth-child(even) { background: rgba(148, 163, 184, 0.05); }
 .rp-row-timeline { grid-template-columns: 76px 78px 48px 34px 104px minmax(0, 1fr) auto auto; }
-.rp-row-buffer { grid-template-columns: 20px 76px 78px 48px minmax(0, 1fr); cursor: pointer; }
-.rp-row-buffer input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
+/* 紧凑列表行:新闻快讯「紧凑视图」与事件池共用这套网格,不各写一份 */
+.rp-row-triage { grid-template-columns: 20px 76px 78px 48px 34px minmax(0, 1fr); cursor: pointer; }
+.rp-row-news { grid-template-columns: 76px 78px 48px 34px minmax(0, 1fr); }
+.rp-row-triage input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
 .rp-row-revival { grid-template-columns: 76px auto minmax(0, 1fr) auto; }
 .rp-row-closed { grid-template-columns: minmax(0, 1fr) auto auto; cursor: pointer; }
 .rp-time { color: var(--text); }

@@ -109,6 +109,7 @@ export const api = {
     search?: string;
     page?: number;
     page_size?: number;
+    buffer_only?: boolean;          // 仅看未挂事件(= 事件池缓冲区口径)
   }) => request<NewsResponse>(`/news${buildQuery(params)}`),
   newsSources: () => request<NewsSourceMeta[]>("/news/sources"),
   predictions: (params: { hours?: number; search?: string }) =>
