@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 import config
-from models.behavior import BehaviorDailySummary, BehaviorSegment
+from models.behavior import BehaviorSegment
 from models.news import NewsItem
 from schemas.behavior import (
     BehaviorDailyResponse,
@@ -27,7 +27,7 @@ from schemas.behavior import (
     SScoreSchema,
 )
 from schemas.common import TimeFields
-from services.behavior_classifier import _points, aggregate_day, day_direction_extras, day_type_of, merge_composition, to_window_class
+from services.behavior_classifier import _points, aggregate_day, day_direction_extras, day_type_of, to_window_class
 from services.resonance_score import BIG_WINDOW_MINUTES, chg_map, rolling_s
 from services.time_utils import bj_date_of, timestamp_pair
 
@@ -78,36 +78,30 @@ def list_segments(session: Session, symbol: str, days: int = 2) -> BehaviorSegme
 
 
 def daily_series(session: Session, symbol: str, days: int = 14) -> BehaviorDailyResponse:
-    """最近 N 个北京日：优先取每日最新 PIT 行（只认 date_basis='bj'）；
-    没有（当日盘中/历史缺口/口径切换前）按同口径现算 live=True。"""
+    """最近 N 个北京日：**一律 compute-on-read**（2026-08-06 用户拍板"关掉锁账读数"）。
+
+    历史日曾优先读 behavior_daily_summaries 的 PIT 快照。但快照在次日拍完就再没人重拍，
+    之后的人工改判永远进不了构成堆叠图——2026-08-04 那根段机器判 macro_news、快照记
+    news_driven=1，次日改判 sentiment_tech 后堆叠图仍显示新闻驱动；而同页情绪小图走
+    day_direction_extras 现算，是对的。同一页两条口径打架，根因就在这里。
+
+    现算是安全的：段原始数据 settle 后不变，价格快照与新闻已永久保留
+    （config.DATA_RETENTION，2026-08-02 用户拍板），现算与"拍照当时"的唯一差别就是人工改判，
+    而那一项本就该以最新结论为准。快照表仍由日结 job 追加，只作 class_version 换版基线
+    （换版会就地重写段上的 classification，那时快照是唯一的"变更前"底稿），读层不再触碰。
+    """
     now = datetime.utcnow()
     today_bj = datetime.strptime(bj_date_of(now), "%Y-%m-%d")
     out: list[BehaviorDailySchema] = []
     for offset in range(days - 1, -1, -1):
         bj_date = (today_bj - timedelta(days=offset)).strftime("%Y-%m-%d")
-        row = (
-            session.query(BehaviorDailySummary)
-            .filter_by(symbol=symbol, bucket_date=bj_date, date_basis="bj")
-            .order_by(BehaviorDailySummary.computed_at.desc())
-            .first()
-        )
-        extras = day_direction_extras(session, symbol, bj_date)
-        if row is not None:
-            out.append(BehaviorDailySchema(
-                bj_date=bj_date, day_type=row.day_type,
-                counts=json.loads(row.counts),
-                composition=merge_composition(json.loads(row.composition)),   # 历史六类 PIT 行读取归并
-                down_net_sum=row.down_net_sum, computed_at=_tf(row.computed_at), live=False,
-                **extras,
-            ))
-        else:
-            counts, composition, down_sum = aggregate_day(session, symbol, bj_date)
-            out.append(BehaviorDailySchema(
-                bj_date=bj_date, day_type=day_type_of(bj_date),
-                counts=counts, composition=composition,
-                down_net_sum=down_sum, computed_at=_tf(now), live=True,
-                **extras,
-            ))
+        counts, composition, down_sum = aggregate_day(session, symbol, bj_date)
+        out.append(BehaviorDailySchema(
+            bj_date=bj_date, day_type=day_type_of(bj_date),
+            counts=counts, composition=composition,
+            down_net_sum=down_sum, computed_at=_tf(now), live=True,
+            **day_direction_extras(session, symbol, bj_date),
+        ))
     return BehaviorDailyResponse(symbol=symbol, days=out)
 
 

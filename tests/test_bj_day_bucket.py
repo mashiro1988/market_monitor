@@ -102,7 +102,7 @@ def test_summary_target_is_the_beijing_day_that_just_ended():
 
 
 def test_daily_series_ignores_legacy_utc_rows(session):
-    """同一 bucket_date 上 utc 行与 bj 行并存时，读层只认 bj 行。"""
+    """存档表里的 utc 行不参与读层（读层一律现算，2026-08-06 起连 bj 行也不读）。"""
     from services import behavior_views
 
     today_bj = bj_date_of(datetime.utcnow())
@@ -120,17 +120,29 @@ def test_daily_series_ignores_legacy_utc_rows(session):
     assert day.counts.get("0.3", {}).get("up", 0) != 99
 
 
-def test_daily_series_reads_bj_row_when_present(session):
+def test_daily_series_ignores_stale_pit_row_after_human_reclass(session):
+    """人工改判发生在快照之后：读层必须现算出人工结论，而不是回放过期快照。
+
+    2026-08-04 实例：段机器判 macro_news → 快照记 news_driven=1；次日人工改判
+    sentiment_tech，快照没人重拍，构成堆叠图一直显示蓝色。读层改为一律现算后不再复现。
+    """
     from services import behavior_views
 
     today_bj = bj_date_of(datetime.utcnow())
-    session.add(BehaviorDailySummary(
+    seg = _seg(datetime.utcnow(), direction=-1, net_pct=-0.55, classification="macro_news")
+    seg.human_class = "sentiment_tech"                     # 快照拍完之后才改判
+    session.add(seg)
+    session.add(BehaviorDailySummary(                      # 改判前拍的快照，已过期
         symbol="BTC/USDT", bucket_date=today_bj, date_basis="bj", day_type="weekday",
-        counts=json.dumps({"0.3": {"up": 7, "down": 2}}), composition=json.dumps({}),
+        counts=json.dumps({"0.3": {"up": 7, "down": 2}}),
+        composition=json.dumps({"news_driven": 1, "pure_resonance": 0,
+                                "sentiment_tech": 0, "no_ref": 0}),
         down_net_sum=-1.23, computed_at=datetime.utcnow(),
     ))
     session.commit()
 
     day = behavior_views.daily_series(session, "BTC/USDT", days=1).days[-1]
-    assert day.live is False
-    assert day.counts["0.3"]["up"] == 7
+    assert day.live is True
+    assert day.composition["sentiment_tech"] == 1          # 人工优先
+    assert day.composition["news_driven"] == 0             # 不是快照里的机器旧判
+    assert day.counts["0.5"]["down"] == 1                  # 现算档位计数，不是快照里的 0.3/7

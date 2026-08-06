@@ -288,7 +288,11 @@ def day_type_of(bj_date: str) -> str:
 
 def write_daily_summary(session: Session, symbol: str, bj_date: str,
                         now: datetime | None = None) -> BehaviorDailySummary:
-    """append 一条 PIT 记录（追加不覆盖，读取取 computed_at 最新）。口径固定 'bj'（北京日）。"""
+    """append 一条 PIT 记录（追加不覆盖）。口径固定 'bj'（北京日）。
+
+    ⚠ 2026-08-06 起**面板不读这张表**（behavior_views.daily_series 一律现算）。留着它只为一件事：
+    class_version 换版会就地重写段上的 classification，换版后再也无法复原旧规则下的读数，
+    这些行是唯一的"变更前"底稿。想删掉这个 job，先确认你不需要那份基线。"""
     now = now or datetime.utcnow()
     counts, composition, down_sum = aggregate_day(session, symbol, bj_date)
     summary = BehaviorDailySummary(

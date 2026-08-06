@@ -64,7 +64,7 @@ class BehaviorDailySchema(BaseModel):
     up_net_sum_strong: float | None = None    # 强段（tier_idx≥1）涨净幅Σ ≥0（净幅分层 2026-07-22）
     down_net_sum_strong: float | None = None  # 强段跌净幅Σ ≤0（负值约定同 down_net_sum；弱段=总−强 由前端求）
     computed_at: TimeFields
-    live: bool = False                    # True = 无 PIT 行、按需现算（当日盘中）
+    live: bool = True                     # 恒 True：读层一律现算（2026-08-06 起不再读 PIT 快照）
 
 
 class BehaviorDailyResponse(BaseModel):
