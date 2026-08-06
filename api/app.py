@@ -38,10 +38,31 @@ configure_logging()
 ROOT_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 
+# ---------- 定时任务时刻表（一律北京时间，2026-08-06 修）----------
+# ⚠ 每条 CronTrigger 必须显式带 timezone。显式构造的 CronTrigger 在**构造那一刻**就绑死
+# 系统本地时区，下面 BackgroundScheduler(timezone="UTC") 对它无效。2026-08-05 线上实证两例：
+# 行为日结写 hour=16 注释"UTC 16:05=北京 00:05"，实际北京 16:05 才跑；事件池日报写 hour=0
+# 意图北京 08:10，实际北京 00:10 半夜发微信。两者都"运行成功"，只有时刻错，评审看不出来。
+# 加新 job 就往这张表里加一行，再 _cron_trigger("job_id")——tests/test_scheduler_timezone.py 钉死。
+SCHEDULE_TZ = "Asia/Shanghai"
+CRON_SCHEDULES: dict[str, dict] = {
+    "data_retention": {"hour": 3, "minute": 17},                      # 凌晨低峰（维持原有行为）
+    "behavior_daily_summary": {"hour": 0, "minute": 5},               # 汇总刚结束的北京日
+    "research_daily_brief": {"hour": 8, "minute": 10},                # 紧跟早间新闻推送
+    "cmc_refresh": {"day_of_week": "mon", "hour": 2, "minute": 17},   # 周一凌晨（维持原有行为）
+}
+
+
+def _cron_trigger(job_id: str) -> CronTrigger:
+    """按时刻表建 trigger，时区一律显式绑北京（理由见 CRON_SCHEDULES 上方）。"""
+    return CronTrigger(timezone=SCHEDULE_TZ, **CRON_SCHEDULES[job_id])
+
 
 def _start_background_scheduler() -> BackgroundScheduler:
     configure_proxy_env()
     create_tables()
+    # 这个 UTC 只对"由调度器自己从 kwargs 建的 trigger"生效；显式构造的 CronTrigger 不受它管，
+    # 一律走 _cron_trigger()（见 CRON_SCHEDULES）。IntervalTrigger/date 传的是带时区的绝对时刻，无歧义。
     scheduler = BackgroundScheduler(timezone="UTC")
 
     def scan_cycle() -> None:
@@ -230,7 +251,7 @@ def _start_background_scheduler() -> BackgroundScheduler:
     )
     scheduler.add_job(
         data_retention_cycle,
-        CronTrigger(hour=3, minute=17),
+        _cron_trigger("data_retention"),
         id="data_retention",
         replace_existing=True,
         max_instances=1,
@@ -248,16 +269,16 @@ def _start_background_scheduler() -> BackgroundScheduler:
     )
     scheduler.add_job(
         behavior_daily_summary,
-        CronTrigger(hour=16, minute=5),          # UTC 16:05 = 北京 00:05
+        _cron_trigger("behavior_daily_summary"),
         id="behavior_daily_summary",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
     )
-    # 事件池日报:北京 08:10 = UTC 00:10,紧跟 08:05 行为日报(news-research-phase1 spec §10)。
+    # 事件池日报:北京 08:10,紧跟早间新闻推送(news-research-phase1 spec §10)。时刻见 CRON_SCHEDULES。
     scheduler.add_job(
         research_daily_brief,
-        CronTrigger(hour=0, minute=10),
+        _cron_trigger("research_daily_brief"),
         id="research_daily_brief",
         replace_existing=True,
         max_instances=1,
@@ -274,7 +295,7 @@ def _start_background_scheduler() -> BackgroundScheduler:
     )
     scheduler.add_job(
         cmc_refresh,
-        CronTrigger(day_of_week="mon", hour=2, minute=17),
+        _cron_trigger("cmc_refresh"),
         id="cmc_refresh",
         replace_existing=True,
         max_instances=1,
