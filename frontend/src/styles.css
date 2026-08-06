@@ -1471,3 +1471,110 @@ code {
   position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
   font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; z-index: 1;
 }
+
+/* === 事件池(研究页)专用布局 =========================================
+   根因:此前三处列表都借用行为面板的 .evidence-row(固定 4 列网格),
+   元素数对不上就折行错位(缓冲区一行 5 个、时间轴一行 9 个)。
+   这里给每种行各配专属网格列宽。设计稿:
+   docs/specs/2026-08-05-event-pool-ui-redesign-design.md §5 */
+
+.rp-topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 0 10px; font-size: 13px; flex-wrap: wrap;
+}
+
+/* 事件卡片网格(豆腐块):宽屏自然 3-4 列 */
+/* 360px 下限:2000px 宽屏落 4 列、1400px 笔电落 3 列(设计稿 §2「宽屏 3-4 列」) */
+.rp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 8px; }
+.rp-card {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line-soft);
+  color: inherit; font: inherit;
+}
+.rp-card:hover { border-color: rgba(94, 234, 212, 0.35); }
+.rp-card.selected { border-color: #5eead4; background: rgba(94, 234, 212, 0.06); }
+.rp-card-name {
+  font-weight: 600; font-size: 14px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rp-card-chips { display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap; }
+.rp-card-chips .s-badge { justify-self: auto; }
+.rp-card-foot { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rp-yday { color: var(--text); }
+
+/* 筛选栏:一行紧凑,不再是空落落的散控件 */
+.rp-filters {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 0; font-size: 12.5px; color: var(--muted);
+}
+.rp-filters-head { border-bottom: 1px solid var(--line-soft); margin-bottom: 6px; }
+.rp-filters-head h2 { font-size: 15px; margin: 0 4px 0 0; }
+.rp-filter {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--line-soft); border-radius: 6px; padding: 2px 7px;
+}
+.rp-filter select, .rp-filter input {
+  background: transparent; border: none; color: var(--text);
+  font-size: 12.5px; padding: 0; min-width: 56px;
+}
+.rp-filter select:focus, .rp-filter input:focus { outline: none; }
+.rp-check { display: inline-flex; align-items: center; gap: 5px; }
+.rp-check input { width: 13px; height: 13px; }
+.rp-pager { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.rp-pager .link-button:disabled { opacity: 0.35; cursor: default; }
+
+/* 通用行:各页签用专属网格列,统一紧凑度 */
+.rp-row {
+  display: grid; gap: 8px; align-items: center;
+  padding: 3px 6px; border-radius: 6px; font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.rp-row:nth-child(even) { background: rgba(148, 163, 184, 0.05); }
+.rp-row-timeline { grid-template-columns: 76px 78px 48px 34px 104px minmax(0, 1fr) auto auto; }
+.rp-row-buffer { grid-template-columns: 20px 76px 78px 48px minmax(0, 1fr); cursor: pointer; }
+.rp-row-buffer input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
+.rp-row-revival { grid-template-columns: 76px auto minmax(0, 1fr) auto; }
+.rp-row-closed { grid-template-columns: minmax(0, 1fr) auto auto; cursor: pointer; }
+.rp-time { color: var(--text); }
+.rp-source, .rp-score { color: var(--muted); }
+.rp-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.rp-marks { display: inline-flex; align-items: center; gap: 6px; }
+.rp-marks .s-badge { justify-self: auto; }
+
+/* 大波动一眼可见(|10min 净变动| ≥ OBS_HOT_PCT) */
+.s-badge.obs-hot {
+  background: rgba(251, 191, 36, 0.16); border: 1px solid rgba(251, 191, 36, 0.5);
+  font-weight: 700;
+}
+
+/* 下拉菜单:把低频操作从一排按钮收进来 */
+.rp-dropdown { position: relative; display: inline-flex; }
+.rp-dropdown > .button { display: inline-flex; align-items: center; gap: 3px; }
+.rp-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+  min-width: 170px; max-height: 320px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.rp-menu.right { left: auto; right: 0; }
+.rp-menu-item {
+  display: block; width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--text); font: inherit; font-size: 13px; padding: 5px 8px;
+  border-radius: 5px; cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.rp-menu-item:hover { background: rgba(148, 163, 184, 0.14); }
+.rp-menu-sep { height: 1px; background: var(--line-soft); margin: 4px 0; }
+.rp-menu-hint { font-size: 12px; color: var(--muted); padding: 4px 8px; }
+
+/* 事件详情(展开区) */
+.rp-detail { margin-top: 12px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.rp-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.rp-pickbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 6px; margin-bottom: 4px; border-radius: 6px;
+  background: rgba(94, 234, 212, 0.06); font-size: 13px;
+}
+.rp-closed { margin-top: 12px; font-size: 13px; }
+.rp-closed summary { color: var(--muted); cursor: pointer; padding: 4px 0; }

@@ -9,7 +9,7 @@ const navItems = [
   { to: "/alerts", label: "告警设置", icon: Bell },
   { to: "/annotations", label: "新闻标注", icon: PenSquare },
   { to: "/behavior", label: "行为面板", icon: Activity },
-  { to: "/research", label: "研究", icon: FolderSearch }
+  { to: "/research", label: "事件池", icon: FolderSearch }
 ];
 
 export function AppShell() {

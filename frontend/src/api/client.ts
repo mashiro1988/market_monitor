@@ -188,8 +188,8 @@ export const api = {
     request<import("./types").SuggestKeywordsResponse>("/research/events/suggest-keywords", { method: "POST", body: JSON.stringify(body) }),
   researchBackscan: (id: number, days: number) =>
     request<import("./types").BackscanResponse>(`/research/events/${id}/backscan`, { method: "POST", body: JSON.stringify({ days }) }),
-  researchTimeline: (id: number) =>
-    request<import("./types").TimelineResponse>(`/research/events/${id}/timeline`),
+  researchTimeline: (id: number, params: { days?: number; min_score?: number; min_abs_move?: number; page?: number; page_size?: number } = {}) =>
+    request<import("./types").TimelineResponse>(`/research/events/${id}/timeline${buildQuery(params)}`),
   researchLinkCreate: (body: import("./types").LinkCreateRequest) =>
     request<import("./types").LinkResponse>("/research/links", { method: "POST", body: JSON.stringify(body) }),
   researchLinkPatch: (id: number, body: import("./types").LinkPatchRequest) =>
