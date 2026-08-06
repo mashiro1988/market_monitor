@@ -11,7 +11,8 @@ from scanners.sources.rss_source import RSSSource, create_rss_sources
 
 def test_english_newswires_registered():
     keys = {s.source_key for s in create_rss_sources()}
-    assert "investinglive" in keys
+    # investinglive 2026-08-06 下线(未评分重灾+信息价值低,enabled=False 保留配置可重开)
+    assert "investinglive" not in keys
     assert "financialjuice" in keys
 
 

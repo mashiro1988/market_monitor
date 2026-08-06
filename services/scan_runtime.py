@@ -227,6 +227,7 @@ def run_scan_once():
             logger.exception(f"[ScanCatchup] news rolling backfill failed, continuing scan: {exc}")
 
         _tag_new_news()
+        _rescore_unscored_news()
         _link_new_news()
 
         logger.info("[Scan] 开始预测市场扫描...")
@@ -273,14 +274,16 @@ def _log_source_statuses(source_statuses: dict[str, list[dict]]) -> None:
 
 
 def _run_news_rolling_backfill(news_scanner, now: datetime):
-    """每轮扫描后补最近 2 个已收盘新闻 interval（价格侧已由游标同步窗口自愈，2026-07-14 重构）。"""
+    """每轮扫描后补最近 2 个已收盘新闻 interval（价格侧已由游标同步窗口自愈，2026-07-14 重构）。
+    score_records=True(2026-08-06):backfill_range 查重在打分前,只为净新增的漏网新条付费;
+    此前 False 是未评分新闻的最大稳定来源(news-rescore design §0.1)。"""
     news_interval = max(1, int(config.SCAN_INTERVALS.get("news", 5)))
     news_start, news_end = recent_closed_interval_window(news_interval, 2, now)
     logger.info(
         f"[ScanCatchup] 回补最近 2 个新闻 interval: "
         f"{news_start.isoformat()} - {news_end.isoformat()} UTC"
     )
-    news_scanner.backfill_range(news_start, news_end, score_records=False)
+    news_scanner.backfill_range(news_start, news_end, score_records=True)
 
 
 def _tag_new_news() -> None:
@@ -298,6 +301,25 @@ def _tag_new_news() -> None:
         logger.exception(f"[NewsTagging] 打标失败，不影响本轮扫描: {exc}")
     finally:
         session.close()
+
+def _rescore_unscored_news() -> None:
+    """补评分:入库时打分失败/走了不打分侧门的新闻,每轮补一小批(news-rescore 2026-08-06)。
+    放在挂接之前:补上的分数当轮就参与闸门判定。守卫与打标同款,异常自吞。"""
+    if not getattr(config, "DEEPSEEK_API_KEY", ""):
+        return
+    if not getattr(config, "NEWS_RESCORE_ENABLED", True):
+        return
+    from services.news_rescore import rescore_unscored
+    session = get_session()
+    try:
+        stats = rescore_unscored(session)
+        if stats["selected"]:
+            logger.info(f"[NewsRescore] 本轮补扫 {stats['selected']} 条,补上 {stats['scored']} 条")
+    except Exception as exc:
+        logger.exception(f"[NewsRescore] 补扫失败,不影响本轮扫描: {exc}")
+    finally:
+        session.close()
+
 
 def _link_new_news() -> None:
     """挂接游标为空的新闻到活跃事件池(news-research-phase1 spec §4.1)。

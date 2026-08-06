@@ -33,6 +33,7 @@ class NewsItem(Base):
     traditional_open = Column(Boolean, nullable=True)
     tagged_at = Column(DateTime, nullable=True)          # 打标时间；NULL = 未打标（回灌待处理）
     event_linked_at = Column(DateTime, nullable=True)    # 挂接游标:空=待处理;四种结果都盖章(news-research-phase1 spec §3.3)
+    rescore_attempts = Column(Integer, nullable=True)    # 补评分尝试次数,NULL≈0;达上限不再重试(news-rescore 2026-08-06)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

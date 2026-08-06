@@ -71,6 +71,7 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
                 "magnitude_tier": "VARCHAR(2)",
                 "traditional_open": "BOOLEAN",
                 "tagged_at": "DATETIME",
+                "rescore_attempts": "INTEGER",
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_items ADD COLUMN {column_name} {column_type}"))

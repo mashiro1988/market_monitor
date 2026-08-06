@@ -354,8 +354,10 @@ NEWS_SOURCES = {
         "name": "CNBC",
     },
     # InvestingLive（原 ForexLive）：英文宏观/外汇快讯，分钟级，普通 nginx 直连稳定。
+    # 2026-08-06 下线（用户拍板）：30 天未评分率 52%（分钟级晚到,多走滚动回补的不打分侧门）
+    # + 长文综述类信息价值低。存量行保留展示；重开只需翻回 True。
     "investinglive": {
-        "enabled": True,
+        "enabled": False,
         "type": "rss",
         "language": "en",
         "url": "https://investinglive.com/feed/news",
@@ -601,6 +603,17 @@ EVENT_OBS_REACTION_MINUTES = int(os.getenv("EVENT_OBS_REACTION_MINUTES", "10"))
 EVENT_OBS_SYMBOLS = ("BTC/USDT",)
 # 立案/重开自动回扫范围(小时);深回扫由工作台按钮传天数。
 EVENT_BACKSCAN_DEFAULT_HOURS = int(os.getenv("EVENT_BACKSCAN_DEFAULT_HOURS", "72"))
+
+# ============================================================
+# 新闻补评分扫描(docs/specs/2026-08-06-news-rescore-and-source-cut-design.md)
+# ============================================================
+# 入库时评分失败/走了不打分侧门(滚动回补、停机回补)的新闻,每轮扫描顺带补一小批。
+NEWS_RESCORE_ENABLED = os.getenv("NEWS_RESCORE_ENABLED", "1").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+NEWS_RESCORE_WINDOW_HOURS = int(os.getenv("NEWS_RESCORE_WINDOW_HOURS", "72"))
+NEWS_RESCORE_LIMIT = int(os.getenv("NEWS_RESCORE_LIMIT", "24"))          # 每轮 ≤2 批
+NEWS_RESCORE_MAX_ATTEMPTS = int(os.getenv("NEWS_RESCORE_MAX_ATTEMPTS", "3"))  # 毒条目重试上限
 
 # ============================================================
 # 数据清理配置

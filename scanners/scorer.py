@@ -117,7 +117,8 @@ class NewsScorer:
         user_content = f"共{len(items)}条，必须返回恰好{len(items)}个 items。\n{json.dumps(items, ensure_ascii=False)}"
 
         try:
-            raw = self._call_api(user_content, system_prompt=SCORING_SYSTEM_PROMPT, max_tokens=1800)
+            # 2600:12 条批 + 中文理由曾在 1800 下截断出畸形 JSON(2026-08-06 补评分排查)
+            raw = self._call_api(user_content, system_prompt=SCORING_SYSTEM_PROMPT, max_tokens=2600)
             payload = self._loads_json(raw, "score")
             if isinstance(payload, list):
                 raw_items = [{"idx": i, "importance": s, "reason": None} for i, s in enumerate(payload)]
@@ -147,6 +148,11 @@ class NewsScorer:
                     "reason": (item.get("reason") or "")[:120] or None,
                 }
 
+            missing = len(batch) - len(by_idx)
+            if missing:
+                logger.warning(
+                    f"[NewsScorer] 批内漏单 {missing}/{len(batch)} 条(响应未覆盖对应 idx),置空待补扫"
+                )
             return [by_idx.get(i, {"importance": None, "reason": None}) for i in range(len(batch))]
         except Exception as e:
             logger.warning(f"[NewsScorer] 批次打分失败，返回 None: {e}")
