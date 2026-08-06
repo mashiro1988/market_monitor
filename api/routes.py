@@ -316,7 +316,7 @@ def behavior_segments(symbol: str = "BTC/USDT", days: int = Query(2, ge=1, le=30
 @router.get("/behavior/daily", response_model=BehaviorDailyResponse)
 def behavior_daily(symbol: str = "BTC/USDT", days: int = Query(14, ge=1, le=90),
                    db: Session = Depends(get_db)) -> BehaviorDailyResponse:
-    """日汇总序列：每日最新 PIT 行；当日盘中/缺口按同口径现算（live=true）。"""
+    """日汇总序列：N 个北京日一律 compute-on-read（人工优先，live 恒 true），不读 PIT 快照。"""
     return behavior_views.daily_series(db, symbol, days)
 
 
