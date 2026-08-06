@@ -15,9 +15,11 @@ class ResearchEventItem(BaseModel):
     closed_reason: str | None = None
     evidence_count: int = 0
     today_new: int = 0
+    yesterday_new: int = 0
     badge_count: int = 0
     days_since_last: int | None = None
     last_evidence_at: str | None = None      # naive UTC isoformat(项目惯例,无 Z)
+    last_evidence_bj: str | None = None      # 北京时间字符串,卡片直接显示(勿用上一行拼时间)
 
 
 class ResearchEventsResponse(BaseModel):
@@ -103,6 +105,9 @@ class TimelineResponse(BaseModel):
     event: TimelineEventHead
     items: list[TimelineItem] = Field(default_factory=list)
     pending_relink: int = 0                  # >0 → 前端显示"回扫进行中(剩 N 条)"
+    total: int = 0                           # 筛选后总条数(分页控件算页数用)
+    page: int = 1
+    page_size: int = 0
 
 
 class LinkCreateRequest(BaseModel):

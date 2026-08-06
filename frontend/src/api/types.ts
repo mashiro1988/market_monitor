@@ -563,9 +563,11 @@ export type ResearchEventItem = {
   closed_reason: string | null;
   evidence_count: number;
   today_new: number;
+  yesterday_new: number;
   badge_count: number;
   days_since_last: number | null;
   last_evidence_at: string | null;
+  last_evidence_bj: string | null;
 };
 
 export type ResearchEventPatchRequest = {
@@ -690,6 +692,9 @@ export type TimelineResponse = {
   event: TimelineEventHead;
   items: TimelineItem[];
   pending_relink: number;
+  total: number;
+  page: number;
+  page_size: number;
 };
 
 export type TrackedMarketCreate = {

@@ -562,9 +562,18 @@ def research_event_backscan(event_id: int, request: BackscanRequest,
 
 
 @router.get("/research/events/{event_id}/timeline", response_model=TimelineResponse)
-def research_event_timeline(event_id: int, db: Session = Depends(get_db)) -> TimelineResponse:
+def research_event_timeline(event_id: int,
+                            days: int | None = Query(default=None, ge=1, le=365),
+                            min_score: int | None = Query(default=None, ge=1, le=10),
+                            min_abs_move: float | None = Query(default=None, ge=0),
+                            page: int = Query(default=1, ge=1),
+                            page_size: int = Query(default=50, ge=1, le=200),
+                            db: Session = Depends(get_db)) -> TimelineResponse:
+    # 分页默认值只钉在这一层:服务层不传即全量,replay 脚本(spec §14)要完整时间轴
     try:
-        data = event_pool.event_timeline(db, event_id)
+        data = event_pool.event_timeline(db, event_id, days=days, min_score=min_score,
+                                         min_abs_move=min_abs_move,
+                                         page=page, page_size=page_size)
     except ValueError as exc:
         raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
     return TimelineResponse(**data)

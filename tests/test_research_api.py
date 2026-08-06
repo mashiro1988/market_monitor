@@ -42,10 +42,10 @@ def client(tmp_path):
     return c
 
 
-def _mk_news(client, title="种子新闻"):
+def _mk_news(client, title="种子新闻", score=8, ts=datetime(2026, 8, 1, 12, 0)):
     s = client.test_sessionmaker()
-    n = NewsItem(timestamp=datetime(2026, 8, 1, 12, 0), source="jin10", title=title,
-                 language="zh", llm_importance=8, tagged_at=datetime(2026, 8, 1, 12, 1))
+    n = NewsItem(timestamp=ts, source="jin10", title=title,
+                 language="zh", llm_importance=score, tagged_at=datetime(2026, 8, 1, 12, 1))
     s.add(n); s.commit(); nid = n.id; s.close()
     return nid
 
@@ -94,6 +94,40 @@ def test_links_attach_detach(client):
                         json={"detached": True, "detach_reason": "挂错"}).status_code == 200
     briefs = client.get(f"/api/research/news/{n2}/links").json()["items"]
     assert briefs == []                                   # 摘下后不再显示
+
+
+def test_events_expose_yesterday_and_bj_time(client):
+    """卡片字段(ui-redesign §6.1)必须过得了响应模型这一关。"""
+    nid = _mk_news(client)
+    client.post("/api/research/events", json={"name": "E", "news_ids": [nid]})
+    row = client.get("/api/research/events").json()["items"][0]
+    assert row["yesterday_new"] == 0                       # 刚建的挂接落在今天
+    assert row["last_evidence_bj"] == "2026-08-01 20:00:00"   # 12:00 UTC + 8h
+    assert row["last_evidence_at"].startswith("2026-08-01T12:00")
+
+
+def test_timeline_route_defaults_to_50_per_page(client):
+    """路由层默认分页 = 每页 50(服务层仍是全量,replay 脚本不受影响)。"""
+    ids = [_mk_news(client, f"n{i}", ts=datetime(2026, 8, 1, 12, i)) for i in range(3)]
+    eid = client.post("/api/research/events", json={"name": "E", "news_ids": ids}).json()["id"]
+    tl = client.get(f"/api/research/events/{eid}/timeline").json()
+    assert (tl["total"], tl["page"], tl["page_size"]) == (3, 1, 50)
+    assert len(tl["items"]) == 3
+
+
+def test_timeline_route_filters_and_pages(client):
+    ids = [_mk_news(client, f"n{i}", score=3 if i == 0 else 8,
+                    ts=datetime(2026, 8, 1, 12, i)) for i in range(3)]
+    eid = client.post("/api/research/events", json={"name": "E", "news_ids": ids}).json()["id"]
+
+    scored = client.get(f"/api/research/events/{eid}/timeline?min_score=6").json()
+    assert scored["total"] == 2
+
+    page2 = client.get(f"/api/research/events/{eid}/timeline?page=2&page_size=2").json()
+    assert (page2["total"], page2["page"], len(page2["items"])) == (3, 2, 1)
+
+    bad = client.get(f"/api/research/events/{eid}/timeline?page_size=999")
+    assert bad.status_code == 422                          # page_size 上限 200
 
 
 def test_buffer_revival_stats_endpoints(client):

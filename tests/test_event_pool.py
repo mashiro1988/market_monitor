@@ -137,6 +137,33 @@ def test_list_events_sort_and_derived(session):
     assert rows[1]["days_since_last"] == 14
 
 
+def test_list_events_today_yesterday_and_bj_time(session):
+    """卡片统计行(ui-redesign §2/§6.1):今日/昨日按北京日分桶;最新证据给北京时间字符串。"""
+    now = datetime(2026, 8, 3, 8, 0)                          # 北京 8/3 16:00
+    today_n = _news(session, "今日证据", ts=datetime(2026, 8, 3, 4, 0))
+    yday_n = _news(session, "昨日证据", ts=datetime(2026, 8, 2, 4, 0))
+    e = event_pool.create_event(session, "E", news_ids=[today_n.id, yday_n.id], now=now)
+    links = session.query(ResearchEventLink).filter_by(event_id=e.id).all()
+    by_news = {l.news_id: l for l in links}
+    by_news[today_n.id].created_at = datetime(2026, 8, 3, 4, 1)    # 北京 8/3 12:01
+    by_news[yday_n.id].created_at = datetime(2026, 8, 2, 4, 1)     # 北京 8/2 12:01
+    session.commit()
+
+    row = event_pool.list_events(session, now=now)[0]
+    assert (row["today_new"], row["yesterday_new"]) == (1, 1)
+    assert row["last_evidence_at"] == datetime(2026, 8, 3, 4, 0)   # naive UTC 原样保留
+    assert row["last_evidence_bj"] == "2026-08-03 12:00:00"        # +8h,与 timestamp_bj 同产地
+
+
+def test_list_events_bj_time_none_without_evidence(session):
+    n = _news(session, "seed")
+    e = event_pool.create_event(session, "E", news_ids=[n.id])
+    event_pool.detach_link(session, session.query(ResearchEventLink)
+                           .filter_by(event_id=e.id).one().id, reason="摘光")
+    row = event_pool.list_events(session, now=datetime(2026, 8, 3, 8, 0))[0]
+    assert (row["last_evidence_at"], row["last_evidence_bj"]) == (None, None)
+
+
 def test_timeline_obs_badge_and_score_miss(session):
     from models.price import PriceSnapshot
     n = _news(session, "低分driver", score=3, ts=datetime(2026, 8, 1, 10, 2))
@@ -154,6 +181,74 @@ def test_timeline_obs_badge_and_score_miss(session):
     assert item["driver_badge"] == {"symbol": "BTC/USDT", "change_pct": 1.8}
     assert item["score_miss"] is True                     # 3 分 < 闸门线且已挂(spec §8.3)
     assert item["link"]["link_source"] == "human"
+
+
+def _timeline_fixture(session):
+    """三条证据:高分大波动 / 高分小波动 / 低分无快照(观测 no_data)。返回 (event, news 三元组)。"""
+    from models.price import PriceSnapshot
+    base = datetime(2026, 8, 5, 10, 0)
+    big = _news(session, "大波动", score=8, ts=base + timedelta(minutes=2))
+    small = _news(session, "小波动", score=8, ts=base + timedelta(hours=2, minutes=2))
+    old = _news(session, "三天前无快照", score=3, ts=base - timedelta(days=3))
+    for minutes, price in ((0, 100.0), (10, 100.5),            # big:+0.5%
+                           (120, 100.0), (130, 100.1)):        # small:+0.1%
+        session.add(PriceSnapshot(timestamp=base + timedelta(minutes=minutes),
+                                  asset_class="crypto", symbol="BTC/USDT", name="BTC",
+                                  price=price, source="test"))
+    session.commit()
+    e = event_pool.create_event(session, "E", news_ids=[big.id, small.id, old.id])
+    return e, big, small, old
+
+
+def test_timeline_filters_by_days_score_and_move(session):
+    """筛选栏(ui-redesign §3/§6.2):时间窗 / 分数≥ / 10min 波动≥,各自独立生效。"""
+    now = datetime(2026, 8, 5, 14, 0)
+    e, big, small, old = _timeline_fixture(session)
+
+    all_ids = [it["news"]["id"] for it in event_pool.event_timeline(session, e.id, now=now)["items"]]
+    assert set(all_ids) == {big.id, small.id, old.id}
+
+    win = event_pool.event_timeline(session, e.id, now=now, days=1)
+    assert {it["news"]["id"] for it in win["items"]} == {big.id, small.id}   # 3 天前的出窗
+
+    scored = event_pool.event_timeline(session, e.id, now=now, min_score=6)
+    assert {it["news"]["id"] for it in scored["items"]} == {big.id, small.id}  # 3 分的出局
+
+    moved = event_pool.event_timeline(session, e.id, now=now, min_abs_move=0.3)
+    assert [it["news"]["id"] for it in moved["items"]] == [big.id]           # 小波动/无观测出局
+
+
+def test_timeline_min_score_excludes_unscored(session):
+    """未评分(NULL)在设了分数门槛时必须出局——不能当 0 分也不能漏网。"""
+    now = datetime(2026, 8, 5, 14, 0)
+    unscored = _news(session, "未评分", score=None, ts=datetime(2026, 8, 5, 10, 2))
+    e = event_pool.create_event(session, "E", news_ids=[unscored.id])
+    assert event_pool.event_timeline(session, e.id, now=now)["total"] == 1
+    assert event_pool.event_timeline(session, e.id, now=now, min_score=6)["items"] == []
+
+
+def test_timeline_pagination_and_service_default_is_full(session):
+    """路由层给分页;服务层默认全量(replay 脚本直连,不能被默认 50 条截断)。"""
+    now = datetime(2026, 8, 5, 14, 0)
+    ids = [_news(session, f"n{i}", ts=datetime(2026, 8, 5, 10, i)).id for i in range(5)]
+    e = event_pool.create_event(session, "E", news_ids=ids)
+
+    full = event_pool.event_timeline(session, e.id, now=now)
+    assert (len(full["items"]), full["total"]) == (5, 5)
+
+    p1 = event_pool.event_timeline(session, e.id, now=now, page=1, page_size=2)
+    p3 = event_pool.event_timeline(session, e.id, now=now, page=3, page_size=2)
+    assert (len(p1["items"]), p1["total"], p1["page"], p1["page_size"]) == (2, 5, 1, 2)
+    assert len(p3["items"]) == 1                                  # 尾页
+    assert [it["news"]["id"] for it in p1["items"]] == [ids[4], ids[3]]   # 时间倒序不变
+
+
+def test_timeline_total_counts_after_filter_not_before(session):
+    now = datetime(2026, 8, 5, 14, 0)
+    e, big, _small, _old = _timeline_fixture(session)
+    page = event_pool.event_timeline(session, e.id, now=now, min_abs_move=0.3,
+                                     page=1, page_size=50)
+    assert page["total"] == 1 and page["items"][0]["news"]["id"] == big.id
 
 
 def test_buffer_excludes_linked_and_junk(session):

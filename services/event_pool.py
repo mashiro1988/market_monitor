@@ -23,7 +23,7 @@ from services.news_service import to_news_schema
 from services.theme_ledger import (
     OBS_BASELINE_TOLERANCE_MINUTES, observed_reaction_from_rows,
 )
-from services.time_utils import bj_date_of, bj_day_bounds, utc_now_naive
+from services.time_utils import bj_date_of, bj_day_bounds, format_bj, utc_now_naive
 
 
 def _get_event(session: Session, event_id: int) -> ResearchEvent:
@@ -205,6 +205,7 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
     now = now or utc_now_naive()
     badge_map = _driver_badge_map(session)
     today_start, today_end = bj_day_bounds(bj_date_of(now))
+    yday_start = today_start - timedelta(days=1)
     query = session.query(ResearchEvent)
     if status:
         query = query.filter(ResearchEvent.status == status)
@@ -223,8 +224,12 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
             "evidence_count": len(rows),
             "today_new": sum(1 for l, _ in rows
                              if l.created_at and today_start <= l.created_at < today_end),
+            "yesterday_new": sum(1 for l, _ in rows
+                                 if l.created_at and yday_start <= l.created_at < today_start),
             "badge_count": sum(1 for _, n in rows if int(n.id) in badge_map),
             "last_evidence_at": last_ts,
+            # 卡片显示用北京时间(ui-redesign §6.1):last_evidence_at 是 naive UTC,直接切会差 8 小时
+            "last_evidence_bj": format_bj(last_ts),
             "days_since_last": (now - last_ts).days if last_ts else None,
         })
     out.sort(key=lambda r: (r["last_evidence_at"] is None,
@@ -232,11 +237,19 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
     return out
 
 
-def event_timeline(session: Session, event_id: int, now: datetime | None = None) -> dict:
-    """时间轴(spec §8):每条证据 = 新闻 + 观测值(现算)+ 确认徽章 + 评分失手 + 挂接留痕。"""
+def event_timeline(session: Session, event_id: int, now: datetime | None = None,
+                   days: int | None = None, min_score: int | None = None,
+                   min_abs_move: float | None = None,
+                   page: int | None = None, page_size: int | None = None) -> dict:
+    """时间轴(spec §8 + ui-redesign §6.2):每条证据 = 新闻 + 观测值(现算)+ 确认徽章 +
+    评分失手 + 挂接留痕。筛选/分页全可选;**不传分页 = 全量返回**(replay 脚本直连服务层,
+    默认 50 条会截断 spec §14 的完整时间轴;分页默认值只钉在路由层)。"""
     now = now or utc_now_naive()
     e = _get_event(session, event_id)
     rows = _event_links(session, event_id)
+    if days is not None:
+        cutoff = now - timedelta(days=days)
+        rows = [(l, n) for l, n in rows if n.timestamp and n.timestamp >= cutoff]
     badge_map = _driver_badge_map(session)
     obs_symbol = config.EVENT_OBS_SYMBOLS[0]
     snaps: list = []
@@ -250,9 +263,18 @@ def event_timeline(session: Session, event_id: int, now: datetime | None = None)
                  .order_by(PriceSnapshot.timestamp.asc()).all())
     items = []
     for link, n in rows:
+        # 未评分(NULL)在设了分数门槛时出局:它是"评分失败"不是"0 分",不该混进筛选结果
+        if min_score is not None and (n.llm_importance is None or n.llm_importance < min_score):
+            continue
+        obs = observed_reaction_from_rows(snaps, n.timestamp, now=now)
+        if min_abs_move is not None:
+            if obs.get("status") != "ok" or obs.get("net_pct") is None:
+                continue                                   # pending/no_data 一律排除
+            if abs(obs["net_pct"]) < min_abs_move:
+                continue
         items.append({
             "news": to_news_schema(n).model_dump(),
-            "obs": observed_reaction_from_rows(snaps, n.timestamp, now=now),
+            "obs": obs,
             "obs_symbol": obs_symbol,
             "driver_badge": badge_map.get(int(n.id)),
             "score_miss": (n.llm_importance is not None
@@ -261,13 +283,19 @@ def event_timeline(session: Session, event_id: int, now: datetime | None = None)
                      "auto_event_id": link.auto_event_id, "confidence": link.confidence,
                      "prompt_version": link.prompt_version, "detached": link.detached},
         })
+    total = len(items)
+    page = max(1, int(page or 1))
+    if page_size is not None:
+        page_size = max(1, int(page_size))
+        items = items[(page - 1) * page_size: page * page_size]
     pending_relink = (session.query(NewsItem)
                       .filter(NewsItem.tagged_at.isnot(None),
                               NewsItem.event_linked_at.is_(None)).count())
     return {"event": {"id": e.id, "name": e.name, "status": e.status,
                       "gate_keywords": e.gate_keywords, "created_from": e.created_from,
                       "closed_reason": e.closed_reason, "merged_into_id": e.merged_into_id},
-            "items": items, "pending_relink": pending_relink}
+            "items": items, "pending_relink": pending_relink,
+            "total": total, "page": page, "page_size": page_size or total}
 
 
 def news_links(session: Session, news_id: int) -> list[dict]:
