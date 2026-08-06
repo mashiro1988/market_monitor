@@ -1514,10 +1514,13 @@ code {
   display: inline-flex; align-items: center; gap: 5px;
   border: 1px solid var(--line-soft); border-radius: 6px; padding: 2px 7px;
 }
+/* select 的原生下拉列表用元素自身的 background 渲染:设 transparent 会让弹出层变白底
+   (:root 的 color-scheme: dark 也救不回来),所以这里必须给实色底 */
 .rp-filter select, .rp-filter input {
-  background: transparent; border: none; color: var(--text);
-  font-size: 12.5px; padding: 0; min-width: 56px;
+  background: var(--panel); border: none; color: var(--text);
+  font-size: 12.5px; padding: 0; min-width: 56px; min-height: 20px;
 }
+.rp-filter select option { background: var(--panel); color: var(--text); }
 .rp-filter select:focus, .rp-filter input:focus { outline: none; }
 .rp-check { display: inline-flex; align-items: center; gap: 5px; }
 .rp-check input { width: 13px; height: 13px; }
@@ -1568,8 +1571,13 @@ code {
 .rp-menu-sep { height: 1px; background: var(--line-soft); margin: 4px 0; }
 .rp-menu-hint { font-size: 12px; color: var(--muted); padding: 4px 8px; }
 
-/* 事件详情(展开区) */
-.rp-detail { margin-top: 12px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+/* 事件详情(展开区):与卡片区留出呼吸,不贴着豆腐块 */
+.rp-detail {
+  margin-top: 18px; border: 1px solid var(--line-soft); border-radius: 10px;
+  padding: 10px 12px 6px; background: rgba(148, 163, 184, 0.035);
+}
+/* 首次加载不占一大块空白,收成一行 */
+.rp-detail .state-view { min-height: 44px; border: none; background: transparent; }
 .rp-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
 .rp-pickbar {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

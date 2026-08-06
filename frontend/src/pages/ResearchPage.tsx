@@ -132,6 +132,8 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
   const timeline = useQuery({
     queryKey: ["research-timeline", eventId, days, minScore, minMove, page],
     queryFn: () => api.researchTimeline(eventId, filters),
+    // 改筛选/翻页时留住上一页,避免整块塌成"加载中"再弹回来
+    placeholderData: (previous) => previous,
   });
   const events = useQuery({ queryKey: ["research-events", "active"],
                             queryFn: () => api.researchEvents({ status: "active" }) });
@@ -424,7 +426,7 @@ export function ResearchPage() {
 
   return (
     <section>
-      <PageHeader title="事件池" />
+      <PageHeader title="宏观事件池" />
       <div className="rp-topbar">
         {stats.data?.link_rate != null && (
           <span className="muted" title="过闸新闻里模型挂上的占比(并行期观察,spec §13.3)">
