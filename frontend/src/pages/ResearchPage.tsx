@@ -157,8 +157,11 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
     onSuccess: invalidate,
   });
 
-  if (timeline.isLoading && !timeline.data) return <LoadingState label="加载时间轴" />;
-  if (timeline.isError || !timeline.data) return <ErrorState error={timeline.error} />;
+  // 加载/报错也必须套在 .rp-detail 里:否则拿不到展开区的上边距,会直接贴住上面的卡片
+  if (timeline.isLoading && !timeline.data)
+    return <div className="rp-detail"><LoadingState label="加载时间轴" /></div>;
+  if (timeline.isError || !timeline.data)
+    return <div className="rp-detail"><ErrorState error={timeline.error} /></div>;
   const { event, items, pending_relink, total } = timeline.data;
   const activeOptions = (events.data?.items ?? []).filter((e) => e.id !== eventId);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));

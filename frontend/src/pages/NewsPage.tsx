@@ -29,11 +29,6 @@ const scoreOptions = [
   ...Array.from({ length: 10 }, (_, i) => ({ label: `${i + 1}+`, value: String(i + 1) })),
 ];
 
-const viewOptions = [
-  { label: "卡片", value: "card" },
-  { label: "紧凑", value: "compact" },
-];
-
 const PAGE_SIZE = 50;
 
 function useDebouncedValue(value: string, delayMs: number) {
@@ -47,28 +42,6 @@ function useDebouncedValue(value: string, delayMs: number) {
   return debounced;
 }
 
-function NewsCard({ item }: { item: NewsItem }) {
-  const score = item.llm_importance ?? 0;
-  return (
-    <details className="news-card">
-      <summary>
-        <div className="news-line">
-          <span className={`score s${Math.min(10, score)}`}>{item.llm_importance ?? "—"}</span>
-          <strong>{item.title}</strong>
-        </div>
-        <div className="news-meta">
-          <span>{item.timestamp_bj}</span>
-          <span>{item.source}</span>
-          {item.is_jin10_important ? <span className="badge hot">Jin10 重要</span> : null}
-          {item.categories ? <span>{item.categories}</span> : null}
-        </div>
-      </summary>
-      {item.llm_importance_reason ? <p className="reason">{item.llm_importance_reason}</p> : null}
-      {item.content ? <p>{item.content}</p> : null}
-      {item.url ? <a href={item.url} target="_blank" rel="noreferrer">原文链接</a> : null}
-    </details>
-  );
-}
 
 /** 立案操作条:勾了几条未挂事件的新闻后,直接在这里立事件或挂到已有事件
  *  (原事件池「缓冲区」页签整体搬来,buffer-into-news design §2.1)。 */
@@ -117,27 +90,40 @@ function TriageBar({ picked, onDone }: { picked: number[]; onDone: () => void })
   );
 }
 
+/** 紧凑单行:点标题展开看 LLM 理由/正文/原文链接(取代原卡片视图的展开能力)。 */
 function CompactRow({ item, picked, onPick }:
                     { item: NewsItem; picked: boolean | null; onPick?: (checked: boolean) => void }) {
+  const [open, setOpen] = useState(false);
   const score = fmtScore(item.llm_importance);
-  const body = (
-    <>
-      {picked !== null && (
-        <input type="checkbox" checked={picked}
-               onChange={(ev) => onPick?.(ev.target.checked)} />
+  return (
+    <div className="rp-news-item">
+      <div className={`rp-row ${picked !== null ? "rp-row-triage" : "rp-row-news"}`}>
+        {picked !== null && (
+          <input type="checkbox" checked={picked} aria-label="选中以立案"
+                 onChange={(ev) => onPick?.(ev.target.checked)} />
+        )}
+        <span className="rp-time">{fmtBjShort(item.timestamp_bj)}</span>
+        <span className="rp-source">{item.source}</span>
+        <span className={score.cls}>{score.text}</span>
+        <span className={item.news_direction === "利多" ? "up-text"
+                         : item.news_direction === "利空" ? "down-text" : "muted"}>
+          {item.news_direction ?? "—"}
+        </span>
+        <button type="button" className="rp-title rp-title-btn" title="点开看理由/正文/原文"
+                onClick={() => setOpen((v) => !v)}>
+          {item.is_jin10_important && <span className="s-badge mid">金十重要</span>}
+          {item.title}
+        </button>
+      </div>
+      {open && (
+        <div className="rp-news-body">
+          {item.llm_importance_reason && <p className="reason">{item.llm_importance_reason}</p>}
+          {item.content && <p>{item.content}</p>}
+          {item.url && <a href={item.url} target="_blank" rel="noreferrer">原文链接</a>}
+        </div>
       )}
-      <span className="rp-time">{fmtBjShort(item.timestamp_bj)}</span>
-      <span className="rp-source">{item.source}</span>
-      <span className={score.cls}>{score.text}</span>
-      <span className={item.news_direction === "利多" ? "up-text"
-                       : item.news_direction === "利空" ? "down-text" : "muted"}>
-        {item.news_direction ?? "—"}
-      </span>
-      <span className="rp-title" title={item.llm_importance_reason ?? item.title}>{item.title}</span>
-    </>
+    </div>
   );
-  const cls = `rp-row ${picked !== null ? "rp-row-triage" : "rp-row-news"}`;
-  return picked !== null ? <label className={cls}>{body}</label> : <div className={cls}>{body}</div>;
 }
 
 export function NewsPage() {
@@ -148,7 +134,6 @@ export function NewsPage() {
   const [jin10Importance, setJin10Importance] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [view, setView] = useState<"card" | "compact">("card");
   const [bufferOnly, setBufferOnly] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
   const debouncedSearch = useDebouncedValue(search, 350);
@@ -187,10 +172,8 @@ export function NewsPage() {
 
   // 中英分栏完全按 language 字段切分；新加源不需要再改这里。
   const items = news.data?.items ?? [];
-  const zh = items.filter((item) => item.language === "zh");
-  const en = items.filter((item) => item.language === "en");
   const total = news.data?.total ?? 0;
-  const canTriage = bufferOnly && view === "compact";   // 勾选立案只在紧凑视图给
+  const canTriage = bufferOnly;                        // 勾选立案 = 开了"仅看未挂事件"
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = page;
 
@@ -203,7 +186,6 @@ export function NewsPage() {
         <SelectControl label="回溯" value={hours} onChange={(value) => { setHours(value); setPage(1); }} options={hourOptions} />
         <SelectControl label="Jin10" value={jin10Importance} onChange={(value) => { setJin10Importance(value); setPage(1); }} options={importantOptions} />
         <TextInput label="关键词" value={search} onChange={(value) => { setSearch(value); setPage(1); }} placeholder="标题或正文" />
-        <SelectControl label="视图" value={view} onChange={(value) => setView(value as "card" | "compact")} options={viewOptions} />
         <label className="field">
           <span>范围</span>
           <label className="rp-check">
@@ -215,34 +197,18 @@ export function NewsPage() {
       </div>
       {news.isLoading ? <LoadingState /> : news.error ? <ErrorState error={news.error} /> : null}
       {canTriage && picked.length > 0 && <TriageBar picked={picked} onDone={afterTriage} />}
-      {bufferOnly && view === "card" && (
-        <p className="muted-text small">卡片视图不支持勾选立案,切到「紧凑」视图即可勾选并立事件。</p>
-      )}
-      {view === "compact" ? (
-        <section className="panel">
-          <div className="panel-head">
-            <h2>{bufferOnly ? "未挂事件的新闻" : "全部新闻"}</h2>
-            <span className="muted">{total} 条</span>
-          </div>
-          {items.length ? items.map((item) => (
-            <CompactRow key={item.id} item={item}
-                        picked={canTriage ? picked.includes(item.id) : null}
-                        onPick={(checked) => setPicked(checked
-                          ? [...picked, item.id] : picked.filter((x) => x !== item.id))} />
-          )) : <EmptyState title="当前筛选下没有新闻" />}
-        </section>
-      ) : (
-        <div className="two-columns">
-          <section className="panel">
-            <div className="panel-head"><h2>中文源</h2></div>
-            {zh.length ? zh.map((item) => <NewsCard key={item.id} item={item} />) : <EmptyState title="当前筛选下没有中文新闻" />}
-          </section>
-          <section className="panel">
-            <div className="panel-head"><h2>英文源</h2></div>
-            {en.length ? en.map((item) => <NewsCard key={item.id} item={item} />) : <EmptyState title="当前筛选下没有英文新闻" />}
-          </section>
+      <section className="panel">
+        <div className="panel-head">
+          <h2>{bufferOnly ? "未挂事件的新闻" : "全部新闻"}</h2>
+          <span className="muted">{total} 条</span>
         </div>
-      )}
+        {items.length ? items.map((item) => (
+          <CompactRow key={item.id} item={item}
+                      picked={bufferOnly ? picked.includes(item.id) : null}
+                      onPick={(checked) => setPicked(checked
+                        ? [...picked, item.id] : picked.filter((x) => x !== item.id))} />
+        )) : <EmptyState title="当前筛选下没有新闻" />}
+      </section>
       <div className="pager">
         <Button kind="ghost" disabled={currentPage <= 1 || news.isFetching} onClick={() => setPage((value) => Math.max(1, value - 1))}>
           <ChevronLeft size={16} />上一页
