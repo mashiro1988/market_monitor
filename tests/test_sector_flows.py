@@ -366,3 +366,42 @@ def test_legacy_pivot_without_flow_fields_degrades_quietly(monkeypatch):
         assert row.spot_net_24h is None
     finally:
         session.close()
+
+
+# ---------------- 榜单读路径 ----------------
+from services import sector_service  # noqa: E402
+
+
+def test_leaderboard_serializes_flows_from_db_columns():
+    session = _memory_session()
+    try:
+        session.add(SectorReturn(
+            snapshot_at=T1, category="AI", group_name="测试", token_count=12,
+            ret_24h=3.0, ret_24h_median=2.0,
+            spot_net_24h=500.0, spot_qv_24h=5000.0, spot_flow_tokens=11,
+        ))
+        session.commit()
+
+        response = sector_service.get_leaderboard(session)
+        row = response.rows[0]
+        assert row.flows is not None
+        assert row.flows.spot.net_24h == pytest.approx(500.0)
+        assert row.flows.spot.qv_24h == pytest.approx(5000.0)
+        assert row.flows.spot.tokens == 11
+        assert row.flows.spot.net_1h is None
+        assert row.flows.swap is None
+    finally:
+        session.close()
+
+
+def test_leaderboard_row_without_flow_data_has_both_sides_none():
+    session = _memory_session()
+    try:
+        session.add(SectorReturn(
+            snapshot_at=T1, category="AI", group_name="测试", token_count=12, ret_24h=3.0))
+        session.commit()
+        row = sector_service.get_leaderboard(session).rows[0]
+        assert row.flows.spot is None
+        assert row.flows.swap is None
+    finally:
+        session.close()

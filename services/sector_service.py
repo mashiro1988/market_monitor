@@ -29,12 +29,14 @@ from scanners.sector_scanner import (
     normalize_pivot_symbol,
 )
 from schemas.sectors import (
+    SectorFlows,
+    SectorFlowSide,
     SectorLeaderboardResponse,
     SectorLeaderboardRow,
     SectorTokenRow,
     SectorTokensResponse,
 )
-from services import remote_fs
+from services import remote_fs, sector_flows
 from services.time_utils import timestamp_pair
 
 
@@ -74,6 +76,15 @@ def _load_pivot_cached(market: str) -> Optional[dict]:
     with _pivot_lock:
         _pivot_cache[market] = (mtime, obj)
     return obj
+
+
+def _flows_of(source) -> SectorFlows:
+    """sector_returns 行 / 币级现算 dict → API 的 flows 结构。列名约定在 sector_flows。"""
+    payload = sector_flows.from_row(source)
+    return SectorFlows(
+        spot=SectorFlowSide(**payload["spot"]) if payload["spot"] else None,
+        swap=SectorFlowSide(**payload["swap"]) if payload["swap"] else None,
+    )
 
 
 # ============================================================
@@ -130,6 +141,7 @@ def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
                 ret_24h_median=r.ret_24h_median,
                 ret_168h_median=r.ret_168h_median,
                 ret_720h_median=r.ret_720h_median,
+                flows=_flows_of(r),
             )
             for r in rows_sorted
         ],

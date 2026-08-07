@@ -6,6 +6,25 @@ from pydantic import BaseModel
 from schemas.common import TimeFields
 
 
+class SectorFlowSide(BaseModel):
+    """单市场（现货 or 永续）的资金流。绝对额单位 USDT；强度比率由前端用 net/qv 现算。"""
+    tokens: int | None = None      # 该市场下有资金流数据的成分币数（板块行才有，币行为 None）
+    net_1h: float | None = None
+    net_24h: float | None = None
+    net_168h: float | None = None
+    net_720h: float | None = None
+    qv_1h: float | None = None
+    qv_24h: float | None = None
+    qv_168h: float | None = None
+    qv_720h: float | None = None
+
+
+class SectorFlows(BaseModel):
+    """现货与永续永不混加，各自一侧；该侧无数据时为 null。"""
+    spot: SectorFlowSide | None = None
+    swap: SectorFlowSide | None = None
+
+
 class SectorLeaderboardRow(BaseModel):
     """板块榜单一行：一个 CMC category 的最新 snapshot 聚合数据。"""
     category: str
@@ -19,6 +38,7 @@ class SectorLeaderboardRow(BaseModel):
     ret_24h_median: float | None = None
     ret_168h_median: float | None = None
     ret_720h_median: float | None = None
+    flows: SectorFlows | None = None
 
 
 class SectorLeaderboardResponse(BaseModel):
@@ -35,6 +55,7 @@ class SectorTokenRow(BaseModel):
     ret_24h: float | None = None
     ret_168h: float | None = None
     ret_720h: float | None = None
+    flows: SectorFlows | None = None
 
 
 class SectorTokensResponse(BaseModel):
