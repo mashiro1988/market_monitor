@@ -42,9 +42,10 @@ def test_per_symbol_returns_use_common_spot_swap_snapshot(monkeypatch):
 
     monkeypatch.setattr(sector_scanner, "_load_pivot", load_pivot)
 
-    snapshot_at, returns = sector_scanner._load_per_symbol_returns()
+    market_data = sector_scanner._load_market_data()
+    returns = sector_scanner._per_symbol_returns_from(market_data)
 
-    assert snapshot_at == datetime(2026, 1, 1, 1, 0)
+    assert market_data.snapshot_at == datetime(2026, 1, 1, 1, 0)
     assert returns["BTC"]["ret_1h"] == 10.0
     assert returns["ETH"]["ret_1h"] == 5.0
 
@@ -67,8 +68,14 @@ def test_sector_aggregates_include_median_and_skip_thin_categories(monkeypatch):
     monkeypatch.setattr(config, "cmc_category_to_group", lambda name: "测试")
     monkeypatch.setattr(
         sector_scanner,
-        "_load_per_symbol_returns",
-        lambda use_pivot_cache=False: (datetime(2026, 1, 1, 1, 0), returns),
+        "_load_market_data",
+        lambda use_pivot_cache=False: sector_scanner.MarketData(
+            snapshot_at=datetime(2026, 1, 1, 1, 0), spot_pivot=None, swap_pivot=None),
+    )
+    monkeypatch.setattr(
+        sector_scanner,
+        "_per_symbol_returns_from",
+        lambda market: returns,
     )
     monkeypatch.setattr(
         sector_scanner.cmc_client,

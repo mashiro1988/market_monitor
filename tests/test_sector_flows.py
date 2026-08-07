@@ -260,3 +260,104 @@ def test_from_row_returns_none_side_when_all_values_missing():
         setattr(row, name, None)
     flows = sector_flows.from_row(row)
     assert flows == {"spot": None, "swap": None}
+
+
+# ---------------- scanner 接入 ----------------
+from sqlalchemy import create_engine            # noqa: E402
+from sqlalchemy.orm import sessionmaker          # noqa: E402
+
+from database import Base                        # noqa: E402
+from models.sector import SectorReturn           # noqa: E402
+import scanners.sector_scanner as sector_scanner  # noqa: E402
+
+
+def _memory_session():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    return sessionmaker(bind=engine)()
+
+
+def _wire_scanner(monkeypatch, *, spot_pivot, swap_pivot, symbols):
+    """把 scanner 的 pivot 加载与板块映射都换成内存假数据。"""
+    monkeypatch.setattr(
+        sector_scanner, "_load_market_data",
+        lambda use_pivot_cache=False: sector_scanner.MarketData(
+            snapshot_at=T1, spot_pivot=spot_pivot, swap_pivot=swap_pivot),
+    )
+    monkeypatch.setattr(config, "all_whitelisted_cmc_categories", lambda: ["AI"])
+    monkeypatch.setattr(config, "cmc_category_to_group", lambda name: "测试")
+    monkeypatch.setattr(sector_scanner, "MIN_TOKENS_PER_SECTOR", 1)
+    monkeypatch.setattr(
+        sector_scanner.cmc_client, "load_category_to_symbols",
+        lambda session: {"AI": symbols},
+    )
+
+
+def test_scan_writes_flow_columns(monkeypatch):
+    _wire_scanner(monkeypatch, spot_pivot=_good_pivot(), swap_pivot=None,
+                  symbols={"BTC", "ETH"})
+    session = _memory_session()
+    try:
+        stats = sector_scanner.SectorScanner(session=session).scan()
+        assert stats["sectors_written"] == 1
+        row = session.query(SectorReturn).one()
+        # 现货：BTC(+800) + ETH(−200) = +600；qv = 2000 + 400 = 2400
+        assert row.spot_net_1h == pytest.approx(600.0)
+        assert row.spot_qv_1h == pytest.approx(2400.0)
+        assert row.spot_flow_tokens == 2
+        # 无永续 pivot → 整侧为空
+        assert row.swap_net_1h is None
+        assert row.swap_flow_tokens is None
+        # 涨跌照常
+        assert row.ret_1h is not None
+    finally:
+        session.close()
+
+
+def test_scan_nulls_flows_but_keeps_returns_when_gate_fails(monkeypatch):
+    """勾稽门失败：资金流全空、涨跌照常、失败原因进 result。"""
+    broken = _good_pivot()
+    del broken[sector_flows.TAKER_BUY_KEY]
+    _wire_scanner(monkeypatch, spot_pivot=broken, swap_pivot=None, symbols={"BTC", "ETH"})
+    session = _memory_session()
+    try:
+        result = sector_scanner.compute_all_sector_returns(session)
+        assert "spot" in result.flow_gate_failures
+        assert "缺字段" in result.flow_gate_failures["spot"]
+        aggregate = result.aggregates[0]
+        assert aggregate.ret_1h is not None
+        assert aggregate.flows["spot"] is None
+    finally:
+        session.close()
+
+
+def test_gate_failure_on_one_market_does_not_affect_the_other(monkeypatch):
+    broken_spot = _good_pivot()
+    del broken_spot[sector_flows.TAKER_BUY_KEY]
+    _wire_scanner(monkeypatch, spot_pivot=broken_spot, swap_pivot=_good_pivot(),
+                  symbols={"BTC", "ETH"})
+    session = _memory_session()
+    try:
+        result = sector_scanner.compute_all_sector_returns(session)
+        assert set(result.flow_gate_failures) == {"spot"}
+        aggregate = result.aggregates[0]
+        assert aggregate.flows["spot"] is None
+        assert aggregate.flows["swap"].net["1h"] == pytest.approx(600.0)
+    finally:
+        session.close()
+
+
+def test_legacy_pivot_without_flow_fields_degrades_quietly(monkeypatch):
+    """服务器补丁没上/已回滚时，涨跌照常产出，资金流全空 —— 本项目可先于补丁上线。"""
+    legacy = {"close": _frame(["BTCUSDT", "ETHUSDT"],
+                              [(T0, [100.0, 10.0]), (T1, [110.0, 11.0])])}
+    _wire_scanner(monkeypatch, spot_pivot=legacy, swap_pivot=None, symbols={"BTC", "ETH"})
+    session = _memory_session()
+    try:
+        stats = sector_scanner.SectorScanner(session=session).scan()
+        assert stats["sectors_written"] == 1
+        row = session.query(SectorReturn).one()
+        assert row.ret_1h is not None
+        assert row.spot_net_24h is None
+    finally:
+        session.close()

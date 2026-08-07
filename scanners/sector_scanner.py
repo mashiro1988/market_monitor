@@ -18,7 +18,7 @@ sector_service.get_leaderboard（live 读取用）共享，确保 UI 永远和 t
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
@@ -200,6 +200,8 @@ class SectorAggregate:
     ret_24h_median: Optional[float]
     ret_168h_median: Optional[float]
     ret_720h_median: Optional[float]
+    # {market: FlowSide|None} —— 勾稽门没过或该市场无数据时该侧为 None
+    flows: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -209,13 +211,38 @@ class SectorComputeResult:
     active_symbols: int
     considered_cats: int
     skipped_thin: list[str]
+    # {market: 中文失败原因} —— 为空表示两个市场的勾稽门都通过
+    flow_gate_failures: dict[str, str] = field(default_factory=dict)
     skipped_reason: Optional[str] = None  # 失败时填
 
 
-def _load_aligned_market_returns(
-    *,
-    use_pivot_cache: bool = False,
-) -> tuple[Optional[datetime], dict[str, dict[str, float]], dict[str, dict[str, float]]]:
+@dataclass
+class MarketData:
+    """一次 pivot 加载的产物 —— 涨跌与资金流共用，避免重复反序列化 30MB pkl。
+
+    snapshot_at = 现货/永续最新 bar 的**较早者**，两个市场对齐到同一时刻，
+    免得一个板块快照里混两个市场的不同时间。
+    """
+    snapshot_at: Optional[datetime]
+    spot_pivot: Optional[dict]
+    swap_pivot: Optional[dict]
+
+    def pivot(self, market: str) -> Optional[dict]:
+        return self.spot_pivot if market == "spot" else self.swap_pivot
+
+
+def _close_of(pivot: Optional[dict]):
+    return None if pivot is None else pivot.get("close")
+
+
+def _load_market_data(*, use_pivot_cache: bool = False) -> MarketData:
+    """加载 spot + swap pivot 并对齐快照时刻。
+
+    Args:
+        use_pivot_cache: True 时调 sector_service._load_pivot_cached（mtime 缓存，
+                         供 live 读取路径用以避免每次反序列化）；False 时调
+                         _load_pivot（无缓存，更适合定时 scanner，每次都用最新文件）
+    """
     if use_pivot_cache:
         # 延迟 import 避免循环 (sector_service 导入了 sector_scanner)
         from services.sector_service import _load_pivot_cached as _loader
@@ -224,67 +251,36 @@ def _load_aligned_market_returns(
 
     spot_pivot = _loader("spot")
     swap_pivot = _loader("swap")
-    if spot_pivot is None and swap_pivot is None:
-        return None, {}, {}
-
-    spot_close = spot_pivot.get("close") if spot_pivot is not None else None
-    swap_close = swap_pivot.get("close") if swap_pivot is not None else None
 
     latest_times = [
         ts for ts in (
-            _latest_snapshot_for_close(spot_close) if spot_close is not None else None,
-            _latest_snapshot_for_close(swap_close) if swap_close is not None else None,
+            _latest_snapshot_for_close(_close_of(spot_pivot)) if _close_of(spot_pivot) is not None else None,
+            _latest_snapshot_for_close(_close_of(swap_pivot)) if _close_of(swap_pivot) is not None else None,
         )
         if ts is not None
     ]
-    if not latest_times:
-        return None, {}, {}
-
-    # When both spot and swap exist, calculate both as of the older latest bar.
-    # This keeps one sector snapshot from mixing two different market times.
-    snapshot_at = min(latest_times) if len(latest_times) > 1 else latest_times[0]
-
-    spot_returns: dict[str, dict[str, float]] = {}
-    swap_returns: dict[str, dict[str, float]] = {}
-    if spot_close is not None:
-        _, spot_returns = _compute_returns_for_close(spot_close, as_of=snapshot_at)
-    if swap_close is not None:
-        _, swap_returns = _compute_returns_for_close(swap_close, as_of=snapshot_at)
-
-    return snapshot_at, spot_returns, swap_returns
+    snapshot_at = min(latest_times) if len(latest_times) > 1 else (
+        latest_times[0] if latest_times else None)
+    return MarketData(snapshot_at=snapshot_at, spot_pivot=spot_pivot, swap_pivot=swap_pivot)
 
 
-def _load_per_symbol_returns(
-    *,
-    use_pivot_cache: bool = False,
-) -> tuple[Optional[datetime], dict[str, dict[str, float]]]:
-    """加载 spot + swap pivot，算每个规范化 symbol 的多周期涨跌（现货优先）。
-
-    Args:
-        use_pivot_cache: True 时调 sector_service._load_pivot_cached（mtime 缓存，
-                         供 live 读取路径用以避免每次反序列化）；False 时调
-                         _load_pivot（无缓存，更适合定时 scanner，每次都用最新文件）
-
-    Returns:
-        (snapshot_at, {normalized_symbol: {ret_1h: float, ...}})
-    """
-    snapshot_at, spot_returns, swap_returns = _load_aligned_market_returns(
-        use_pivot_cache=use_pivot_cache
-    )
-    if snapshot_at is None:
-        return None, {}
+def _per_symbol_returns_from(market: MarketData) -> dict[str, dict[str, float]]:
+    """MarketData → {规范化 symbol: {ret_1h: ...}}。现货优先（后写覆盖永续）。"""
+    if market.snapshot_at is None:
+        return {}
 
     sym_to_returns: dict[str, dict[str, float]] = {}
-    for col, rets in swap_returns.items():
-        nsym = normalize_pivot_symbol(col)
-        if nsym:
-            sym_to_returns[nsym] = rets
-    for col, rets in spot_returns.items():
-        nsym = normalize_pivot_symbol(col)
-        if nsym:
-            sym_to_returns[nsym] = rets
-
-    return snapshot_at, sym_to_returns
+    # 顺序敏感：先永续后现货，现货有的就盖掉永续（现货价格更干净）
+    for market_name in ("swap", "spot"):
+        close = _close_of(market.pivot(market_name))
+        if close is None:
+            continue
+        _, returns = _compute_returns_for_close(close, as_of=market.snapshot_at)
+        for col, rets in returns.items():
+            nsym = normalize_pivot_symbol(col)
+            if nsym:
+                sym_to_returns[nsym] = rets
+    return sym_to_returns
 
 
 def compute_all_sector_returns(
@@ -296,8 +292,15 @@ def compute_all_sector_returns(
     - SectorScanner.scan() 调，拿到结果后写 DB
     - sector_service.get_leaderboard() 调，拿到结果直接序列化给前端
     保证两者用同一份 pivot 算出同一个 snapshot_at + 同一组聚合数。
+
+    资金流（2026-08-07）与涨跌共用这一份 pivot；每个市场先过勾稽门，
+    没过的市场整轮资金流写 None，涨跌不受任何影响。
     """
-    snapshot_at, sym_to_returns = _load_per_symbol_returns(use_pivot_cache=use_pivot_cache)
+    from services import sector_flows  # 延迟 import 避免循环
+
+    market_data = _load_market_data(use_pivot_cache=use_pivot_cache)
+    snapshot_at = market_data.snapshot_at
+    sym_to_returns = _per_symbol_returns_from(market_data)
 
     if snapshot_at is None:
         return SectorComputeResult(
@@ -310,11 +313,27 @@ def compute_all_sector_returns(
             considered_cats=0, skipped_thin=[], skipped_reason="no_symbols",
         )
 
+    # 资金流：每个市场各自过闸，一边失败不连坐另一边
+    flow_gate_failures: dict[str, str] = {}
+    flows_by_market: dict[str, dict[str, dict[str, float]]] = {}
+    for market_name in sector_flows.MARKETS:
+        pivot = market_data.pivot(market_name)
+        if pivot is None:
+            continue  # 该市场 pivot 本来就没拉到，不算勾稽失败（涨跌侧同样没有）
+        reason = sector_flows.check_flow_gate(pivot)
+        if reason:
+            flow_gate_failures[market_name] = reason
+            logger.warning("资金流勾稽门未通过 market={}: {}", market_name, reason)
+            continue
+        flows_by_market[market_name] = sector_flows.per_symbol_flows(
+            pivot, as_of=snapshot_at)
+
     cat_to_syms = cmc_client.load_category_to_symbols(session)
     if not cat_to_syms:
         return SectorComputeResult(
             snapshot_at=snapshot_at, aggregates=[], active_symbols=len(sym_to_returns),
             considered_cats=0, skipped_thin=[], skipped_reason="no_mapping",
+            flow_gate_failures=flow_gate_failures,
         )
 
     whitelist = set(config.all_whitelisted_cmc_categories())
@@ -344,6 +363,12 @@ def compute_all_sector_returns(
             ret_name: (round(float(median(values)), 4) if values else None)
             for ret_name, values in agg.items()
         }
+        # 资金流的成员集合按各市场宽表实际有的列取，与涨跌口径的 matched 无关
+        flows = {
+            market_name: sector_flows.aggregate_side(
+                flows_by_market.get(market_name, {}), cmc_symbols)
+            for market_name in sector_flows.MARKETS
+        }
         aggregates.append(SectorAggregate(
             category=category,
             group_name=config.cmc_category_to_group(category),
@@ -356,6 +381,7 @@ def compute_all_sector_returns(
             ret_24h_median=medians["ret_24h"],
             ret_168h_median=medians["ret_168h"],
             ret_720h_median=medians["ret_720h"],
+            flows=flows,
         ))
 
     return SectorComputeResult(
@@ -364,6 +390,7 @@ def compute_all_sector_returns(
         active_symbols=len(sym_to_returns),
         considered_cats=considered_cats,
         skipped_thin=skipped_thin,
+        flow_gate_failures=flow_gate_failures,
         skipped_reason=None,
     )
 
@@ -388,6 +415,8 @@ class SectorScanner:
                 logger.warning("sector_scan 跳过: {}", result.skipped_reason)
                 return {"sectors_written": 0, "skipped_reason": result.skipped_reason}
 
+            from services import sector_flows  # 延迟 import 避免循环
+
             # 写库：先删同 snapshot_at 的旧行（处理重跑），再写新行
             rows = [
                 SectorReturn(
@@ -403,6 +432,7 @@ class SectorScanner:
                     ret_24h_median=a.ret_24h_median,
                     ret_168h_median=a.ret_168h_median,
                     ret_720h_median=a.ret_720h_median,
+                    **sector_flows.to_columns(a.flows),
                 )
                 for a in result.aggregates
             ]
@@ -428,6 +458,7 @@ class SectorScanner:
                 "considered_cats": result.considered_cats,
                 "skipped_thin": len(result.skipped_thin),
                 "active_symbols": result.active_symbols,
+                "flow_gate_failures": dict(result.flow_gate_failures),
             }
         except Exception:
             if own_session:
