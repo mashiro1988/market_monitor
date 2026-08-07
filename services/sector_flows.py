@@ -69,17 +69,28 @@ def check_flow_gate(pivot: Optional[dict]) -> Optional[str]:
 
     # 3) 恒等式：0 <= taker_buy <= quote_volume（只看两边都有值的格子）
     both = qv.notna() & tb.notna()
+    bad = both & ((tb < 0) | (tb > qv * (1 + _IDENTITY_RTOL)))
     total = int(both.to_numpy().sum())
     if total == 0:
         return "无任何有效成交额格子"
-    negative = (tb < 0) & both
-    over = (tb > qv * (1 + _IDENTITY_RTOL)) & both
-    violations = int((negative | over).to_numpy().sum())
+    violations = int(bad.to_numpy().sum())
     max_ratio = float(getattr(config, "FLOW_IDENTITY_VIOLATION_MAX_RATIO", 0.001))
     ratio = violations / total
     if ratio > max_ratio:
         return (f"恒等式违规占比 {ratio:.4%} 超过上限 {max_ratio:.4%}"
                 f"（{violations}/{total} 格 taker_buy 为负或大于 quote_volume）")
+
+    # 3b) 同一恒等式单独看最新一根 bar。
+    # 上面的全矩阵占比会被历史稀释：2000 行里坏掉整根最新 bar 才 0.05%，够不着 0.1% 的线
+    # （2026-08-07 彩排实测）。而最新 bar 是 1h 列直接读的那根，也是写入损坏最常出现的地方。
+    latest_both = int(both.iloc[-1].sum())
+    if latest_both:
+        latest_violations = int(bad.iloc[-1].sum())
+        latest_ratio = latest_violations / latest_both
+        latest_max = float(getattr(config, "FLOW_LATEST_BAR_VIOLATION_MAX_RATIO", 0.05))
+        if latest_ratio > latest_max:
+            return (f"最新 bar 恒等式违规占比 {latest_ratio:.2%} 超过上限 {latest_max:.2%}"
+                    f"（{latest_violations}/{latest_both} 个币 taker_buy 为负或大于 quote_volume）")
 
     # 4) 最新 bar 的缺失缺口：收盘价有值、成交额没值的比例
     latest_close = close.iloc[-1]

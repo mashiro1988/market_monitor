@@ -511,6 +511,12 @@ REMOTE_PULLER_POLL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "3600")
 # 任一项不达标 → 该市场资金流整轮写 None（涨跌照常）+ 告警，绝不让错数上页面。
 # 恒等式 0 <= 主动买入额 <= 总成交额 的逐格违规占比上限（浮点噪声留 0.1% 余量）
 FLOW_IDENTITY_VIOLATION_MAX_RATIO = float(os.getenv("FLOW_IDENTITY_VIOLATION_MAX_RATIO", "0.001"))
+# 同一恒等式**只看最新一根 bar**时的违规占比上限。
+# 为什么要单设一道：全矩阵占比会被历史稀释 —— 2000 行 × 480 列里坏掉整根最新 bar
+# 也才 0.05%，压根够不着上面那个 0.1% 的线（2026-08-07 本地彩排实测）。而最新 bar
+# 正是 1h 列直接读的那根、也是写入损坏最常出现的地方。放宽到 5% 是为了容忍个别币
+# 抽风，不至于每小时误报整个市场。
+FLOW_LATEST_BAR_VIOLATION_MAX_RATIO = float(os.getenv("FLOW_LATEST_BAR_VIOLATION_MAX_RATIO", "0.05"))
 # 最新一根 bar 上「成交额缺失率 − 收盘价缺失率」的上限：新字段大面积缺数时拦下
 FLOW_NAN_GAP_MAX = float(os.getenv("FLOW_NAN_GAP_MAX", "0.05"))
 # 勾稽失败告警的冷却分钟数（同 marker 冷却窗内只推一次）

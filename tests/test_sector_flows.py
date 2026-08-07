@@ -85,6 +85,43 @@ def test_gate_rejects_identity_violation_over_threshold():
     assert "恒等式" in reason
 
 
+def test_gate_rejects_fully_corrupted_latest_bar_in_long_history():
+    """整根最新 bar 串列，但历史很长 —— 全矩阵占比会把它稀释到看不见。
+
+    2026-08-07 本地彩排实测：2000 行 × 482 列里坏掉整根最新 bar 只占 0.05%，
+    低于 0.1% 的全矩阵阈值，闸门直接放行。而最新 bar 正是 1h 列直接读的那根、
+    也是写入损坏最常出现的地方。故单独设一道「最新 bar」检查。
+    """
+    # 行数必须够长才能复现「稀释」：2000×100 里坏 100 格 = 0.05%，低于全矩阵 0.1% 的线，
+    # 全矩阵那道检查会放行，只有最新 bar 那道能拦住（与线上 2000 行的真实形状一致）。
+    n_rows, n_cols = 2000, 100
+    columns = [f"C{i}USDT" for i in range(n_cols)]
+    index = pd.date_range("2026-01-01", periods=n_rows, freq="h")
+    close = pd.DataFrame(1.0, index=index, columns=columns)
+    qv = pd.DataFrame(100.0, index=index, columns=columns)
+    tb = pd.DataFrame(60.0, index=index, columns=columns)
+    tb.iloc[-1, :] = 500.0  # 最新一整根 bar 串列：主动买入额是总成交额的 5 倍
+
+    pivot = {"close": close, "quote_volume": qv, "taker_buy_quote_asset_volume": tb}
+    reason = sector_flows.check_flow_gate(pivot)
+    assert reason is not None, "整根最新 bar 串列必须被拦下"
+    assert "最新 bar" in reason and "恒等式" in reason
+
+
+def test_gate_tolerates_single_bad_cell_on_latest_bar():
+    """最新 bar 上个别币抽风不该让整个市场的资金流作废（避免每小时误报）。"""
+    n_rows, n_cols = 500, 100
+    columns = [f"C{i}USDT" for i in range(n_cols)]
+    index = pd.date_range("2026-01-01", periods=n_rows, freq="h")
+    close = pd.DataFrame(1.0, index=index, columns=columns)
+    qv = pd.DataFrame(100.0, index=index, columns=columns)
+    tb = pd.DataFrame(60.0, index=index, columns=columns)
+    tb.iloc[-1, 0] = 500.0  # 100 个币里坏 1 个 = 1%，在 5% 容忍内
+
+    pivot = {"close": close, "quote_volume": qv, "taker_buy_quote_asset_volume": tb}
+    assert sector_flows.check_flow_gate(pivot) is None
+
+
 def test_gate_tolerates_float_noise_within_ratio():
     """浮点噪声导致的极小超出不该拦（相对容差 1e-6 内视为合规）。"""
     pivot = _good_pivot()
