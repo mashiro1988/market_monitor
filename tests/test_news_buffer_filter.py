@@ -75,6 +75,23 @@ def test_buffer_only_and_score_filter_compose(session):
     assert resp.total == 1
 
 
+def test_score_filter_is_score_only_jin10_flag_no_longer_bypasses(session):
+    """分数就是分数:金十重要不再顶替分数(它有自己的 Jin10 筛选维度)。
+
+    此前 `分数 >= N 或 金十重要` 的或关系,导致选了"8 分以上"仍混进 6 分的金十条目。
+    """
+    low_flagged = _news(session, "金十重要但六分", score=6)
+    low_flagged.importance = 1                       # 金十重要标记
+    _news(session, "八分的", score=8)
+    session.commit()
+
+    assert _titles(news_service.get_news(session, min_llm_importance=8)) == {"八分的"}
+    # 金十维度仍可单独筛,且此时不受分数门槛牵连
+    only_flagged = news_service.get_news(session, min_llm_importance=0,
+                                         jin10_importance="important")
+    assert _titles(only_flagged) == {low_flagged.title}
+
+
 def test_default_behaviour_unchanged_without_new_params(session):
     """老调用不回归:不传新参数时仍是"5 分以上",未评分照旧不出现。"""
     _news(session, "七分的", score=7)

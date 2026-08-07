@@ -37,9 +37,14 @@ def is_jin10_important(item: NewsItem) -> bool:
 
 
 def passes_default_importance_filter(item: NewsItem, min_llm_score: int) -> bool:
+    """分数门槛只看分数。
+
+    2026-08-07 起去掉了 `或 金十重要` 这个旁路:它让"8 分以上"里混进 6 分的金十条目,
+    口径不干净。金十重要是**独立维度**,由 `jin10_importance` 参数单独筛。
+    """
     if min_llm_score <= 0:                       # 不限:未评分也放行(buffer-into-news design §0)
         return True
-    return (item.llm_importance or 0) >= min_llm_score or is_jin10_important(item)
+    return (item.llm_importance or 0) >= min_llm_score
 
 
 def to_news_schema(item: NewsItem) -> NewsItemSchema:
