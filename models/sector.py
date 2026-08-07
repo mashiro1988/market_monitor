@@ -66,6 +66,27 @@ class SectorReturn(Base):
     ret_24h_median = Column(Float, nullable=True)
     ret_168h_median = Column(Float, nullable=True)
     ret_720h_median = Column(Float, nullable=True)
+    # 资金流（2026-08-07 净资金流入 spec）：现货/永续两条独立口径，绝对额单位 USDT。
+    # net = 主动买入额 − 主动卖出额；qv = 同一批 bar 的总成交额（强度比率 = net/qv 读时现算）。
+    # {market}_flow_tokens = 该市场在此板块内实际有资金流数据的成分币数（与 token_count 可不等）。
+    spot_net_1h = Column(Float, nullable=True)
+    spot_net_24h = Column(Float, nullable=True)
+    spot_net_168h = Column(Float, nullable=True)
+    spot_net_720h = Column(Float, nullable=True)
+    spot_qv_1h = Column(Float, nullable=True)
+    spot_qv_24h = Column(Float, nullable=True)
+    spot_qv_168h = Column(Float, nullable=True)
+    spot_qv_720h = Column(Float, nullable=True)
+    spot_flow_tokens = Column(Integer, nullable=True)
+    swap_net_1h = Column(Float, nullable=True)
+    swap_net_24h = Column(Float, nullable=True)
+    swap_net_168h = Column(Float, nullable=True)
+    swap_net_720h = Column(Float, nullable=True)
+    swap_qv_1h = Column(Float, nullable=True)
+    swap_qv_24h = Column(Float, nullable=True)
+    swap_qv_168h = Column(Float, nullable=True)
+    swap_qv_720h = Column(Float, nullable=True)
+    swap_flow_tokens = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

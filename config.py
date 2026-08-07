@@ -506,6 +506,16 @@ LOCAL_CACHE_DIR = os.getenv("LOCAL_CACHE_DIR", "data/remote_cache")
 REMOTE_OFFSET = os.getenv("REMOTE_OFFSET", "30m")
 REMOTE_PULLER_POLL_SECONDS = int(os.getenv("REMOTE_PULLER_POLL_SECONDS", "3600"))
 
+# 板块资金流勾稽门（2026-08-07 净资金流入 spec §5.2）。
+# 宽表新增 quote_volume / taker_buy_quote_asset_volume 两个矩阵后，每轮扫描先过闸再算钱：
+# 任一项不达标 → 该市场资金流整轮写 None（涨跌照常）+ 告警，绝不让错数上页面。
+# 恒等式 0 <= 主动买入额 <= 总成交额 的逐格违规占比上限（浮点噪声留 0.1% 余量）
+FLOW_IDENTITY_VIOLATION_MAX_RATIO = float(os.getenv("FLOW_IDENTITY_VIOLATION_MAX_RATIO", "0.001"))
+# 最新一根 bar 上「成交额缺失率 − 收盘价缺失率」的上限：新字段大面积缺数时拦下
+FLOW_NAN_GAP_MAX = float(os.getenv("FLOW_NAN_GAP_MAX", "0.05"))
+# 勾稽失败告警的冷却分钟数（同 marker 冷却窗内只推一次）
+FLOW_GATE_ALERT_COOLDOWN_MINUTES = int(os.getenv("FLOW_GATE_ALERT_COOLDOWN_MINUTES", "60"))
+
 # ============================================================
 # CoinMarketCap 板块分类配置
 # ============================================================

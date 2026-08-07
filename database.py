@@ -117,16 +117,23 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
                 conn.execute(text("ALTER TABLE prediction_markets ADD COLUMN origin VARCHAR(120)"))
 
         # sector_returns：补中位数列。均值代表强度，中位数代表板块广度。
+        # 2026-08-07 追加 18 个资金流列（net/qv × 四窗口 × 两市场 + 两个覆盖币数）。
         if "sector_returns" in table_names:
             existing = {col["name"] for col in inspector.get_columns("sector_returns")}
-            for column_name in {
-                "ret_1h_median",
-                "ret_24h_median",
-                "ret_168h_median",
-                "ret_720h_median",
-            }:
+            sector_new_columns = {
+                "ret_1h_median": "FLOAT",
+                "ret_24h_median": "FLOAT",
+                "ret_168h_median": "FLOAT",
+                "ret_720h_median": "FLOAT",
+            }
+            for market in ("spot", "swap"):
+                for kind in ("net", "qv"):
+                    for window in ("1h", "24h", "168h", "720h"):
+                        sector_new_columns[f"{market}_{kind}_{window}"] = "FLOAT"
+                sector_new_columns[f"{market}_flow_tokens"] = "INTEGER"
+            for column_name, column_type in sector_new_columns.items():
                 if column_name not in existing:
-                    conn.execute(text(f"ALTER TABLE sector_returns ADD COLUMN {column_name} FLOAT"))
+                    conn.execute(text(f"ALTER TABLE sector_returns ADD COLUMN {column_name} {column_type}"))
 
         # behavior_daily_summaries：北京日口径切换（2026-07-29 spec）——列改名 + 口径标记 + 索引重建。
         if "behavior_daily_summaries" in table_names:
