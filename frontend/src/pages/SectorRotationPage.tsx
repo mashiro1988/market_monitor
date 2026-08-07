@@ -2,11 +2,22 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, RefreshCcw } from "lucide-react";
 import { api } from "../api/client";
-import type { SectorLeaderboardRow, SectorTokenRow } from "../api/types";
+import type { SectorFlowSide, SectorLeaderboardRow, SectorTokenRow } from "../api/types";
 import { Button, PageHeader, SelectControl } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
+import {
+  FLOW_WINDOWS,
+  type FlowSortKey,
+  type FlowWindow,
+  flowSortValue,
+  flowStrength,
+  fmtMoney,
+  fmtStrength,
+  isFlowSortKey,
+  sideValue,
+} from "./sectorFlowFormat";
 
-type SortKey =
+type ReturnSortKey =
   | "ret_1h_median"
   | "ret_24h_median"
   | "ret_168h_median"
@@ -14,8 +25,9 @@ type SortKey =
   | "ret_1h"
   | "ret_24h"
   | "ret_168h"
-  | "ret_720h"
-  | "token_count";
+  | "ret_720h";
+
+type SortKey = ReturnSortKey | FlowSortKey | "token_count";
 
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: "24 小时中位", value: "ret_24h_median" },
@@ -26,8 +38,20 @@ const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: "1 小时均值", value: "ret_1h" },
   { label: "7 天均值", value: "ret_168h" },
   { label: "30 天均值", value: "ret_720h" },
+  { label: "现货 24h 净流入", value: "flow_spot_24h" },
+  { label: "永续 24h 净流入", value: "flow_swap_24h" },
+  { label: "现货 7d 净流入", value: "flow_spot_168h" },
+  { label: "永续 7d 净流入", value: "flow_swap_168h" },
   { label: "成分币数量", value: "token_count" },
 ];
+
+/** UI 上的窗口名（代码里一律用 168h/720h，给人看的是 7d/30d）。 */
+const WINDOW_LABELS: Record<FlowWindow, string> = {
+  "1h": "1h",
+  "24h": "24h",
+  "168h": "7d",
+  "720h": "30d",
+};
 
 function fmtPct(v: number | null | undefined): string {
   if (v === null || v === undefined) return "—";
@@ -68,11 +92,12 @@ export function SectorRotationPage() {
 
   const sortedRows: SectorLeaderboardRow[] = useMemo(() => {
     const rows = leaderboard.data?.rows ?? [];
-    return [...rows].sort((a, b) =>
-      sortBy === "token_count"
-        ? b.token_count - a.token_count
-        : compareDescNullsLast(a[sortBy], b[sortBy])
-    );
+    const valueOf = (row: SectorLeaderboardRow): number | null => {
+      if (sortBy === "token_count") return row.token_count;
+      if (isFlowSortKey(sortBy)) return flowSortValue(row, sortBy);
+      return row[sortBy];
+    };
+    return [...rows].sort((a, b) => compareDescNullsLast(valueOf(a), valueOf(b)));
   }, [leaderboard.data, sortBy]);
 
   function toggleRow(cat: string) {
@@ -132,6 +157,11 @@ export function SectorRotationPage() {
                   <th style={{ textAlign: "right" }}>24h</th>
                   <th style={{ textAlign: "right" }}>7d</th>
                   <th style={{ textAlign: "right" }}>30d</th>
+                  {FLOW_WINDOWS.map((w) => (
+                    <th key={w} style={{ textAlign: "right" }} title="净资金流入 = 主动买入 − 主动卖出；上行现货、下行永续">
+                      资金 {WINDOW_LABELS[w]}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -184,10 +214,13 @@ function RowGroup({
         <ReturnCell median={row.ret_24h_median} mean={row.ret_24h} />
         <ReturnCell median={row.ret_168h_median} mean={row.ret_168h} />
         <ReturnCell median={row.ret_720h_median} mean={row.ret_720h} />
+        {FLOW_WINDOWS.map((w) => (
+          <FlowCell key={w} flows={row.flows} window={w} showTokens />
+        ))}
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={8} style={{ padding: 0, background: "var(--bg-secondary, #f9fafb)" }}>
+          <td colSpan={12} style={{ padding: 0, background: "var(--bg-secondary, #f9fafb)" }}>
             <div style={{ padding: "12px 24px 16px 48px" }}>
               {tokensLoading ? (
                 <LoadingState label="加载板块成分币" />
@@ -204,6 +237,9 @@ function RowGroup({
                       <th style={{ textAlign: "right" }}>24h</th>
                       <th style={{ textAlign: "right" }}>7d</th>
                       <th style={{ textAlign: "right" }}>30d</th>
+                      {FLOW_WINDOWS.map((w) => (
+                        <th key={w} style={{ textAlign: "right" }}>资金 {WINDOW_LABELS[w]}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
@@ -216,6 +252,9 @@ function RowGroup({
                         <td style={{ textAlign: "right" }} className={pctClass(t.ret_24h)}>{fmtPct(t.ret_24h)}</td>
                         <td style={{ textAlign: "right" }} className={pctClass(t.ret_168h)}>{fmtPct(t.ret_168h)}</td>
                         <td style={{ textAlign: "right" }} className={pctClass(t.ret_720h)}>{fmtPct(t.ret_720h)}</td>
+                        {FLOW_WINDOWS.map((w) => (
+                          <FlowCell key={w} flows={t.flows} window={w} showTokens={false} />
+                        ))}
                       </tr>
                     ))}
                   </tbody>
@@ -236,6 +275,40 @@ function ReturnCell({ median, mean }: { median: number | null | undefined; mean:
     <td style={{ textAlign: "right" }} className={pctClass(median ?? mean)}>
       <div>{fmtPct(median)}</div>
       <div className="muted" style={{ fontSize: 13.5 }}>均 {fmtPct(mean)}</div>
+    </td>
+  );
+}
+
+function FlowCell({
+  flows,
+  window,
+  showTokens,
+}: {
+  flows: { spot: SectorFlowSide | null; swap: SectorFlowSide | null } | null | undefined;
+  window: FlowWindow;
+  showTokens: boolean;
+}) {
+  const line = (market: "spot" | "swap", label: string) => {
+    const side = flows?.[market] ?? null;
+    const net = sideValue(side, "net", window);
+    const qv = sideValue(side, "qv", window);
+    const strength = fmtStrength(flowStrength(net, qv));
+    const cls = net === null || net === 0 ? "ret-flat" : net > 0 ? "ret-up" : "ret-down";
+    const hint = showTokens && side?.tokens != null
+      ? `${label}：${side.tokens} 个成分币有数据，窗口总成交额 ${fmtMoney(qv)}`
+      : `${label}：窗口总成交额 ${fmtMoney(qv)}`;
+    return (
+      <div className={cls} title={hint}>
+        <span className="muted" style={{ fontSize: 12 }}>{label} </span>
+        {fmtMoney(net)}
+        {strength && <span className="muted" style={{ fontSize: 12 }}> · {strength}</span>}
+      </div>
+    );
+  };
+  return (
+    <td style={{ textAlign: "right", fontSize: 13.5 }}>
+      {line("spot", "现")}
+      {line("swap", "永")}
     </td>
   );
 }
