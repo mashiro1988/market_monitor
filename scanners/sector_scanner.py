@@ -452,6 +452,16 @@ class SectorScanner:
             if result.skipped_thin:
                 logger.debug("token<{} 跳过: {}", MIN_TOKENS_PER_SECTOR, result.skipped_thin)
 
+            # 勾稽失败主动推送（页面上的「—」太安静，没人会注意到）
+            if result.flow_gate_failures:
+                try:
+                    from services import sector_flow_monitoring
+                    sector_flow_monitoring.alert_flow_gate_failures(
+                        result.flow_gate_failures)
+                except Exception as exc:
+                    # 告警失败绝不能拖垮扫描本身
+                    logger.warning("资金流勾稽告警推送失败: {}", exc)
+
             return {
                 "snapshot_at": result.snapshot_at,
                 "sectors_written": len(rows),

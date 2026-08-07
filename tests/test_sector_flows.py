@@ -291,6 +291,11 @@ def _wire_scanner(monkeypatch, *, spot_pivot, swap_pivot, symbols):
         sector_scanner.cmc_client, "load_category_to_symbols",
         lambda session: {"AI": symbols},
     )
+    # 勾稽失败分支会走真实推送（建 SessionLocal + 发企业微信），测试里一律挡掉
+    monkeypatch.setattr(
+        "services.sector_flow_monitoring.alert_flow_gate_failures",
+        lambda failures, **kwargs: [],
+    )
 
 
 def test_scan_writes_flow_columns(monkeypatch):
