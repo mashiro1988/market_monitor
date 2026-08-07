@@ -15,11 +15,13 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
 
 import config
+from scanners.sector_scanner import _slice_close_as_of, normalize_pivot_symbol
 
 # 宽表里两个新矩阵的键名（与服务器补丁写入的列名一致，零映射层）
 QUOTE_VOLUME_KEY = "quote_volume"
@@ -90,3 +92,49 @@ def check_flow_gate(pivot: Optional[dict]) -> Optional[str]:
         return f"最新 bar 成交额缺失率比收盘价高 {gap:.2%}，超过上限 {max_gap:.2%}"
 
     return None
+
+
+def per_symbol_flows(
+    pivot: Optional[dict],
+    *,
+    as_of: Optional[datetime],
+) -> dict[str, dict[str, float]]:
+    """单市场 pivot → {规范化 symbol: {net_1h, qv_1h, net_24h, qv_24h, ...}}。
+
+    调用前必须先过 check_flow_gate()。约定：
+    - 窗口 = 截到 as_of 的最近 N 根 bar；bar 不够就按实际有的求和（新币不作废）
+    - 某根 bar 只要 net/qv 任一为缺失，这根 bar 两边都不计入 —— 强度比率才自洽
+    - 整窗口无有效 bar 的币不产出该窗口的键（区别于「净流入恰好为 0」）
+    - 同一市场内多个交易对归一到同一 symbol 时合并求和（BEAMX/BEAM 这类）
+    """
+    if pivot is None:
+        return {}
+    qv_all = pivot.get(QUOTE_VOLUME_KEY)
+    tb_all = pivot.get(TAKER_BUY_KEY)
+    if qv_all is None or tb_all is None:
+        return {}
+
+    qv_all = _slice_close_as_of(qv_all, as_of)
+    tb_all = _slice_close_as_of(tb_all, as_of)
+    if qv_all.empty:
+        return {}
+
+    out: dict[str, dict[str, float]] = {}
+    for window, lookback in FLOW_WINDOWS.items():
+        qv = qv_all.iloc[-lookback:]
+        tb = tb_all.iloc[-lookback:]
+        valid = qv.notna() & tb.notna()
+        qv_sum = qv.where(valid).sum(min_count=1)
+        tb_sum = tb.where(valid).sum(min_count=1)
+        net_sum = 2.0 * tb_sum - qv_sum
+        for col in qv_all.columns:
+            qv_val = qv_sum.get(col)
+            if qv_val is None or pd.isna(qv_val):
+                continue
+            nsym = normalize_pivot_symbol(str(col))
+            if not nsym:
+                continue
+            bucket = out.setdefault(nsym, {})
+            bucket[f"qv_{window}"] = bucket.get(f"qv_{window}", 0.0) + float(qv_val)
+            bucket[f"net_{window}"] = bucket.get(f"net_{window}", 0.0) + float(net_sum[col])
+    return out
