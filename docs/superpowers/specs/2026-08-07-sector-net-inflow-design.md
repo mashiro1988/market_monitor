@@ -91,9 +91,12 @@ BMAC preprocess.py ──宽表(+2 字段)──▶ market_pivot_{spot,swap}_{ye
 
 ## 4. 服务器补丁细节（改动①）
 
-文件：数据服务器 `/root/data_center/bmac/preprocess.py`（本仓库镜像
-`scripts/server_src/preprocess.py` 同步更新留档）。该文件已有历史本地补丁先例
+文件：数据服务器 `/root/data_center/bmac/preprocess.py`。该文件已有历史本地补丁先例
 （资金费率对齐处的"修改后的代码"注释），非首次改动。
+
+补丁的**权威留档**在本仓库 `scripts/server_patch/bmac_preprocess_patch.py`（进版本库，
+有 `tests/test_server_pivot_patch.py` 盯着行为）。注意 **不是** `scripts/server_src/`
+—— 那是从服务器抓下来的第三方源码副本，被 `.gitignore:58` 挡在版本库外，放那儿等于没留档。
 
 两处纯增量修改：
 
@@ -286,6 +289,6 @@ ssh mmon-data 'python /root/verify_taker_pivot_patch.py --year 2026 --offset 30m
 | 风险 | 应对 |
 |---|---|
 | 补丁改坏导致宽表停产，波及交易框架 | 纯增量+缺列宽容；安静窗口操作；备份秒回滚；T0 脚本把关 |
-| BMAC 升级覆盖补丁 | scripts/server_src/ 镜像留档重打；勾稽门第一条会立刻发现（缺键→告警） |
+| BMAC 升级覆盖补丁 | scripts/server_patch/ 留档重打；勾稽门第一条会立刻发现（缺键→告警） |
 | data_api 备用源缺新字段 | §4 容错（缺列补 NaN 不崩溃）+ T0 脚本第 4 项体检确认实际概率 |
 | 1 月跨年短窗 | 既有行为，明示不扩大范围；如未来要治，涨跌资金流一起治 |
