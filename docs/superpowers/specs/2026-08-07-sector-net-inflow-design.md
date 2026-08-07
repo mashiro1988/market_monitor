@@ -238,9 +238,15 @@ ssh mmon-data 'mkdir -p /root/backup && cp /root/data_center/bmac/preprocess.py 
 
 **第 2 步：上传补丁与验收脚本**
 
-补丁内容 = 本仓库 `scripts/server_src/preprocess.py` 的两处改动（`PIVOT_COLUMNS` 追加
-两列 + `make_market_pivot` 增产两个矩阵并改用 `reindex` 容错）。**注意镜像文件的其余部分
-可能与服务器现版有出入**，稳妥做法是只把这两处改动手工贴过去，而不是整文件覆盖。
+补丁内容 = 本仓库 **`scripts/server_patch/bmac_preprocess_patch.py`** 里的两段：
+`PIVOT_COLUMNS`（追加两列）与 `make_market_pivot`（增产两个矩阵 + 改用 `reindex` 容错）。
+把这两段替换掉服务器 `preprocess.py` 里的同名部分，**不要整文件覆盖** —— 服务器现版
+与本地那份第三方源码副本可能有出入。
+
+> 为什么权威副本不是 `scripts/server_src/preprocess.py`：那份是从服务器抓下来的第三方
+> 源码副本，被 `.gitignore:58` 挡在版本库外，不进 git 就等于没留档，BMAC 升级冲掉补丁后
+> 没有底稿可重打。`scripts/server_patch/` 那份进版本库，且有
+> `tests/test_server_pivot_patch.py` 盯着行为。
 
 ```bash
 scp scripts/verify_taker_pivot_patch.py mmon-data:/root/

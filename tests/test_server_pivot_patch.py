@@ -4,9 +4,12 @@
 改坏了不只是本项目的资金流没了，交易框架也会断粮。所以补丁上服务器前，
 先在本地把它的行为钉死。
 
-scripts/server_src/preprocess.py 是服务器文件的留档镜像，依赖 BMAC 内部模块
-（core.utils.log_kit 等），本地 import 不了。这里用 ast 把 PIVOT_COLUMNS 与
-make_market_pivot 单独抠出来 exec —— 测的就是将要贴到服务器上的那段源码本身。
+被测对象是 scripts/server_patch/bmac_preprocess_patch.py —— 补丁的权威副本。
+不测 scripts/server_src/preprocess.py（从服务器抓下来的第三方源码副本）的原因：
+那份被 .gitignore 挡在版本库外，新克隆的仓库里根本没有这个文件，测试会直接报错。
+
+这里用 ast 把 PIVOT_COLUMNS 与 make_market_pivot 单独抠出来 exec，而不是整文件 import
+—— 保证测的就是将要贴到服务器上的那段源码本身，不掺任何本地脚手架。
 """
 import ast
 from pathlib import Path
@@ -14,7 +17,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-MIRROR = Path(__file__).resolve().parents[1] / "scripts" / "server_src" / "preprocess.py"
+MIRROR = (Path(__file__).resolve().parents[1]
+          / "scripts" / "server_patch" / "bmac_preprocess_patch.py")
 
 QUOTE_VOLUME_KEY = "quote_volume"
 TAKER_BUY_KEY = "taker_buy_quote_asset_volume"
@@ -30,7 +34,7 @@ def make_market_pivot():
             and any(getattr(t, "id", None) == "PIVOT_COLUMNS" for t in node.targets))
         or (isinstance(node, ast.FunctionDef) and node.name == "make_market_pivot")
     ]
-    assert len(wanted) == 2, f"镜像里没找到 PIVOT_COLUMNS 和 make_market_pivot：{wanted}"
+    assert len(wanted) == 2, f"补丁副本里没找到 PIVOT_COLUMNS 和 make_market_pivot：{wanted}"
     namespace: dict = {"pd": pd}
     exec(compile(ast.Module(body=wanted, type_ignores=[]), str(MIRROR), "exec"), namespace)
     return namespace["make_market_pivot"], namespace["PIVOT_COLUMNS"]
