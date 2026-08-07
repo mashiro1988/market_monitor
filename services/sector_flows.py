@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -137,4 +138,82 @@ def per_symbol_flows(
             bucket = out.setdefault(nsym, {})
             bucket[f"qv_{window}"] = bucket.get(f"qv_{window}", 0.0) + float(qv_val)
             bucket[f"net_{window}"] = bucket.get(f"net_{window}", 0.0) + float(net_sum[col])
+    return out
+
+
+MARKETS = ("spot", "swap")
+
+
+@dataclass
+class FlowSide:
+    """单市场、单板块的资金流聚合。net/qv 的键是窗口名（1h/24h/168h/720h）。"""
+    tokens: int
+    net: dict[str, Optional[float]]
+    qv: dict[str, Optional[float]]
+
+
+def aggregate_side(
+    per_symbol: dict[str, dict[str, float]],
+    members: set[str],
+) -> Optional[FlowSide]:
+    """把板块成分币的币级资金流加总。无任何成分币有数据时返回 None。
+
+    tokens = 该市场下**实际有资金流数据**的成分币数，与涨跌口径的 token_count 可以不等
+    （一个板块可能 30 个币有现货、35 个币有永续）。
+    """
+    matched = [sym for sym in members if sym in per_symbol]
+    if not matched:
+        return None
+
+    net: dict[str, Optional[float]] = {}
+    qv: dict[str, Optional[float]] = {}
+    for window in FLOW_WINDOWS:
+        net_total = 0.0
+        qv_total = 0.0
+        found = False
+        for sym in matched:
+            values = per_symbol[sym]
+            qv_val = values.get(f"qv_{window}")
+            if qv_val is None:
+                continue
+            found = True
+            qv_total += qv_val
+            net_total += values.get(f"net_{window}", 0.0)
+        net[window] = round(net_total, 4) if found else None
+        qv[window] = round(qv_total, 4) if found else None
+
+    return FlowSide(tokens=len(matched), net=net, qv=qv)
+
+
+def to_columns(sides: dict[str, Optional[FlowSide]]) -> dict[str, Optional[float]]:
+    """{market: FlowSide|None} → 18 个 sector_returns 列的 kwargs。列名约定只此一处。"""
+    out: dict[str, Optional[float]] = {}
+    for market in MARKETS:
+        side = sides.get(market)
+        out[f"{market}_flow_tokens"] = side.tokens if side else None
+        for window in FLOW_WINDOWS:
+            out[f"{market}_net_{window}"] = side.net.get(window) if side else None
+            out[f"{market}_qv_{window}"] = side.qv.get(window) if side else None
+    return out
+
+
+def from_row(row) -> dict[str, Optional[dict]]:
+    """sector_returns 行 → {market: {tokens, net_1h, qv_1h, ...} | None}，供 API 序列化。
+
+    整侧所有窗口都为空 → 该侧为 None（页面显示「—」而不是一排 0）。
+    """
+    out: dict[str, Optional[dict]] = {}
+    for market in MARKETS:
+        payload: dict[str, Optional[float]] = {
+            "tokens": getattr(row, f"{market}_flow_tokens", None),
+        }
+        has_value = False
+        for window in FLOW_WINDOWS:
+            net = getattr(row, f"{market}_net_{window}", None)
+            qv = getattr(row, f"{market}_qv_{window}", None)
+            payload[f"net_{window}"] = net
+            payload[f"qv_{window}"] = qv
+            if net is not None or qv is not None:
+                has_value = True
+        out[market] = payload if has_value else None
     return out

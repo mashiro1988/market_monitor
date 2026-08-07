@@ -192,3 +192,71 @@ def test_per_symbol_flows_merges_duplicate_normalized_symbols():
 
 def test_per_symbol_flows_returns_empty_for_none_pivot():
     assert sector_flows.per_symbol_flows(None, as_of=T1) == {}
+
+
+# ---------------- 板块聚合 ----------------
+
+def test_aggregate_sums_members_and_ignores_outsiders():
+    per_symbol = {
+        "BTC": {"net_1h": 100.0, "qv_1h": 1000.0, "net_24h": 300.0, "qv_24h": 3000.0},
+        "ETH": {"net_1h": -40.0, "qv_1h": 400.0, "net_24h": -60.0, "qv_24h": 600.0},
+        "DOGE": {"net_1h": 999.0, "qv_1h": 999.0},   # 不在板块里
+    }
+    side = sector_flows.aggregate_side(per_symbol, {"BTC", "ETH"})
+    assert side.tokens == 2
+    assert side.net["1h"] == pytest.approx(60.0)
+    assert side.qv["1h"] == pytest.approx(1400.0)
+    assert side.net["24h"] == pytest.approx(240.0)
+    assert side.qv["24h"] == pytest.approx(3600.0)
+    # 无人有 168h 数据 → None（不是 0）
+    assert side.net["168h"] is None
+    assert side.qv["168h"] is None
+
+
+def test_aggregate_returns_none_when_no_member_has_flow_data():
+    assert sector_flows.aggregate_side({"BTC": {"net_1h": 1.0, "qv_1h": 2.0}}, {"SOL"}) is None
+
+
+def test_aggregate_counts_only_members_with_data():
+    per_symbol = {"BTC": {"net_1h": 10.0, "qv_1h": 100.0}}
+    side = sector_flows.aggregate_side(per_symbol, {"BTC", "ETH", "SOL"})
+    assert side.tokens == 1
+
+
+# ---------------- DB 列名映射 ----------------
+
+def test_to_columns_roundtrips_through_from_row():
+    per_symbol = {"BTC": {"net_24h": 500.0, "qv_24h": 5000.0}}
+    sides = {
+        "spot": sector_flows.aggregate_side(per_symbol, {"BTC"}),
+        "swap": None,
+    }
+    columns = sector_flows.to_columns(sides)
+    assert columns["spot_net_24h"] == pytest.approx(500.0)
+    assert columns["spot_qv_24h"] == pytest.approx(5000.0)
+    assert columns["spot_flow_tokens"] == 1
+    assert columns["spot_net_1h"] is None
+    assert columns["swap_net_24h"] is None
+    assert columns["swap_flow_tokens"] is None
+    assert len(columns) == 18
+
+    class Row:
+        pass
+    row = Row()
+    for name, value in columns.items():
+        setattr(row, name, value)
+
+    flows = sector_flows.from_row(row)
+    assert flows["spot"]["net_24h"] == pytest.approx(500.0)
+    assert flows["spot"]["tokens"] == 1
+    assert flows["swap"] is None
+
+
+def test_from_row_returns_none_side_when_all_values_missing():
+    class Row:
+        pass
+    row = Row()
+    for name in sector_flows.to_columns({"spot": None, "swap": None}):
+        setattr(row, name, None)
+    flows = sector_flows.from_row(row)
+    assert flows == {"spot": None, "swap": None}
