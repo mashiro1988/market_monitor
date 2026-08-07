@@ -105,8 +105,11 @@ BMAC preprocess.py ──宽表(+2 字段)──▶ market_pivot_{spot,swap}_{ye
 NaN 而不是 KeyError 炸掉），防备 data_api 备用源个别文件缺这两列时拖垮整个预处理——
 预处理停产会波及交易框架供数，此处宁可缺数不可崩溃。
 
-**影响评估**：宽表文件约 20MB → 约 33MB（+2/3 键），拉取多几秒；旧键一个不动，
-对既有消费者（交易框架）向后兼容。
+**影响评估**（2026-08-07 实测修正）：实际拉到的 swap 宽表**当前已是 33.7MB**（4 个键），
+spot 约 25MB（3 个键），即每个矩阵约 8.4MB。加 2 个矩阵后 swap 约 51MB、spot 约 42MB，
+比原先估计的"20MB→33MB"大一档。按现有跨境拉取速度（实测 spot 14.8s）推算，
+每小时多花约 10-20 秒，仍在 1 小时的 cycle 预算内，但值得在部署后观察一次拉取耗时。
+旧键一个不动，对既有消费者（交易框架）向后兼容。
 
 ## 5. 自动化验证（两道闸）
 
@@ -131,16 +134,25 @@ scp 到数据服务器用其自带 python 跑，输出 PASS/FAIL 报告 + 非零
 |---|---|---|
 | 键存在 | 两个新键都在 pivot dict | 补丁未生效/被升级覆盖 |
 | 时间对齐 | 新键矩阵 index 与 close 完全相等 | 半写/陈旧数据 |
-| 恒等式 | `0 ≤ taker_buy ≤ quote_volume` 逐格（相对容差 1e-6），违规格子占比 ≤ `FLOW_IDENTITY_VIOLATION_MAX_RATIO` | 数据串列/损坏 |
+| 恒等式（全矩阵） | `0 ≤ taker_buy ≤ quote_volume` 逐格（相对容差 1e-6），违规格子占比 ≤ `FLOW_IDENTITY_VIOLATION_MAX_RATIO`（0.1%） | 历史数据串列/损坏 |
+| 恒等式（最新 bar） | 同一恒等式**只看最新一根 bar**，违规币占比 ≤ `FLOW_LATEST_BAR_VIOLATION_MAX_RATIO`（5%） | 本轮写入损坏 |
 | 空值一致 | 最新 bar 上 quote_volume 的 NaN 占比 − close 的 NaN 占比 ≤ `FLOW_NAN_GAP_MAX` | 新字段大面积缺数 |
+
+> **为什么恒等式要查两遍**（2026-08-07 本地彩排实测补充）：全矩阵占比会被历史稀释 ——
+> 生产形状是 2000 行 × 482 列，坏掉**整根**最新 bar 也只占 0.05%，够不着 0.1% 的线，
+> 闸门会放行。而最新 bar 正是 1h 列直接读的那根、也是写入损坏最常出现的地方。
+> 最新 bar 那道放宽到 5%，是为了容忍个别币抽风，不至于每小时误报整个市场。
+> 这个缺陷是彩排脚本（`scripts/rehearse_flow_pipeline.py`）在生产形状数据上跑出来的，
+> 单元测试的 2×2 玩具矩阵看不到 —— 改闸门逻辑后应重跑该脚本。
 
 **失败策略**：该市场当轮资金流全部写 `None`（涨跌照常产出），并按
 `services/price_source_monitoring.py` 的 marker+冷却模式发一条告警
 （marker=`flow_gate:{market}`，冷却 60 分钟，走既有 alert_logs 通道）。
 
 新增配置常量（config.py，均为新参数，不动任何已校准值）：
-`FLOW_IDENTITY_VIOLATION_MAX_RATIO`（默认 0.001）、`FLOW_NAN_GAP_MAX`（默认 0.05）、
-`FLOW_GATE_ALERT_COOLDOWN_MINUTES`（默认 60）。
+`FLOW_IDENTITY_VIOLATION_MAX_RATIO`（默认 0.001）、
+`FLOW_LATEST_BAR_VIOLATION_MAX_RATIO`（默认 0.05，实现时新增）、
+`FLOW_NAN_GAP_MAX`（默认 0.05）、`FLOW_GATE_ALERT_COOLDOWN_MINUTES`（默认 60）。
 
 ### 5.3 兼容性保证（上线顺序安全）
 
@@ -211,6 +223,51 @@ FlowCell 缺侧渲染。
 3. 跑 T0 验收脚本 → PASS 才算部署完成
 4. 盯一个整点周期：确认新宽表落地、mmon.top 拉到、页面出数、告警通道无 flow_gate
 5. 回滚预案：还原备份文件 + 重启 BMAC（秒级）；本项目侧自动退化为"—"，无需动作
+
+### 10.1 服务器补丁操作 runbook（人工执行）
+
+**前置**：本项目代码已全量上线（页面资金流列显示「—」，其余功能不受影响）。
+下面的 `mmon-data` 是数据服务器（`root@47.243.252.92`）的 ssh 别名；本机
+`~/.ssh/config` 里若没配，把它换成 `root@47.243.252.92`。
+
+**第 1 步：备份**（回归勾稽要用到补丁前的宽表）
+
+```bash
+ssh mmon-data 'mkdir -p /root/backup && cp /root/data_center/bmac/preprocess.py /root/backup/preprocess.py.$(date +%Y%m%d) && cp /root/data_center/data/preprocess_1h_resample/30m/market_pivot_spot_2026.pkl /root/backup/ && cp /root/data_center/data/preprocess_1h_resample/30m/market_pivot_swap_2026.pkl /root/backup/'
+```
+
+**第 2 步：上传补丁与验收脚本**
+
+补丁内容 = 本仓库 `scripts/server_src/preprocess.py` 的两处改动（`PIVOT_COLUMNS` 追加
+两列 + `make_market_pivot` 增产两个矩阵并改用 `reindex` 容错）。**注意镜像文件的其余部分
+可能与服务器现版有出入**，稳妥做法是只把这两处改动手工贴过去，而不是整文件覆盖。
+
+```bash
+scp scripts/verify_taker_pivot_patch.py mmon-data:/root/
+```
+
+**第 3 步：重启 BMAC**
+
+选在整点写入刚结束的安静窗口操作（每小时 `:40` 之后；BMAC 在 `:10/:20/:30/:35` 写）。
+
+**第 4 步：等下一个整点周期写完，跑验收**
+
+```bash
+ssh mmon-data 'python /root/verify_taker_pivot_patch.py --year 2026 --offset 30m --backup /root/backup/market_pivot_spot_2026.pkl'
+```
+
+退出码必须为 0。任一 FAIL → 立即还原备份的 `preprocess.py` 并重启 BMAC；
+本项目侧无需任何操作（勾稽门会自动把资金流退化为「—」）。
+
+**第 5 步：观察一个整点周期**
+
+- mmon.top 拉到新宽表（看拉取耗时，文件变大约 1.5 倍，见 §4 实测修正）
+- 板块页资金流列出数字
+- 无 `sector_flow_gate` 告警
+
+**验收脚本本身可信吗**：`tests/test_verify_taker_pivot_patch.py` 用假服务器目录注入
+五种坏法（缺键 / 索引错位 / 取值不符 / 旧数被改 / 备用源缺字段），逐一断言它恰好抓到
+该抓的那项且不误伤其它项 —— 拿没验过的工具去验补丁等于没验。
 
 ## 11. 本期不做（YAGNI）
 
