@@ -23,9 +23,9 @@ import config
 from models.sector import CmcSymbolCategory, SectorReturn
 from scanners.sector_scanner import (
     MIN_TOKENS_PER_SECTOR,
-    RETURN_LOOKBACKS,
+    _close_of,
     _compute_returns_for_close,
-    _latest_snapshot_for_close,
+    _load_market_data,
     normalize_pivot_symbol,
 )
 from schemas.sectors import (
@@ -152,14 +152,14 @@ def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
 # 板块详情（钻取）
 # ============================================================
 def get_sector_tokens(session: Session, category: str) -> SectorTokensResponse:
-    """对一个板块返回其下所有 symbol 当前的涨跌。
+    """对一个板块返回其下所有 symbol 当前的涨跌 + 两个市场的资金流。
 
     步骤：
     1. 查 cmc_symbol_categories 拿这个板块的 symbol 集合
-    2. 加载两份 pivot（spot + swap）
-    3. 现货优先匹配，缺现货才用永续
-    4. 算 1h/24h/168h/720h 涨跌
-    5. 返回排好序的列表
+    2. 加载两份 pivot（spot + swap），对齐到同一 snapshot（走 scanner 的 MarketData）
+    3. 涨跌：现货优先匹配，缺现货才用永续（一行一个 market）
+    4. 资金流：现货与永续各自独立算，同一行同时挂两侧（与 market 字段无关）
+    5. 返回按 24h 涨跌排好序的列表
     """
     cmc_symbols = {
         row[0]
@@ -171,9 +171,9 @@ def get_sector_tokens(session: Session, category: str) -> SectorTokensResponse:
     if not cmc_symbols:
         return SectorTokensResponse(category=category, group=None, snapshot_at=None, tokens=[])
 
-    spot_pivot = _load_pivot_cached("spot")
-    swap_pivot = _load_pivot_cached("swap")
-    if spot_pivot is None and swap_pivot is None:
+    market_data = _load_market_data(use_pivot_cache=True)
+    snapshot_at = market_data.snapshot_at
+    if snapshot_at is None:
         return SectorTokensResponse(
             category=category,
             group=config.cmc_category_to_group(category),
@@ -181,60 +181,50 @@ def get_sector_tokens(session: Session, category: str) -> SectorTokensResponse:
             tokens=[],
         )
 
-    # 算两边的 per-symbol 涨跌
-    latest_times = [
-        ts for ts in (
-            _latest_snapshot_for_close(spot_pivot["close"]) if spot_pivot is not None else None,
-            _latest_snapshot_for_close(swap_pivot["close"]) if swap_pivot is not None else None,
-        )
-        if ts is not None
-    ]
-    aligned_snapshot = min(latest_times) if len(latest_times) > 1 else (latest_times[0] if latest_times else None)
+    # 涨跌：两个市场各自算（列名 → 涨跌），现货优先
+    returns_by_market: dict[str, dict[str, dict[str, float]]] = {}
+    for market_name in sector_flows.MARKETS:
+        close = _close_of(market_data.pivot(market_name))
+        if close is None:
+            continue
+        _, returns_by_market[market_name] = _compute_returns_for_close(
+            close, as_of=snapshot_at)
 
-    snapshot_at: Optional[datetime] = None
-    spot_returns: dict[str, dict[str, float]] = {}
-    swap_returns: dict[str, dict[str, float]] = {}
-    if spot_pivot is not None:
-        s, spot_returns = _compute_returns_for_close(spot_pivot["close"], as_of=aligned_snapshot)
-        snapshot_at = s
-    if swap_pivot is not None:
-        s, swap_returns = _compute_returns_for_close(swap_pivot["close"], as_of=aligned_snapshot)
-        if snapshot_at is None or (s is not None and s > snapshot_at):
-            snapshot_at = s
+    # 资金流：过闸后按规范化 symbol 现算（两侧独立）
+    flows_by_market: dict[str, dict[str, dict[str, float]]] = {}
+    for market_name in sector_flows.MARKETS:
+        pivot = market_data.pivot(market_name)
+        if pivot is None or sector_flows.check_flow_gate(pivot):
+            continue
+        flows_by_market[market_name] = sector_flows.per_symbol_flows(
+            pivot, as_of=snapshot_at)
 
-    # 对每个 binance pivot 列名规范化 → 看是否在我们关心的 CMC symbol 集合里
+    def _token_flows(nsym: str) -> SectorFlows:
+        sides: dict[str, Optional[SectorFlowSide]] = {}
+        for market_name in sector_flows.MARKETS:
+            values = flows_by_market.get(market_name, {}).get(nsym)
+            sides[market_name] = SectorFlowSide(**values) if values else None
+        return SectorFlows(spot=sides["spot"], swap=sides["swap"])
+
     rows: list[SectorTokenRow] = []
     seen_normalized: set[str] = set()
-
     # spot 优先（先扫 spot，得到的 base sym 标记 seen，swap 里再有同名 sym 就跳过）
-    for col, rets in spot_returns.items():
-        nsym = normalize_pivot_symbol(col)
-        if not nsym or nsym not in cmc_symbols:
-            continue
-        seen_normalized.add(nsym)
-        rows.append(SectorTokenRow(
-            symbol=nsym,
-            binance_symbol=col,
-            market="spot",
-            ret_1h=rets.get("ret_1h"),
-            ret_24h=rets.get("ret_24h"),
-            ret_168h=rets.get("ret_168h"),
-            ret_720h=rets.get("ret_720h"),
-        ))
-    # swap 补 spot 没覆盖的
-    for col, rets in swap_returns.items():
-        nsym = normalize_pivot_symbol(col)
-        if not nsym or nsym not in cmc_symbols or nsym in seen_normalized:
-            continue
-        rows.append(SectorTokenRow(
-            symbol=nsym,
-            binance_symbol=col,
-            market="swap",
-            ret_1h=rets.get("ret_1h"),
-            ret_24h=rets.get("ret_24h"),
-            ret_168h=rets.get("ret_168h"),
-            ret_720h=rets.get("ret_720h"),
-        ))
+    for market_name in ("spot", "swap"):
+        for col, rets in returns_by_market.get(market_name, {}).items():
+            nsym = normalize_pivot_symbol(col)
+            if not nsym or nsym not in cmc_symbols or nsym in seen_normalized:
+                continue
+            seen_normalized.add(nsym)
+            rows.append(SectorTokenRow(
+                symbol=nsym,
+                binance_symbol=col,
+                market=market_name,
+                ret_1h=rets.get("ret_1h"),
+                ret_24h=rets.get("ret_24h"),
+                ret_168h=rets.get("ret_168h"),
+                ret_720h=rets.get("ret_720h"),
+                flows=_token_flows(nsym),
+            ))
 
     # 按 24h 降序，NaN 末尾
     def _sort_key(r: SectorTokenRow) -> tuple[int, float]:

@@ -608,6 +608,23 @@ export type SScoreSchema = {
   coverage: number;
 };
 
+export type SectorFlowSide = {
+  tokens: number | null;
+  net_1h: number | null;
+  net_24h: number | null;
+  net_168h: number | null;
+  net_720h: number | null;
+  qv_1h: number | null;
+  qv_24h: number | null;
+  qv_168h: number | null;
+  qv_720h: number | null;
+};
+
+export type SectorFlows = {
+  spot: SectorFlowSide | null;
+  swap: SectorFlowSide | null;
+};
+
 export type SectorLeaderboardResponse = {
   snapshot_at: TimeFields | null;
   rows: SectorLeaderboardRow[];
@@ -625,6 +642,7 @@ export type SectorLeaderboardRow = {
   ret_24h_median: number | null;
   ret_168h_median: number | null;
   ret_720h_median: number | null;
+  flows: SectorFlows | null;
 };
 
 export type SectorTokenRow = {
@@ -635,6 +653,7 @@ export type SectorTokenRow = {
   ret_24h: number | null;
   ret_168h: number | null;
   ret_720h: number | null;
+  flows: SectorFlows | null;
 };
 
 export type SectorTokensResponse = {

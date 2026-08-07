@@ -405,3 +405,70 @@ def test_leaderboard_row_without_flow_data_has_both_sides_none():
         assert row.flows.swap is None
     finally:
         session.close()
+
+
+# ---------------- 成分币钻取 ----------------
+from models.sector import CmcSymbolCategory  # noqa: E402
+
+
+def test_token_row_carries_both_market_flows(monkeypatch):
+    """一行币同时挂现货与永续两侧资金流，与它价格取自哪个市场无关。"""
+    session = _memory_session()
+    try:
+        session.add(CmcSymbolCategory(symbol="BTC", category="AI"))
+        session.commit()
+        monkeypatch.setattr(config, "cmc_category_to_group", lambda name: "测试")
+        # 注意：要打 sector_service 上的名字 —— 它是 from ... import 进来的绑定，
+        # 打 sector_scanner 上的原名对已绑定的引用无效。
+        monkeypatch.setattr(
+            sector_service, "_load_market_data",
+            lambda use_pivot_cache=False: sector_scanner.MarketData(
+                snapshot_at=T1, spot_pivot=_good_pivot(), swap_pivot=_good_pivot()),
+        )
+
+        response = sector_service.get_sector_tokens(session, "AI")
+        row = next(t for t in response.tokens if t.symbol == "BTC")
+        assert row.market == "spot"           # 价格仍是现货优先
+        assert row.flows.spot.net_1h == pytest.approx(800.0)
+        assert row.flows.swap.net_1h == pytest.approx(800.0)
+        assert row.flows.spot.tokens is None  # 币行不带覆盖币数
+    finally:
+        session.close()
+
+
+def test_token_row_flow_side_is_none_when_market_absent(monkeypatch):
+    session = _memory_session()
+    try:
+        session.add(CmcSymbolCategory(symbol="BTC", category="AI"))
+        session.commit()
+        monkeypatch.setattr(config, "cmc_category_to_group", lambda name: "测试")
+        monkeypatch.setattr(
+            sector_service, "_load_market_data",
+            lambda use_pivot_cache=False: sector_scanner.MarketData(
+                snapshot_at=T1, spot_pivot=_good_pivot(), swap_pivot=None),
+        )
+        row = sector_service.get_sector_tokens(session, "AI").tokens[0]
+        assert row.flows.spot is not None
+        assert row.flows.swap is None
+    finally:
+        session.close()
+
+
+def test_token_flows_empty_when_gate_fails(monkeypatch):
+    session = _memory_session()
+    try:
+        session.add(CmcSymbolCategory(symbol="BTC", category="AI"))
+        session.commit()
+        broken = _good_pivot()
+        del broken[sector_flows.TAKER_BUY_KEY]
+        monkeypatch.setattr(config, "cmc_category_to_group", lambda name: "测试")
+        monkeypatch.setattr(
+            sector_service, "_load_market_data",
+            lambda use_pivot_cache=False: sector_scanner.MarketData(
+                snapshot_at=T1, spot_pivot=broken, swap_pivot=None),
+        )
+        row = sector_service.get_sector_tokens(session, "AI").tokens[0]
+        assert row.ret_1h is not None      # 涨跌照常
+        assert row.flows.spot is None      # 资金流作废
+    finally:
+        session.close()
