@@ -143,6 +143,54 @@ def test_each_break_mode_trips_exactly_its_own_check(tmp_path, break_mode, expec
     assert len(failed) == 2, f"{break_mode} 应两个市场都失败，实际: {failed}"
 
 
+def _perturb_backup_close(root: Path, market: str, row_positions: list[int], n_cols: int):
+    """把备份里指定行的 close 挪动 0.05%，模拟"备份写入时这几根还没收盘"。"""
+    path = root / "backup" / f"market_pivot_{market}_2026.pkl"
+    with open(path, "rb") as fh:
+        backup = pickle.load(fh)
+    close = backup["close"]
+    for pos in row_positions:
+        ts = close.index[pos]
+        for sym in list(close.columns)[:n_cols]:
+            close.at[ts, sym] = close.at[ts, sym] * 1.0005
+    _dump(backup, path)
+
+
+def test_last_bar_only_diff_is_exempted_as_unsettled_candle(tmp_path):
+    """差异全落在重叠区最后一根 bar → 判 PASS 并说明是收盘补全。
+
+    2026-08-08 线上实证：全量重建后，备份里那根卡在收盘边界上的 K 线被补全，
+    close 变了（现货 1 格、永续 113 格），open 一格没变。这不是补丁改了历史数据，
+    校验器不该为此判 FAIL、逼人每次手工排查。
+    """
+    _make_fixture(tmp_path, "none")
+    for market, n_cols in (("spot", 1), ("swap", 3)):
+        _perturb_backup_close(tmp_path, market, [-1], n_cols)
+
+    code, stdout = _run(tmp_path)
+    checks = _checks(stdout)
+
+    assert code == 0, stdout
+    assert all(checks.values()), checks
+    assert "豁免" in stdout, f"豁免了就要说清楚为什么，否则等于偷偷放水：\n{stdout}"
+    assert "未收盘" in stdout, stdout
+
+
+def test_diff_beyond_last_bar_still_fails(tmp_path):
+    """差异只要多出一根 bar 就不再豁免 —— 豁免口径必须是最窄的那一档。"""
+    _make_fixture(tmp_path, "none")
+    for market in ("spot", "swap"):
+        _perturb_backup_close(tmp_path, market, [-1, -2], 2)
+
+    code, stdout = _run(tmp_path)
+    checks = _checks(stdout)
+
+    assert code == 1, f"倒数第二根也变了就不是收盘补全，必须判 FAIL\n{stdout}"
+    failed = {name for name, ok in checks.items() if not ok}
+    assert failed == {"回归勾稽/spot", "回归勾稽/swap"}, failed
+    assert "需人工排查" in stdout, stdout
+
+
 def test_cross_offset_backup_fails_with_actionable_hint(tmp_path):
     """拿别的 offset 的备份来比：必须判 FAIL，且要点破成因。
 

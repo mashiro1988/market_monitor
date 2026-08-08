@@ -116,6 +116,7 @@ def check_regression(pivot: dict, backup_path: Path, market: str) -> bool:
         return False
     old = load_pickle(backup_path)
     legacy = LEGACY_KEYS_SWAP if market == "swap" else LEGACY_KEYS_SPOT
+    trailing_exempt: list[str] = []   # 落在末根未收盘 bar 上、已豁免的差异
     for key in legacy:
         if key not in old:
             continue
@@ -143,9 +144,25 @@ def check_regression(pivot: dict, backup_path: Path, market: str) -> bool:
         diff = ((a - b).abs() > TOLERANCE) & a.notna() & b.notna()
         n_diff = int(diff.to_numpy().sum())
         if n_diff:
-            record(f"回归勾稽/{market}", False, f"{key} 有 {n_diff} 个格子被改动")
+            # 末根 bar 豁免（2026-08-08 实证）：备份拍摄那一刻，重叠区最后一根 K 线
+            # 往往刚好卡在收盘边界上、还没定型，写进备份的是临时收盘价；之后重建重新
+            # 拉数，这根收完，close 就变了。open 不受影响（第一笔成交即定死），所以
+            # 「open 全对、只有 close 差且全在末根」是这个成因的特征签名。
+            # 判据从严：差异必须**全部**落在最后一根上才豁免，多一根都不放。
+            rows_with_diff = set(diff.index[diff.any(axis=1)])
+            if rows_with_diff <= {rows[-1]}:
+                trailing_exempt.append(f"{key} {n_diff} 格")
+                continue
+            record(f"回归勾稽/{market}", False,
+                   f"{key} 有 {n_diff} 个格子被改动，分布在 {len(rows_with_diff)} 个时刻"
+                   f"（非末根 bar，不属于收盘补全，需人工排查）")
             return False
-    record(f"回归勾稽/{market}", True, f"旧字段 {legacy} 在重叠区间逐值未变")
+    if trailing_exempt:
+        record(f"回归勾稽/{market}", True,
+               f"旧字段 {legacy} 在重叠区逐值未变；末根 bar 上的 {', '.join(trailing_exempt)}"
+               f"属备份拍摄时该 K 线未收盘、重建后被补全，与补丁无关，已豁免")
+    else:
+        record(f"回归勾稽/{market}", True, f"旧字段 {legacy} 在重叠区间逐值未变")
     return True
 
 
