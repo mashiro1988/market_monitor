@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
-"""新闻内容标签（news-impact-engine Phase 1）：LLM 给每条新闻打 topic/方向/量级。
+"""新闻内容标签：LLM 给每条新闻打**方向**（利多/利空/中性），纯内容判断、不看价格。
 
-纯内容判断、**不看价格**——量级是 a-priori 严重度（事件本身多大），不是市场实际反应。
-用便宜的 flash 模型批量打；解析层过滤幻觉 id 与非法枚举（对齐 config 三张枚举）。
-落库写 news_items.topic / news_direction / magnitude_tier / tagged_at。
+【2026-08-08 切换】topic 与量级(magnitude)停判停写，只判 direction：
+- topic：事件池并行期验收通过，按 news-research-phase1-event-pool.md §13.4 既定步骤退役，
+  语义归类由 research_events 挂接接替（标注页位置 = 事件徽章，spec §9.2）；
+- 量级：用户拍板一并退役——spec §4.2 校准实测它是较差的重要性信号（"≥6 且量级非小"
+  driver 召回 77% vs 分数闸门 96%），行为分类的新闻命中信号改用事件池闸门口径。
+历史 news_items.topic / magnitude_tier 数据原地保留，不清洗。
+tagged_at 继续盖章——它是事件挂接游标的前置（event_linking 捞 tagged_at 非空的新闻）。
+用便宜的 flash 模型批量打；解析层过滤幻觉 id 与非法枚举。
 """
 from __future__ import annotations
 
@@ -20,16 +25,10 @@ from services.deepseek_client import call_deepseek_chat
 from services.time_utils import utc_now_naive
 
 TAGGING_SYSTEM_PROMPT = (
-    "你是宏观新闻分类员。给每条新闻打三个**纯内容**标签（只看新闻本身，**不看价格、不猜市场反应**）：\n\n"
-    "1. topic（主题，必须严格选下面之一）：\n"
-    + "、".join(config.NEWS_TOPICS) + "\n\n"
-    "2. direction（相对**风险资产**——BTC/纳指——的应然影响，三选一）：利多 / 利空 / 中性\n\n"
-    "3. magnitude（a-priori 量级 rubric，事件本身有多大，三选一）：\n"
-    "   - 大 = 直接改宏观/政策/流动性/地缘定价的一级事件（开战、央行决议、CPI 意外、主权违约、海峡封锁、ETF 获批）\n"
-    "   - 中 = 有方向但非一级（官员喊话、二线数据、局部摩擦、单个公司事件）\n"
-    "   - 小 = 背景 / 重复转述 / 评论 / 行情综述 / 已知信息复述\n\n"
+    "你是宏观新闻分类员。给每条新闻打一个**纯内容**标签（只看新闻本身，**不看价格、不猜市场反应**）：\n\n"
+    "direction（相对**风险资产**——BTC/纳指——的应然影响，三选一）：利多 / 利空 / 中性\n\n"
     "只返回 JSON，不要 Markdown：\n"
-    '{"items": [{"id": int, "topic": "...", "direction": "...", "magnitude": "..."}, ...]}\n'
+    '{"items": [{"id": int, "direction": "..."}, ...]}\n'
     "每条输入新闻在 items 里有且仅有一项，id 严格对应输入。"
 )
 
@@ -72,7 +71,7 @@ def _call_deepseek_tagger(user_content: str) -> str:
 
 
 def _parse_tagging_response(raw: str, valid_ids: set[int]) -> dict[int, dict]:
-    """解析 items；过滤幻觉 id 与非法枚举（topic/direction/magnitude 必须在 config 枚举内）。"""
+    """解析 items；过滤幻觉 id 与非法枚举（direction 必须在 config.NEWS_DIRECTIONS 内）。"""
     text = raw.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
@@ -98,16 +97,10 @@ def _parse_tagging_response(raw: str, valid_ids: set[int]) -> dict[int, dict]:
             continue
         if nid not in valid_ids:
             continue
-        topic = item.get("topic")
         direction = item.get("direction")
-        magnitude = item.get("magnitude")
-        if topic not in config.NEWS_TOPICS:
-            continue
         if direction not in config.NEWS_DIRECTIONS:
             continue
-        if magnitude not in config.NEWS_MAGNITUDE_TIERS:
-            continue
-        out[nid] = {"topic": topic, "direction": direction, "magnitude": magnitude}
+        out[nid] = {"direction": direction}
     return out
 
 
@@ -124,9 +117,8 @@ def tag_news_batch(session: Session, news_list: list[NewsItem]) -> int:
         n = by_id.get(nid)
         if n is None:
             continue
-        n.topic = tags["topic"]
+        # 2026-08-08 切换后只写方向；topic/magnitude_tier 不再写入（历史值原地保留）。
         n.news_direction = tags["direction"]
-        n.magnitude_tier = tags["magnitude"]
         # traditional_open 是**前置条件**，新闻入库时就已设好（news_scanner / backfill_traditional_open），
         # 打标只写内容标签、不碰它。
         n.tagged_at = now
@@ -146,40 +138,6 @@ def backfill_traditional_open(session: Session) -> int:
         n.traditional_open = market_calendar.is_traditional_open(n.timestamp)
     session.commit()
     return len(rows)
-
-
-_UNSET = object()
-
-
-def update_news_tags(session: Session, news_id: int, topic: str | None | object = _UNSET,
-                     magnitude_tier: str | None | object = _UNSET,
-                     news_direction: str | None | object = _UNSET) -> NewsItem:
-    """人工修正一条新闻的内容标签（标注页用）。校验枚举（必须在 config 三张库内）、落库、
-    置 tagged_at（人工改过的不会再被自动重打）。没传的字段不动；显式传 None 清空。"""
-    n = session.query(NewsItem).filter(NewsItem.id == news_id).first()
-    if n is None:
-        raise ValueError(f"新闻 #{news_id} 不存在")
-    if topic == "":
-        topic = None
-    if magnitude_tier == "":
-        magnitude_tier = None
-    if news_direction == "":
-        news_direction = None
-    if topic is not _UNSET and topic is not None and topic not in config.NEWS_TOPICS:
-        raise ValueError(f"非法 topic: {topic!r}")
-    if magnitude_tier is not _UNSET and magnitude_tier is not None and magnitude_tier not in config.NEWS_MAGNITUDE_TIERS:
-        raise ValueError(f"非法 magnitude: {magnitude_tier!r}")
-    if news_direction is not _UNSET and news_direction is not None and news_direction not in config.NEWS_DIRECTIONS:
-        raise ValueError(f"非法 direction: {news_direction!r}")
-    if topic is not _UNSET:
-        n.topic = topic
-    if magnitude_tier is not _UNSET:
-        n.magnitude_tier = magnitude_tier
-    if news_direction is not _UNSET:
-        n.news_direction = news_direction
-    n.tagged_at = utc_now_naive()
-    session.commit()
-    return n
 
 
 def tag_untagged(session: Session, limit: int = 500, batch_size: int | None = None) -> int:

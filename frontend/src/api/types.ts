@@ -449,12 +449,6 @@ export type NewsSourceMeta = {
   language: string;
 };
 
-export type NewsTagUpdateRequest = {
-  topic: string | null;
-  magnitude_tier: string | null;
-  news_direction: string | null;
-};
-
 export type ObsResult = {
   status: string;
   net_pct: number | null;

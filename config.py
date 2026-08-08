@@ -2,6 +2,8 @@
 统一配置文件 - Investment Agent
 """
 import os
+from datetime import datetime
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -156,7 +158,9 @@ MARKET_HISTORY_BASELINE_LOOKBACK_DAYS = int(os.getenv("MARKET_HISTORY_BASELINE_L
 # ============================================================
 # 新闻影响力引擎 · 主题台账（docs/specs/news-impact-engine-plan.md，Phase 1）
 # ============================================================
-# 主题分类种子表：LLM 把每条新闻归入其一（消歧后才能跨时间聚合）。"其他" 兜底，定期审。
+# 【已冻结·遗留 2026-08-08】主题分类种子表：打标已停判停写 topic（语义归类改走研究事件池，
+# news-research-phase1-event-pool.md §13.4 切换）。枚举保留仅为历史数据可读（news_items.topic
+# 存量值）与 theme_ledger 遗留代码引用，勿新增消费者。
 NEWS_TOPICS = (
     "地缘冲突",       # 战争 / 军事 / 制裁 / 海峡封锁
     "美联储政策",     # FOMC / 官员讲话 / 降息加息预期
@@ -170,9 +174,10 @@ NEWS_TOPICS = (
     "公司财报",       # 财报 / 指引 / 重大公司事件
     "其他",           # 兜底
 )
-# a-priori 量级（事件本身有多大，看内容不看价格）。rubric 见 news_tagging.py。
+# 【已冻结·遗留 2026-08-08】a-priori 量级已停判停写（用户拍板；spec §4.2 实测它是较差的
+# 重要性信号）。枚举保留仅为历史数据可读（news_items.magnitude_tier 存量值）。
 NEWS_MAGNITUDE_TIERS = ("大", "中", "小")
-# 方向：相对风险资产（BTC/纳指）的应然影响。
+# 方向：相对风险资产（BTC/纳指）的应然影响。（在役：打标唯一还在判的内容标签）
 NEWS_DIRECTIONS = ("利多", "利空", "中性")
 
 # 标注窗口（news-impact-engine Phase 2）：每品种**单** 15min 档。
@@ -184,6 +189,11 @@ ANNOTATION_WINDOW_SCALES = {
     "BTC/USDT": [{"window_minutes": 15, "threshold_pct": 0.5, "pre_minutes": 60}],
     "NQ=F":     [{"window_minutes": 15, "threshold_pct": 0.3, "pre_minutes": 60}],
 }
+
+# 待标注回溯下限（2026-08-08 用户拍板）：早于北京 2026-07-16 00:00（= UTC 07-15 16:00）的
+# 窗口不再进待标注列表——7 月中旬前的积压不补标。只截"全量回溯"的显示下限，不动行为段
+# 与历史标注数据；已标注列表的 needs_review 时代守卫同步以此为界（否则老标注全体误亮橙标）。
+ANNOTATION_BACKLOG_FLOOR_UTC = datetime(2026, 7, 15, 16, 0)
 
 # 标注页「宏观同期对标」清单：(symbol, 中文标签[, 单位])。增减对标资产只改这里。
 # symbol 必须是 price_snapshots 里在采的（config 价格源内）。
@@ -230,9 +240,9 @@ BEHAVIOR_ESS_THIN = float(os.getenv("BEHAVIOR_ESS_THIN", "5"))
 # 50% 门槛能穿过维护时段不断线；数据连续性问题由休市 perp 代理补点解决（另立项）。
 # （2026-07-10 曾试 0.95，代价是维护后 2h+ 黑窗 + 日经全场稀疏，2026-07-12 回退定稿。）
 BEHAVIOR_COVERAGE_MIN = float(os.getenv("BEHAVIOR_COVERAGE_MIN", "0.5"))
-# 新闻命中：段窗 ± 分钟内存在 a-priori 量级 ∈ BEHAVIOR_NEWS_MAGNITUDES 的新闻（内容判，不看价格）。
+# 新闻命中：段窗 ± 分钟内存在重要新闻。判据 2026-08-08 起复用事件池闸门口径
+# （llm_importance ≥ EVENT_LINK_MIN_IMPORTANCE 或未评分放行）；旧量级口径随量级停判退役。
 BEHAVIOR_NEWS_WINDOW_MIN = int(os.getenv("BEHAVIOR_NEWS_WINDOW_MIN", "30"))
-BEHAVIOR_NEWS_MAGNITUDES = ("大", "中")
 # rolling S 展示曲线窗口点数（2026-07-09 用户定 30 点 ≈ 2.5h）；纯展示——不触发、不分类、不告警。
 BEHAVIOR_ROLLING_POINTS = int(os.getenv("BEHAVIOR_ROLLING_POINTS", "30"))
 # （Phase 2 退役）BEHAVIOR_REPLACES_ANNOTATION_WINDOWS 开关已删除：标注页固定以 behavior_segments

@@ -84,13 +84,19 @@ def _points(session: Session, symbol: str, start: datetime, end: datetime) -> li
 
 
 def _news_ids(session: Session, start: datetime, end: datetime) -> list[int]:
-    """段窗 ±BEHAVIOR_NEWS_WINDOW_MIN 内 a-priori 量级大/中的新闻（内容判，不看价格）。"""
+    """段窗 ±BEHAVIOR_NEWS_WINDOW_MIN 内的重要新闻。
+
+    2026-08-08 换口径：量级(magnitude)停判停写后，改用事件池闸门同款判据——
+    llm_importance ≥ EVENT_LINK_MIN_IMPORTANCE(6) **或未评分放行**（评分调用失败≠不重要）。
+    依据 news-research-phase1-event-pool.md §4.2 线上 30 天校准：该口径对人工 driver
+    召回 96%，对照"量级非小"仅 77%——量级本就是较差的重要性信号。"""
     pad = timedelta(minutes=config.BEHAVIOR_NEWS_WINDOW_MIN)
     rows = (
         session.query(NewsItem.id)
         .filter(NewsItem.timestamp >= start - pad,
                 NewsItem.timestamp <= end + pad,
-                NewsItem.magnitude_tier.in_(config.BEHAVIOR_NEWS_MAGNITUDES))
+                (NewsItem.llm_importance.is_(None))
+                | (NewsItem.llm_importance >= config.EVENT_LINK_MIN_IMPORTANCE))
         .order_by(NewsItem.timestamp.asc())
         .all()
     )

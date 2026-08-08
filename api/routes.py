@@ -34,7 +34,7 @@ from schemas.annotations import (
 from schemas.behavior import BehaviorDailyResponse, BehaviorLinkageResponse, BehaviorReviewRequest, BehaviorSegmentsResponse
 from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
-from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta, NewsTagUpdateRequest
+from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta
 from schemas.predictions import (
     PredictionFamily,
     PredictionRow,
@@ -63,7 +63,7 @@ from schemas.research import (
 )
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, behavior_views, event_linking, event_pool, market_service, news_service, news_tagging, prediction_service, sector_service, task_service
+from services import alerts_service, annotation_service, behavior_views, event_linking, event_pool, market_service, news_service, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -358,24 +358,8 @@ def behavior_review(segment_id: int, request: BehaviorReviewRequest,
             "human_confirmed_at": row.human_confirmed_at.isoformat() if row.human_confirmed_at else None}
 
 
-@router.get("/annotations/tag-options")
-def annotation_tag_options() -> dict[str, list[str]]:
-    """内容标签三张「库」（标注页人工改标签的下拉用）：topic / 量级 / 方向。"""
-    return {
-        "topics": list(config.NEWS_TOPICS),
-        "magnitudes": list(config.NEWS_MAGNITUDE_TIERS),
-        "directions": list(config.NEWS_DIRECTIONS),
-    }
-
-
-@router.patch("/news/{news_id}/tags", response_model=NewsItemSchema)
-def news_tags_update(news_id: int, request: NewsTagUpdateRequest, db: Session = Depends(get_db)) -> NewsItemSchema:
-    """人工修正一条新闻的内容标签（topic/量级/方向），校验枚举后落库（置 tagged_at，不再被自动重打）。"""
-    try:
-        item = news_tagging.update_news_tags(db, news_id, **request.model_dump(exclude_unset=True))
-        return news_service.to_news_schema(item)
-    except ValueError as exc:
-        raise ApiError("NEWS_TAG_INVALID", str(exc), status_code=400) from exc
+# （2026-08-08 切换）GET /annotations/tag-options 与 PATCH /news/{id}/tags 退役：
+# 标注页内容标签下拉删除，语义归类走事件池（research_events），方向只读展示不再人工改。
 
 
 @router.post("/annotations", response_model=AnnotationResponse)

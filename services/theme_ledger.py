@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """主题反应台账（news-impact-engine Phase 1，docs/specs/news-impact-engine-plan.md）。
 
-引擎核心：把"每条新闻的内容标签(主题/方向/量级)" 和 "新闻之后的价格反应" 连起来，
-按 (主题 × 品种) 跨时间聚合，给出该主题最近几次的反应——脱敏 / 预判都从这里取数。
+【主题维度已冻结·遗留 2026-08-08】打标停判停写 topic/量级（事件池切换，
+news-research-phase1-event-pool.md §13.4）：topic_recent_reactions / ledger_overview 这类
+按主题聚合的函数从此只覆盖历史存量，不再有新数据流入，勿新增消费者。
+**在役例外**：forward_reaction / observed_reaction 是纯价格反应观测，与主题无关——
+研究事件池时间轴的观测值就靠它们，继续维护。
 
 故意只做定性/排名层（不做因果量级点估计）：
-- forward_reaction：纯观测，news 时刻起 N 分钟价格净变动 + 振幅。
-- topic_recent_reactions：同主题最近 N 次反应（可按 a-priori 量级做 severity 匹配）。
+- forward_reaction：纯观测，news 时刻起 N 分钟价格净变动 + 振幅。（在役）
+- topic_recent_reactions：同主题最近 N 次反应（可按 a-priori 量级做 severity 匹配）。（冻结）
 - rank_percentile：某幅度在一串同类幅度里的百分位（强/弱判定用，不用绝对阈值）。
 """
 from __future__ import annotations

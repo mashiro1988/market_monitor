@@ -237,9 +237,9 @@ def _add_btc_price(session, ts, price):
 
 
 def test_hours_zero_full_lookback_windows(session):
-    """hours<=0 = 全量：回溯到最早行为段；同一 40 天前的段在 hours=72 下不可见。"""
-    now = utc_now_naive()
-    start = now - timedelta(days=40)
+    """hours<=0 = 全量：回溯到最早行为段（受积压下限约束，见下一测试）；
+    同一段在 hours=72 下不可见。段锚定在下限次日，测试不随运行日期漂移。"""
+    start = config.ANNOTATION_BACKLOG_FLOOR_UTC + timedelta(days=1)
     end = start + timedelta(minutes=30)
     _add_btc_segment(session, start, end)
     _add_btc_price(session, start, 100000.0)
@@ -250,6 +250,20 @@ def test_hours_zero_full_lookback_windows(session):
     assert len(wins) == 1
     assert wins[0].change_pct == pytest.approx(0.6, abs=0.01)
     assert wins[0].annotatable                                 # 早已走完的段不冻结
+
+
+def test_hours_zero_respects_backlog_floor(session):
+    """积压下限（2026-08-08 拍板）：北京 7/16 前的段不再出窗口——不补标；下限后照常。"""
+    floor = config.ANNOTATION_BACKLOG_FLOOR_UTC
+    for start in (floor - timedelta(days=5), floor + timedelta(days=1)):
+        end = start + timedelta(minutes=30)
+        _add_btc_segment(session, start, end)
+        _add_btc_price(session, start, 100000.0)
+        _add_btc_price(session, end, 100600.0)
+    session.commit()
+    wins = load_price_windows(session, "BTC/USDT", hours=0)
+    assert len(wins) == 1                                      # 只剩下限后那个
+    assert wins[0].window_start.timestamp_utc.startswith((floor + timedelta(days=1)).isoformat()[:16])
 
 
 def test_hours_zero_no_segments_returns_empty(session):
@@ -370,3 +384,33 @@ def test_needs_review_skips_pre_segment_era_annotations(session):
     assert len(items) == 2
     assert len(old) == 1 and len(flagged) == 1
     assert min(by_start) == next(i.window_start.timestamp_utc for i in old)   # 更早那条 = 时代前
+
+
+def test_needs_review_skips_pre_floor_annotations(session):
+    """积压下限守卫（2026-08-08）：段时代早于下限时，下限前的老标注因窗口源被截断
+    本就匹配不到当前窗口，不该误亮 needs_review；下限后匹配不上的照旧标。"""
+    from models.news import NewsPriceAnnotation
+
+    now = utc_now_naive()
+    floor = config.ANNOTATION_BACKLOG_FLOOR_UTC
+    era_start = floor - timedelta(days=10)                     # 时代锚在下限之前
+    _add_btc_segment(session, era_start, era_start + timedelta(minutes=30))
+
+    def _ann(ws):
+        we = ws + timedelta(minutes=15)
+        session.add(NewsPriceAnnotation(
+            symbol="BTC/USDT", window_start=ws, window_end=we,
+            context_start=ws, context_end=we,
+            change_pct=1.0, no_clear_news=False, created_at=now, updated_at=now,
+        ))
+
+    _ann(floor - timedelta(days=5))     # 时代内但下限前：不标（窗口源已截断，属正常缺席）
+    _ann(now - timedelta(days=5))       # 下限后、无对应窗口：needs_review
+    session.commit()
+
+    items = annotation_service.list_annotations(session, symbol="BTC/USDT", hours=0).items
+    assert len(items) == 2
+    flagged = {i.window_start.timestamp_utc: i.needs_review for i in items}
+    pre_floor_key = min(flagged)
+    assert flagged[pre_floor_key] is False
+    assert [v for k, v in flagged.items() if k != pre_floor_key] == [True]

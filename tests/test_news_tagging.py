@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""新闻内容标签（news-impact-engine Phase 1）：LLM 批量打 topic/方向/量级 + 解析校验 + 落库。
+"""新闻内容标签：LLM 批量打**方向**（利多/利空/中性）+ 解析校验 + 落库。
 
-LLM 调用 mock 掉；只测解析(过滤幻觉id/非法枚举) + 落库(写列+tagged_at) + prompt 含 rubric。
+2026-08-08 切换（annotation-tags-event-pool-switchover design）：topic/量级停判停写，
+语义归类由事件池接替；本文件同步只测 direction 口径，并锁定提示词不再出现旧槽位。
+LLM 调用 mock 掉；只测解析(过滤幻觉id/非法枚举) + 落库(写列+tagged_at) + prompt 形态。
 """
 import sys
 import os
@@ -39,37 +41,36 @@ def _news(s, title, ts=None, traditional_open=True):
 
 def test_parse_filters_hallucination_and_bad_enums():
     raw = json.dumps({"items": [
-        {"id": 1, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"},
-        {"id": 2, "topic": "不存在的主题", "direction": "利空", "magnitude": "大"},   # 非法 topic
-        {"id": 3, "topic": "通胀数据", "direction": "向上", "magnitude": "中"},        # 非法 direction
-        {"id": 4, "topic": "通胀数据", "direction": "利多", "magnitude": "巨大"},      # 非法 magnitude
-        {"id": 99, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"},       # 幻觉 id
+        {"id": 1, "direction": "利空"},
+        {"id": 3, "direction": "向上"},        # 非法 direction
+        {"id": 99, "direction": "利空"},       # 幻觉 id
     ]})
     parsed = news_tagging._parse_tagging_response(raw, valid_ids={1, 2, 3, 4})
-    assert parsed == {1: {"topic": "地缘冲突", "direction": "利空", "magnitude": "大"}}
+    assert parsed == {1: {"direction": "利空"}}
 
 
-def test_tag_news_batch_writes_columns(session, monkeypatch):
+def test_tag_news_batch_writes_direction_only(session, monkeypatch):
+    """切换后落库只写 news_direction + tagged_at；topic/量级列保持空（历史数据才有值）。"""
     n1 = _news(session, "美军轰炸伊朗")
     n2 = _news(session, "美国CPI高于预期")
 
     def fake_call(user_content):
         return json.dumps({"items": [
-            {"id": n1.id, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"},
-            {"id": n2.id, "topic": "通胀数据", "direction": "利空", "magnitude": "大"},
+            {"id": n1.id, "direction": "利空"},
+            {"id": n2.id, "direction": "利空"},
         ]})
 
     monkeypatch.setattr(news_tagging, "_call_deepseek_tagger", fake_call)
     count = news_tagging.tag_news_batch(session, [n1, n2])
     assert count == 2
     session.refresh(n1); session.refresh(n2)
-    assert n1.topic == "地缘冲突" and n1.magnitude_tier == "大" and n1.news_direction == "利空"
-    assert n1.tagged_at is not None
-    assert n2.topic == "通胀数据"
+    assert n1.news_direction == "利空" and n1.tagged_at is not None
+    assert n1.topic is None and n1.magnitude_tier is None
+    assert n2.news_direction == "利空"
 
 
 def test_tag_untagged_only_picks_untagged(session, monkeypatch):
-    done = _news(session, "已打标"); done.topic = "其他"; done.tagged_at = datetime(2026, 6, 1, 12, 0)
+    done = _news(session, "已打标"); done.news_direction = "中性"; done.tagged_at = datetime(2026, 6, 1, 12, 0)
     todo = _news(session, "美军轰炸伊朗")
     session.commit()
 
@@ -77,7 +78,7 @@ def test_tag_untagged_only_picks_untagged(session, monkeypatch):
 
     def fake_call(user_content):
         captured["content"] = user_content
-        return json.dumps({"items": [{"id": todo.id, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"}]})
+        return json.dumps({"items": [{"id": todo.id, "direction": "利空"}]})
 
     monkeypatch.setattr(news_tagging, "_call_deepseek_tagger", fake_call)
     count = news_tagging.tag_untagged(session, limit=50, batch_size=12)
@@ -89,17 +90,16 @@ def test_tag_untagged_only_picks_untagged(session, monkeypatch):
 
 def test_tag_untagged_does_not_wait_for_window(session, monkeypatch):
     """内容标签不看价格 → 刚发的新闻(反应窗口没走完)也照打，不再卡'窗口走完'。"""
-    from datetime import timedelta
     fresh = _news(session, "刚发的大事", ts=datetime(2026, 6, 20, 11, 59))  # 1 分钟前
 
     def fake_call(user_content):
-        return json.dumps({"items": [{"id": fresh.id, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"}]})
+        return json.dumps({"items": [{"id": fresh.id, "direction": "利空"}]})
 
     monkeypatch.setattr(news_tagging, "_call_deepseek_tagger", fake_call)
     count = news_tagging.tag_untagged(session, limit=50)
     assert count == 1
     session.refresh(fresh)
-    assert fresh.topic == "地缘冲突"
+    assert fresh.news_direction == "利空"
 
 
 def test_tag_untagged_requires_traditional_open_precondition(session, monkeypatch):
@@ -111,7 +111,7 @@ def test_tag_untagged_requires_traditional_open_precondition(session, monkeypatc
 
     def fake_call(user_content):
         captured["content"] = user_content
-        return json.dumps({"items": [{"id": ready.id, "topic": "地缘冲突", "direction": "利空", "magnitude": "大"}]})
+        return json.dumps({"items": [{"id": ready.id, "direction": "利空"}]})
 
     monkeypatch.setattr(news_tagging, "_call_deepseek_tagger", fake_call)
     news_tagging.tag_untagged(session, limit=50)
@@ -132,31 +132,10 @@ def test_backfill_traditional_open(session):
     assert news_tagging.backfill_traditional_open(session) == 0       # 幂等
 
 
-def test_update_news_tags_validates_and_sticks(session):
-    """人工改内容标签：非法枚举被拒；合法落库 + tagged_at 置上(不再被自动重打)。"""
-    n = _news(session, "美军打击伊朗")
-    with pytest.raises(ValueError):
-        news_tagging.update_news_tags(session, n.id, topic="不存在的主题", magnitude_tier="大", news_direction="利空")
-    news_tagging.update_news_tags(session, n.id, topic="地缘冲突", magnitude_tier="大", news_direction="利空")
-    session.refresh(n)
-    assert n.topic == "地缘冲突" and n.magnitude_tier == "大" and n.news_direction == "利空"
-    assert n.tagged_at is not None                       # 置 tagged → tag_untagged 不会再碰它
-
-
-def test_update_news_tags_can_clear_one_field(session):
-    """显式传 None = 清空该字段；未传字段保持不变。"""
-    n = _news(session, "美军打击伊朗")
-    news_tagging.update_news_tags(session, n.id, topic="地缘冲突", magnitude_tier="大", news_direction="利空")
-    news_tagging.update_news_tags(session, n.id, topic=None)
-    session.refresh(n)
-    assert n.topic is None
-    assert n.magnitude_tier == "大"
-    assert n.news_direction == "利空"
-
-
-def test_prompt_documents_rubric():
+def test_prompt_direction_only():
+    """切换防回归：提示词只含方向三值，不再出现主题库与量级 rubric。"""
     p = news_tagging.TAGGING_SYSTEM_PROMPT
-    for topic in config.NEWS_TOPICS:
-        assert topic in p
-    assert "利多" in p and "利空" in p
-    assert "大" in p and "rubric" in p.lower() or "量级" in p
+    assert "利多" in p and "利空" in p and "中性" in p
+    for topic in ("地缘冲突", "美联储政策", "通胀数据"):     # 旧主题库样本不得回流
+        assert topic not in p
+    assert "量级" not in p and "magnitude" not in p

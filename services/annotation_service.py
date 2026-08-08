@@ -728,6 +728,7 @@ def load_price_windows(
         display_cutoff = utc_now_naive() - timedelta(hours=eff_hours)
     elif threshold_pct is None and window_minutes is None:
         # 全量：以最早行为段为回溯锚（无段 → 没有可标窗口）。窗口数仍受尾部截断 200 约束。
+        # 2026-08-08：再叠加积压下限——7/16（北京）前的老窗口不再进待标注（不补标拍板）。
         from models.behavior import BehaviorSegment
         first_start = (
             session.query(func.min(BehaviorSegment.start_dt))
@@ -736,7 +737,7 @@ def load_price_windows(
         )
         if first_start is None:
             return []
-        display_cutoff = first_start
+        display_cutoff = max(first_start, config.ANNOTATION_BACKLOG_FLOOR_UTC)
     else:
         # 调试路径（显式 threshold/window）没有行为段锚点，全量兜底 30 天。
         display_cutoff = utc_now_naive() - timedelta(hours=24 * 30)
@@ -1203,9 +1204,12 @@ def list_annotations(
         selected_ids = _parse_news_ids(row.causal_news_ids)
         cur_ids, s_by_ann = _sym_window_index(row.symbol)
         anchor = _era_anchor(row.symbol)
+        # 守卫下界与窗口源的积压下限同步抬升：7/16 前的老标注在当前窗口源里本就无对应窗口，
+        # 不参与 needs_review（同"时代守卫"逻辑，2026-08-08）。
+        guard_floor = max(anchor, config.ANNOTATION_BACKLOG_FLOOR_UTC) if anchor is not None else None
         needs_review = (
-            anchor is not None
-            and row.window_end >= anchor
+            guard_floor is not None
+            and row.window_end >= guard_floor
             and row.id not in cur_ids
         )
         items.append(AnnotationListItem(

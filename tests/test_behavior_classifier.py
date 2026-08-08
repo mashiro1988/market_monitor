@@ -81,9 +81,9 @@ def test_pure_resonance_and_macro_news(session, monkeypatch):
     assert row.classification == "pure_resonance"
     scores = json.loads(row.s_scores)
     assert scores["NQ=F"]["s"] >= 0.5
-    # 补一条大新闻 → 重跑（换 class_version 强制重分类）→ macro_news
+    # 补一条重要新闻（过事件池闸门线）→ 重跑（换 class_version 强制重分类）→ macro_news
     session.add(NewsItem(timestamp=row.start_dt + timedelta(minutes=5),
-                         source="test", title="CPI 低于预期", magnitude_tier="大"))
+                         source="test", title="CPI 低于预期", llm_importance=8))
     session.commit()
     monkeypatch.setattr(bc, "CLASS_VERSION", "v-test")
     bc.classify(session, "BTC/USDT", now=now)
@@ -107,12 +107,25 @@ def test_no_ref_news_when_refs_closed(session):
     btc = _btc_with_push()
     _seed_prices(session, "BTC/USDT", btc)       # 不给任何参照数据 = 宏观休市
     session.add(NewsItem(timestamp=T0 + timedelta(minutes=95),
-                         source="test", title="周末地缘冲突升级", magnitude_tier="大"))
+                         source="test", title="周末地缘冲突升级", llm_importance=8))
     session.commit()
     bc.classify(session, "BTC/USDT", now=_now_after(btc))
     row = _one_composed_segment(session)
     assert row.classification == "no_ref_news"   # 无对照 ≠ 无宏观新闻
     assert row.s_scores == "{}"
+
+
+def test_news_ids_gate_reuses_event_pool_line(session):
+    """新闻命中口径（2026-08-08 换）：分数 ≥6 或未评分放行；低分不计。量级不再参与。"""
+    inside = T0 + timedelta(minutes=10)
+    hi = NewsItem(timestamp=inside, source="test", title="高分", llm_importance=8)
+    lo = NewsItem(timestamp=inside, source="test", title="低分", llm_importance=3)
+    unrated = NewsItem(timestamp=inside, source="test", title="未评分")          # 评分失败≠不重要
+    lo_big = NewsItem(timestamp=inside, source="test", title="低分但旧量级大",
+                      llm_importance=3, magnitude_tier="大")                     # 旧口径会命中，新口径不看
+    session.add_all([hi, lo, unrated, lo_big]); session.commit()
+    ids = bc._news_ids(session, T0, T0 + timedelta(minutes=20))
+    assert set(ids) == {hi.id, unrated.id}
 
 
 def test_count_only_and_idempotent(session):

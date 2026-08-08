@@ -495,14 +495,6 @@ export function AnnotationsPage() {
     }
   });
 
-  // 内容标签：库（下拉选项）+ 人工改一条新闻的标签
-  const tagOptions = useQuery({ queryKey: ["tag-options"], queryFn: api.tagOptions, staleTime: 60 * 60_000 });
-  const updateTags = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: { topic?: string; magnitude_tier?: string; news_direction?: string } }) =>
-      api.updateNewsTags(id, body),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["context-news"] }); }
-  });
-
   const applyAutoResult = useCallback((result: AutoAnnotateResponse) => {
       setAutoResult(result);
       setNewsRoles(result.news_roles ?? {});
@@ -662,32 +654,15 @@ export function AnnotationsPage() {
     { key: "source", header: "来源", cell: (row: NewsItem) => row.source },
     { key: "score", header: "LLM", cell: (row: NewsItem) => row.llm_importance ?? "—" },
     {
-      key: "tags",
-      header: "内容标签（可改）",
-      cell: (row: NewsItem) => {
-        const opts = tagOptions.data;
-        const dirColor =
-          row.news_direction === "利多" ? "#16a34a" :
-          row.news_direction === "利空" ? "#dc2626" : undefined;
-        const sel = (val: string | null, list: string[] | undefined, field: "topic" | "magnitude_tier" | "news_direction", color?: string) => (
-          <select
-            value={val ?? ""}
-            style={{ fontSize: 13, padding: "1px 2px", color, maxWidth: field === "topic" ? 110 : 64 }}
-            onChange={(e) => updateTags.mutate({ id: row.id, body: { [field]: e.target.value || null } })}
-            title={field === "topic" ? "主题" : field === "magnitude_tier" ? "量级" : "方向"}
-          >
-            <option value="">{field === "topic" ? "未打标" : "—"}</option>
-            {(list ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
-        );
-        return (
-          <span style={{ display: "inline-flex", gap: 3, alignItems: "center", flexWrap: "wrap" }}>
-            {sel(row.topic, opts?.topics, "topic")}
-            {sel(row.magnitude_tier, opts?.magnitudes, "magnitude_tier")}
-            {sel(row.news_direction, opts?.directions, "news_direction", dirColor)}
-          </span>
-        );
-      }
+      // 2026-08-08 切换：内容标签下拉退役（主题→事件池接替，量级停判）；方向只读，复用新闻页着色。
+      key: "direction",
+      header: "方向",
+      cell: (row: NewsItem) => (
+        <span className={row.news_direction === "利多" ? "up-text"
+                         : row.news_direction === "利空" ? "down-text" : "muted"}>
+          {row.news_direction ?? "—"}
+        </span>
+      )
     },
     {
       key: "event",
@@ -697,7 +672,7 @@ export function AnnotationsPage() {
       )
     },
     { key: "title", header: "标题", cell: (row: NewsItem) => row.title }
-  ], [newsRoles, setNewsRole, tagOptions.data, updateTags]);
+  ], [newsRoles, setNewsRole]);
 
   return (
     <section>

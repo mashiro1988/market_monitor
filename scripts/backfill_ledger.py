@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""主题台账历史回灌（news-impact-engine Phase 1）。
+"""【已冻结·遗留 2026-08-08】主题台账历史回灌（news-impact-engine Phase 1）。
 
-把库里未打标的历史新闻批量打 topic/方向/量级，然后打印各品种的台账总览——
-让"哪些主题历史上动过价、最近反应趋势"立刻可见,不必等新数据攒。
+打标已停判停写 topic/量级（事件池切换,news-research-phase1-event-pool.md §13.4）——
+本脚本再跑只会给新闻打方向、台账总览只覆盖历史存量,不要再当作日常工具使用。
+保留仅为追溯历史回灌逻辑。
 
+原用途:把库里未打标的历史新闻批量打 topic/方向/量级,打印各品种台账总览。
 跑法（生产服务器,数据在那里）：
   .venv/bin/python scripts/backfill_ledger.py [--limit N] [--symbols BTC/USDT,NQ=F]
 本地库自 2026-05-17 起停更,只能跑通流程、看不到近期数据（见 memory: local-env）。
