@@ -143,6 +143,36 @@ def test_each_break_mode_trips_exactly_its_own_check(tmp_path, break_mode, expec
     assert len(failed) == 2, f"{break_mode} 应两个市场都失败，实际: {failed}"
 
 
+def test_cross_offset_backup_fails_with_actionable_hint(tmp_path):
+    """拿别的 offset 的备份来比：必须判 FAIL，且要点破成因。
+
+    2026-08-08 线上实证：用 10m 的新宽表比 30m 的备份，两者 bar 边界不同
+    （:10 vs :30）、时间戳交集恒为零。校验器拒绝比对是对的，但当时只说
+    「无重叠区间」，让人误以为数据坏了 —— 提示里必须带上 offset 这条线索。
+    """
+    _make_fixture(tmp_path, "none")
+    # 把备份的时间戳整体移到每小时 :30，模拟"另一个 offset 的备份"
+    for market in ("spot", "swap"):
+        path = tmp_path / "backup" / f"market_pivot_{market}_2026.pkl"
+        with open(path, "rb") as fh:
+            backup = pickle.load(fh)
+        shifted = {k: v.set_axis(v.index + pd.Timedelta(minutes=30), axis=0)
+                   for k, v in backup.items()}
+        _dump(shifted, path)
+
+    code, stdout = _run(tmp_path)
+    checks = _checks(stdout)
+
+    assert code == 1, stdout
+    failed = {name for name, ok in checks.items() if not ok}
+    assert failed == {"回归勾稽/spot", "回归勾稽/swap"}, f"只该回归勾稽失败，实际: {failed}"
+    # 结构与抽样不该被连累 —— 数据本身是好的
+    assert checks["结构/spot"] and checks["抽样勾稽/spot"], stdout
+    # 提示必须点破成因，而不是只说"无重叠区间"
+    assert "offset" in stdout, f"提示里没提 offset，用户无从下手：\n{stdout}"
+    assert ":30" in stdout and ":00" in stdout, f"提示里没给出两边的分钟数：\n{stdout}"
+
+
 def test_missing_backup_is_reported_not_silently_skipped(tmp_path):
     """没给备份就无法证明旧数未变 —— 必须判 FAIL，不能装作通过。"""
     _make_fixture(tmp_path, "none")

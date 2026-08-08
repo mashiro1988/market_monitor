@@ -22,6 +22,7 @@ import pickle
 import random
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
@@ -101,6 +102,14 @@ def check_sampling(pivot: dict, per_symbol_dir: Path, market: str,
     return True
 
 
+def _minute_of(ts) -> Optional[int]:
+    """取时间戳的分钟数，用于识别「拿错 offset 的备份来比」。"""
+    try:
+        return int(pd.Timestamp(ts).minute)
+    except Exception:
+        return None
+
+
 def check_regression(pivot: dict, backup_path: Path, market: str) -> bool:
     if not backup_path.exists():
         record(f"回归勾稽/{market}", False, f"备份不存在: {backup_path}")
@@ -117,7 +126,18 @@ def check_regression(pivot: dict, backup_path: Path, market: str) -> bool:
         rows = old_df.index.intersection(new_df.index)
         cols = [c for c in old_df.columns if c in set(new_df.columns)]
         if len(rows) == 0 or not cols:
-            record(f"回归勾稽/{market}", False, f"{key} 与备份无重叠区间，无法比对")
+            # 最常见的成因：拿 A offset 的宽表去比 B offset 的备份。不同 offset 的
+            # K 线边界不同（30m 的 bar 从每小时 :30 起，10m 的从 :10 起），时间戳
+            # 永不重合、交集恒为零 —— 这不是数据坏了，是两份东西本来就不可比。
+            hint = ""
+            if len(rows) == 0 and len(old_df.index) and len(new_df.index):
+                old_min = _minute_of(old_df.index[-1])
+                new_min = _minute_of(new_df.index[-1])
+                if old_min is not None and new_min is not None and old_min != new_min:
+                    hint = (f"；备份的 bar 落在每小时 :{old_min:02d}、当前这份落在 :{new_min:02d}"
+                            f" —— 八成是拿不同 offset 的两份在比，请用同 offset 的备份")
+            record(f"回归勾稽/{market}", False,
+                   f"{key} 与备份无重叠区间，无法比对{hint}")
             return False
         a, b = old_df.loc[rows, cols], new_df.loc[rows, cols]
         diff = ((a - b).abs() > TOLERANCE) & a.notna() & b.notna()
