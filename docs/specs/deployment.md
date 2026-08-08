@@ -264,10 +264,26 @@ set -euo pipefail
 cd /opt/market_monitor
 git pull --ff-only
 .venv/bin/pip install -r requirements.txt
-( cd frontend && npm ci && npm run build )        # 严格按 lockfile 安装并先构建
-sudo systemctl restart market-monitor             # 再重启
+# 前端构建必须带上 venv 的 PATH —— 见下方「⚠ python not found」
+( cd frontend && npm ci && PATH=/opt/market_monitor/.venv/bin:$PATH npm run build )
+sudo systemctl restart market-monitor             # 先构建、再重启
 sudo systemctl --no-pager status market-monitor
 ```
+
+> **⚠ `npm run build` 报 `sh: 1: python: not found`**（2026-08-08 部署实撞）
+>
+> `frontend/package.json` 的 `build` 第一步是
+> `generate:api-types → python ../scripts/generate_openapi_types.py`，
+> 调的是**裸 `python`**。服务器上只有 `python3` 和 venv 里那个，PATH 上没有 `python`，
+> 于是构建在第一步就死。**修法**：把 venv 的 bin 临时插到 PATH 最前面（上面已内置）。
+>
+> 安全性：该脚本只 `create_app()` 取 OpenAPI schema。`create_tables()` 与调度器启动都在
+> `lifespan` 里（`api/app.py:311`），只有应用真被服务时才跑 —— 所以**服务运行中执行它
+> 不会连库、也不会拉起第二个调度器**。
+>
+> 该脚本会重新生成 `frontend/src/api/types.ts`（该文件已提交进仓库）。正常情况下生成结果
+> 与仓库里的一致、`git status` 无改动；若出现改动，说明有人改了后端 schema 却没重新生成，
+> 应当回到本地补生成并提交，而不是在服务器上就地改。
 
 ## 7. 安全加固
 
