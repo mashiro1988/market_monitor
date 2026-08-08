@@ -190,14 +190,16 @@ def get_sector_tokens(session: Session, category: str) -> SectorTokensResponse:
         _, returns_by_market[market_name] = _compute_returns_for_close(
             close, as_of=snapshot_at)
 
-    # 资金流：过闸后按规范化 symbol 现算（两侧独立）
+    # 资金流：宽表优先、缺 taker 字段则回退读单币文件（两侧独立，与榜单同一口径）
     flows_by_market: dict[str, dict[str, dict[str, float]]] = {}
     for market_name in sector_flows.MARKETS:
         pivot = market_data.pivot(market_name)
-        if pivot is None or sector_flows.check_flow_gate(pivot):
+        if pivot is None:
             continue
-        flows_by_market[market_name] = sector_flows.per_symbol_flows(
-            pivot, as_of=snapshot_at)
+        flows, reason = sector_flows.resolve_per_symbol_flows(
+            pivot, market_name, as_of=snapshot_at)
+        if not reason:
+            flows_by_market[market_name] = flows
 
     def _token_flows(nsym: str) -> SectorFlows:
         sides: dict[str, Optional[SectorFlowSide]] = {}

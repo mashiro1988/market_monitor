@@ -320,13 +320,14 @@ def compute_all_sector_returns(
         pivot = market_data.pivot(market_name)
         if pivot is None:
             continue  # 该市场 pivot 本来就没拉到，不算勾稽失败（涨跌侧同样没有）
-        reason = sector_flows.check_flow_gate(pivot)
+        flows, reason = sector_flows.resolve_per_symbol_flows(
+            pivot, market_name, as_of=snapshot_at)
         if reason:
+            # 宽表和单币文件两条路都不通才算失败
             flow_gate_failures[market_name] = reason
-            logger.warning("资金流勾稽门未通过 market={}: {}", market_name, reason)
+            logger.warning("资金流不可用 market={}: {}", market_name, reason)
             continue
-        flows_by_market[market_name] = sector_flows.per_symbol_flows(
-            pivot, as_of=snapshot_at)
+        flows_by_market[market_name] = flows
 
     cat_to_syms = cmc_client.load_category_to_symbols(session)
     if not cat_to_syms:
