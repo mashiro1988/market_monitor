@@ -1544,3 +1544,9 @@ code {
 
 /* 行内徽章不许撑高行:带「金十重要」的行此前比邻行高 4px,列表看起来毛毛的 */
 .rp-row .s-badge { font-size: 11.5px; padding: 0 6px; line-height: 15px; }
+
+/* 行内的下拉按钮压平:通用 .button 自带 min-height:34px,会把时间轴行从 23px 撑到 40px
+   (与勾选框同源的坑)。事件详情头部的「管理」按钮不在行内,保持常规尺寸。 */
+.rp-row .rp-dropdown > .button {
+  min-height: 0; padding: 0 7px; font-size: 12px; line-height: 15px; border-radius: 5px;
+}
