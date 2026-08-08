@@ -97,12 +97,15 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
                 "auto_news_roles": "TEXT",
                 "prompt_version": "VARCHAR(40)",
                 "eval_set": "BOOLEAN NOT NULL DEFAULT 0",
+                "window_class": "VARCHAR(30)",
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_price_annotations ADD COLUMN {column_name} {column_type}"))
             # v1 → v2 一次性迁移 + v2.0 枚举升级到 v2.1（均幂等）
             if run_migrations:
                 migrate_legacy_annotations(conn)
+                # 历史标注的窗口级三类从行为段 human_class 反向回填（幂等，见函数注释）
+                backfill_annotation_window_class(conn)
 
         # tracked_markets：补软删除墓碑列（删除留行，避免 seed 重启把它补种回来）。
         if "tracked_markets" in table_names:
@@ -262,6 +265,65 @@ def migrate_legacy_annotations(conn) -> int:
             )
             changed += 1
     return changed
+
+
+def backfill_annotation_window_class(conn) -> int:
+    """历史标注补窗口级三类（2026-08-08 加列后一次性回填，幂等）。
+
+    数据来源 = 行为段的 human_class——它本就是保存标注时回写过去的同一个值，这里原路取回。
+    匹配规则与 annotation_service._write_back_window_class 保持一致（同 symbol、tier≥0.5 档、
+    区间重叠 ≥50% 且以较短一方为分母），避免回填口径与写入口径打架。
+    段被回补劈改 / 早于行为段时代的老标注匹配不到 → 保持 NULL（宁缺勿错），返回回填行数。"""
+    rows = conn.execute(text(
+        "SELECT id, symbol, window_start, window_end FROM news_price_annotations "
+        "WHERE window_class IS NULL"
+    )).fetchall()
+    if not rows:
+        return 0
+
+    filled = 0
+    for ann_id, symbol, w_start, w_end in rows:
+        if not w_start or not w_end:
+            continue
+        # SQLite 直接比较 DATETIME 文本（ISO 格式，字典序=时间序），无需在 Python 侧转换
+        segs = conn.execute(text(
+            "SELECT start_dt, end_dt, human_class FROM behavior_segments "
+            "WHERE symbol = :sym AND tier_idx >= 1 AND human_class IS NOT NULL "
+            "AND start_dt <= :w_end AND end_dt >= :w_start"
+        ), {"sym": symbol, "w_start": w_start, "w_end": w_end}).fetchall()
+        best, best_ratio = None, 0.0
+        for s_start, s_end, human_class in segs:
+            s0, s1 = _parse_dt(s_start), _parse_dt(s_end)
+            w0, w1 = _parse_dt(w_start), _parse_dt(w_end)
+            if None in (s0, s1, w0, w1):
+                continue
+            overlap = (min(s1, w1) - max(s0, w0)).total_seconds()
+            shorter = min((s1 - s0).total_seconds(), (w1 - w0).total_seconds()) or 1.0
+            ratio = overlap / shorter
+            if ratio > best_ratio:
+                best, best_ratio = human_class, ratio
+        if best is not None and best_ratio >= 0.5:
+            conn.execute(
+                text("UPDATE news_price_annotations SET window_class = :wc WHERE id = :id"),
+                {"wc": best, "id": ann_id},
+            )
+            filled += 1
+    return filled
+
+
+def _parse_dt(value):
+    """SQLite 取回的时间可能是 datetime 对象或 ISO 字符串，统一成 datetime；无法解析返回 None。"""
+    from datetime import datetime as _dt
+
+    if value is None or isinstance(value, _dt):
+        return value
+    text_value = str(value).strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return _dt.strptime(text_value, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def seed_tracked_markets(session=None, *, slugs: list[str] | None = None, tags: list[str] | None = None):

@@ -1026,6 +1026,10 @@ export function AnnotationsPage() {
                     redundant > 0 ? `+${redundant} 条同簇冗余` : null,
                     row.confidence != null ? `置信 ${row.confidence.toFixed(2)}` : null,
                   ].filter(Boolean).join(" · ");
+                  // 2026-08-08：无 driver 的窗口按三类结论区分显示——"纯宏观共振"和"情绪·技术面"
+                  // 定义上都没有 driver，此前一律显示"无明确诱因"，把两种不同结论混成一句话。
+                  // 老标注（加列前保存、且段匹配不上无法回填）没有 window_class，仍回退旧文案。
+                  const klass = row.window_class ? classMeta(row.window_class) : null;
                   return (
                     <div className="ann-briefs">
                       {drivers.map((b) => (
@@ -1035,7 +1039,15 @@ export function AnnotationsPage() {
                           <span className="ann-brief-title">{b.title}</span>
                         </div>
                       ))}
-                      {!drivers.length && row.no_clear_news ? <span className="muted-text">无明确诱因</span> : null}
+                      {!drivers.length ? (
+                        klass ? (
+                          <span className={`klass ${klass.cls}`} title="人工审定的窗口驱动类型">
+                            {klass.label}
+                          </span>
+                        ) : row.no_clear_news ? (
+                          <span className="muted-text">无明确诱因</span>
+                        ) : null
+                      ) : null}
                       {footer ? <span className="muted-text small">{footer}</span> : null}
                     </div>
                   );

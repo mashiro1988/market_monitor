@@ -189,6 +189,70 @@ def test_migration_v1_and_v20_rows(session):
     assert migrate_legacy_annotations(session.connection()) == 0
 
 
+def test_backfill_window_class_from_segments(session):
+    """加列后回填（2026-08-08）：历史标注的三类从行为段 human_class 原路取回。
+    匹配口径与保存时一致（重叠≥50%，短边分母）；匹配不上保持 NULL（宁缺勿错）；幂等。"""
+    from database import backfill_annotation_window_class
+    from models.behavior import BehaviorSegment
+
+    def _seg(start, end, human_class):
+        session.add(BehaviorSegment(
+            symbol="BTC/USDT", start_dt=start, end_dt=end, direction=1,
+            tier_idx=1, tier_max=0.5, net_pct=0.6,
+            classification="pure_resonance", class_version="v1", human_class=human_class,
+        ))
+
+    def _ann(start, end):
+        session.add(NewsPriceAnnotation(
+            symbol="BTC/USDT", window_start=start, window_end=end,
+            context_start=start, context_end=end, no_clear_news=True,
+        ))
+
+    # ① 窗口 ⊂ 段（重叠 100%）→ 取回 pure_resonance
+    _seg(W_START, W_START + timedelta(minutes=40), "pure_resonance")
+    _ann(W_START + timedelta(minutes=10), W_START + timedelta(minutes=25))
+    # ② 段存在但重叠 <50% → 保持 NULL
+    far = W_START - timedelta(days=2)
+    _seg(far, far + timedelta(minutes=20), "sentiment_tech")
+    _ann(far + timedelta(minutes=15), far + timedelta(minutes=75))
+    # ③ 完全没有对应段（行为段时代之前的老标注）→ 保持 NULL
+    orphan = W_START - timedelta(days=10)
+    _ann(orphan, orphan + timedelta(minutes=15))
+    session.commit()
+
+    filled = backfill_annotation_window_class(session.connection())
+    session.commit()
+    assert filled == 1
+
+    rows = {r.window_start: r.window_class
+            for r in session.query(NewsPriceAnnotation).all()}
+    assert rows[W_START + timedelta(minutes=10)] == "pure_resonance"
+    assert rows[far + timedelta(minutes=15)] is None
+    assert rows[orphan] is None
+    # 幂等：已填的不再重扫（WHERE window_class IS NULL），未匹配的也不会凭空补上
+    assert backfill_annotation_window_class(session.connection()) == 0
+
+
+def test_backfill_skips_segments_without_human_class(session):
+    """段存在但没人工审过（human_class 为空）→ 不编造结论。"""
+    from database import backfill_annotation_window_class
+    from models.behavior import BehaviorSegment
+
+    session.add(BehaviorSegment(
+        symbol="BTC/USDT", start_dt=W_START, end_dt=W_START + timedelta(minutes=40),
+        direction=1, tier_idx=1, tier_max=0.5, net_pct=0.6,
+        classification="pure_resonance", class_version="v1", human_class=None,
+    ))
+    session.add(NewsPriceAnnotation(
+        symbol="BTC/USDT", window_start=W_START + timedelta(minutes=10),
+        window_end=W_START + timedelta(minutes=25),
+        context_start=W_START, context_end=W_END, no_clear_news=True,
+    ))
+    session.commit()
+    assert backfill_annotation_window_class(session.connection()) == 0
+    assert session.query(NewsPriceAnnotation).one().window_class is None
+
+
 def test_migrate_drops_retired_roles(session):
     """Phase3a：迁移把存量 post_hoc_explanation / contradictory 从 news_roles 移除（归 noise），幂等。"""
     n1, n2, n3 = _seed(session)

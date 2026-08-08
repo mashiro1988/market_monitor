@@ -885,6 +885,16 @@ def _find_window_snapshot(session: Session, symbol: str, timestamp_value: dateti
     )
 
 
+def _validate_window_class(window_class: str | None) -> None:
+    """窗口级三类枚举校验（空值合法 = 未分类）。落库与回写段前共用，口径只此一处。"""
+    if not window_class:
+        return
+    from services.behavior_classifier import WINDOW_CLASSES
+
+    if window_class not in WINDOW_CLASSES:
+        raise ValueError(f"window_class 非法: {window_class!r}（可选: {', '.join(WINDOW_CLASSES)}）")
+
+
 def _write_back_window_class(session: Session, symbol: str,
                              window_start: datetime, window_end: datetime,
                              window_class: str | None) -> None:
@@ -894,10 +904,8 @@ def _write_back_window_class(session: Session, symbol: str,
     if not window_class:
         return
     from models.behavior import BehaviorSegment
-    from services.behavior_classifier import WINDOW_CLASSES
 
-    if window_class not in WINDOW_CLASSES:
-        raise ValueError(f"window_class 非法: {window_class!r}（可选: {', '.join(WINDOW_CLASSES)}）")
+    _validate_window_class(window_class)
     candidates = (
         session.query(BehaviorSegment)
         .filter(BehaviorSegment.symbol == symbol,
@@ -985,7 +993,13 @@ def upsert_annotation(session: Session, request: AnnotationCreateRequest) -> Ann
     if request.auto_reasoning is not None or request.auto_summary is not None:
         existing.prompt_version = ANNOTATION_PROMPT_VERSION
     existing.updated_at = utc_now_naive()
+    # 2026-08-08：三类结论同时落标注自身（标注自带完整结论，不依赖段匹配是否成功）。
+    # 校验必须先于赋值——否则非法值会先写进 ORM 对象再抛错，留下脏 session。
+    # 显式传 None 也写入：人工把分类清空时要能落回 NULL，不能靠 COALESCE 留住旧值。
+    _validate_window_class(request.window_class)
+    existing.window_class = request.window_class
     # Phase 2：标注保存 = 人工审核 → 窗口级三类回写行为段 human_class（重叠≥50% 匹配）。
+    # 行为页/结论页读段，两处并存：段是"这个时间段的性质"，标注列是"这次标注的结论"。
     _write_back_window_class(session, request.symbol, window_start, window_end, request.window_class)
     session.commit()
     return AnnotationResponse(id=existing.id)
@@ -1232,6 +1246,7 @@ def list_annotations(
             s_scores=s_by_ann.get(row.id, {}),
             market_reaction_type=row.market_reaction_type,
             confidence=row.confidence,
+            window_class=row.window_class,
             eval_set=bool(row.eval_set),
             needs_review=needs_review,
             labeler=row.labeler,
@@ -1833,6 +1848,9 @@ def export_training_jsonl(session: Session, days: int = 365, split: str = "train
                 "no_clear_news": bool(row.no_clear_news),
                 "market_reaction_type": row.market_reaction_type,
                 "confidence": row.confidence,
+                # 窗口级三类（2026-08-08 起落库）：无 driver 的样本靠它区分纯共振 / 情绪·技术面，
+                # 否则训练侧只看得到"无 driver"这一个笼统标签。历史样本可能为 null。
+                "window_class": row.window_class,
                 "summary": row.notes or row.auto_summary or "",
             },
             # AI 原始标注（人改前）：与 labels 的差异 = 人机分歧难例信号

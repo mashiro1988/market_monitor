@@ -64,6 +64,10 @@ class NewsPriceAnnotation(Base):
     news_roles = Column(Text, nullable=True)             # JSON dict {news_id: causal_role}，只存非 noise 条目
     market_reaction_type = Column(String(40), nullable=True)   # macro_policy / event_driven / no_news_driver
     confidence = Column(Float, nullable=True)            # 0-1；旧迁移样本为 NULL（低保真标记）
+    # 窗口级三类结论（news_driven / pure_resonance / sentiment_tech）。2026-08-08 起标注自带一份：
+    # 此前只回写 behavior_segments.human_class，段匹配不到就静默丢失，且无 driver 的两类
+    # （纯共振 / 情绪·技术面）在列表上无从区分。段仍照常回写（行为页读它），两处并存。
+    window_class = Column(String(30), nullable=True)
     auto_news_roles = Column(Text, nullable=True)        # AI 原始标注（人改前快照），人机分歧=难例信号
     prompt_version = Column(String(40), nullable=True)   # 产生 auto_* 的提示词版本
     eval_set = Column(Boolean, nullable=False, default=False)  # 冻结为评估集（训练导出默认排除）

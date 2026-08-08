@@ -109,6 +109,7 @@ export type AnnotationListItem = {
   s_scores: Record<string, Record<string, unknown>>;
   market_reaction_type: string | null;
   confidence: number | null;
+  window_class: string | null;
   eval_set: boolean;
   needs_review: boolean;
   labeler: string | null;

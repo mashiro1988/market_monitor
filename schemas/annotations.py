@@ -238,6 +238,8 @@ class AnnotationListItem(BaseModel):
     s_scores: dict[str, dict] = Field(default_factory=dict)
     market_reaction_type: str | None = None
     confidence: float | None = None
+    # 窗口级三类结论（2026-08-08 起随标注落库）：无 driver 的两类靠它区分纯共振 / 情绪·技术面
+    window_class: str | None = None
     eval_set: bool = False
     needs_review: bool = False         # Phase3b A策略③：窗口边界被 backfill 改动、当前重算窗口对不上
     labeler: str | None
