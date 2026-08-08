@@ -227,56 +227,83 @@ FlowCell 缺侧渲染。
 4. 盯一个整点周期：确认新宽表落地、mmon.top 拉到、页面出数、告警通道无 flow_gate
 5. 回滚预案：还原备份文件 + 重启 BMAC（秒级）；本项目侧自动退化为"—"，无需动作
 
-### 10.1 服务器补丁操作 runbook（人工执行）
+### 10.1 服务器环境（2026-08-08 实地侦察确认，推翻此前的若干猜测）
 
-**前置**：本项目代码已全量上线（页面资金流列显示「—」，其余功能不受影响）。
-下面的 `mmon-data` 是数据服务器（`root@47.243.252.92`）的 ssh 别名；本机
-`~/.ssh/config` 里若没配，把它换成 `root@47.243.252.92`。
+| 项 | 实际情况 | 此前设计稿里的猜测 |
+|---|---|---|
+| 补丁文件路径 | `/root/data_center/core/preprocess.py` | ~~`/root/data_center/bmac/preprocess.py`~~ **猜错了** |
+| 进程托管 | pm2，进程名 `realtime_data`，fork 模式 | 未知 |
+| `watch` | `False` —— 改文件**不会**自动重启，重启时机可控 | 未知 |
+| 解释器 | `/root/anaconda3/envs/psm0129/bin/python`（3.12.8 / pandas 2.2.3 / numpy 2.0.2） | 未知；注意非交互 ssh 的 PATH 上**没有** `python`，必须写全路径 |
+| pm2 重启能否解析到 python | 能（pm2 存的 PATH 含 anaconda 环境） | 未知 |
+| 版本控制 | data_center **不是** git 仓库 —— 备份是唯一退路 | 未知 |
+| 写入节奏 | 每小时 `:10/:20/:30/:35`，其余时间空转；一轮预处理约 7s、生成 pivot 约 3s | 与文档一致 |
+| 认证 | 密码（`.env` 的 `REMOTE_PASSWORD`），无密钥；交互式 ssh 需人工输入 | 未记录 |
 
-**第 1 步：备份**（回归勾稽要用到补丁前的宽表）
+**已确认的前置条件**（补丁能出数的根本前提）：
+- 现货 / 永续 / DataAPI 备用源的 1h resample 文件**都带** `quote_volume` 与
+  `taker_buy_quote_asset_volume`（10 列齐全）
+- 真实数据满足恒等式 `0 ≤ taker_buy ≤ quote_volume`（BTCUSDT 全部 2000 根 K 线验过）
+- 备份已就位：`/root/backup/taker_patch_20260808/`（原 preprocess.py + 两个宽表）
 
-```bash
-ssh mmon-data 'mkdir -p /root/backup && cp /root/data_center/bmac/preprocess.py /root/backup/preprocess.py.$(date +%Y%m%d) && cp /root/data_center/data/preprocess_1h_resample/30m/market_pivot_spot_2026.pkl /root/backup/ && cp /root/data_center/data/preprocess_1h_resample/30m/market_pivot_swap_2026.pkl /root/backup/'
-```
+**已完成的就地预检**（真实数据、未改文件、未重启）：两处原文精确匹配、打完能编译、
+现货与永续的旧键 `open/close/vwap1m/funding_rate` **逐值未变**、新增两矩阵形状与
+`close` 一致且恒等式成立。
 
-**第 2 步：上传补丁与验收脚本**
+### 10.2 补丁操作 runbook
 
-补丁内容 = 本仓库 **`scripts/server_patch/bmac_preprocess_patch.py`** 里的两段：
-`PIVOT_COLUMNS`（追加两列）与 `make_market_pivot`（增产两个矩阵 + 改用 `reindex` 容错）。
-把这两段替换掉服务器 `preprocess.py` 里的同名部分，**不要整文件覆盖** —— 服务器现版
-与本地那份第三方源码副本可能有出入。
-
-> 为什么权威副本不是 `scripts/server_src/preprocess.py`：那份是从服务器抓下来的第三方
-> 源码副本，被 `.gitignore:58` 挡在版本库外，不进 git 就等于没留档，BMAC 升级冲掉补丁后
-> 没有底稿可重打。`scripts/server_patch/` 那份进版本库，且有
-> `tests/test_server_pivot_patch.py` 盯着行为。
-
-```bash
-scp scripts/verify_taker_pivot_patch.py mmon-data:/root/
-```
-
-**第 3 步：重启 BMAC**
-
-选在整点写入刚结束的安静窗口操作（每小时 `:40` 之后；BMAC 在 `:10/:20/:30/:35` 写）。
-
-**第 4 步：等下一个整点周期写完，跑验收**
+前置：本项目代码已全量上线（页面资金流列显示「—」，其余功能不受影响）。
+**挑写入空窗操作**：每小时 `:35` 之后到下一个 `:10` 之前，约 30 分钟。
 
 ```bash
-ssh mmon-data 'python /root/verify_taker_pivot_patch.py --year 2026 --offset 30m --backup /root/backup/market_pivot_spot_2026.pkl'
+scp scripts/server_patch/apply_on_server.py scripts/verify_taker_pivot_patch.py root@47.243.252.92:/root/
 ```
 
-退出码必须为 0。任一 FAIL → 立即还原备份的 `preprocess.py` 并重启 BMAC；
-本项目侧无需任何操作（勾稽门会自动把资金流退化为「—」）。
+登上服务器后依次执行（`$PY` = `/root/anaconda3/envs/psm0129/bin/python`）：
 
-**第 5 步：观察一个整点周期**
+```bash
+PY=/root/anaconda3/envs/psm0129/bin/python
 
-- mmon.top 拉到新宽表（看拉取耗时，文件变大约 1.5 倍，见 §4 实测修正）
+# 1) 备份（若 /root/backup/taker_patch_20260808 已存在可跳过）
+mkdir -p /root/backup/taker_patch_20260808 && \
+  cp -n /root/data_center/core/preprocess.py /root/backup/taker_patch_20260808/preprocess.py.orig && \
+  cp -n /root/data_center/data/preprocess_1h_resample/30m/market_pivot_{spot,swap}_2026.pkl \
+        /root/backup/taker_patch_20260808/
+
+# 2) 预检：不改文件，用真实数据在内存里试跑
+$PY /root/apply_on_server.py --preflight
+
+# 3) 落盘：写文件 + 编译校验（不通过自动还原），仍不重启
+$PY /root/apply_on_server.py --apply
+
+# 4) 重启（看清楚了再敲）
+pm2 restart realtime_data && sleep 20 && pm2 status realtime_data
+
+# 5) 等下一个 :10/:20/:30/:35 写完，跑验收
+$PY /root/verify_taker_pivot_patch.py --year 2026 --offset 30m \
+    --backup /root/backup/taker_patch_20260808/market_pivot_spot_2026.pkl
+```
+
+第 5 步退出码必须为 0。任一 FAIL、或第 4 步进程没稳住 → 立即回滚：
+
+```bash
+cp /root/backup/taker_patch_20260808/preprocess.py.orig /root/data_center/core/preprocess.py && pm2 restart realtime_data
+```
+
+本项目侧回滚无需任何操作 —— 勾稽门会自动把资金流退化为「—」。
+
+**第 6 步：观察一个整点周期**
+- mmon.top 拉到新宽表（看拉取耗时；文件约 1.5 倍大，见 §4 实测修正）
 - 板块页资金流列出数字
 - 无 `sector_flow_gate` 告警
 
 **验收脚本本身可信吗**：`tests/test_verify_taker_pivot_patch.py` 用假服务器目录注入
 五种坏法（缺键 / 索引错位 / 取值不符 / 旧数被改 / 备用源缺字段），逐一断言它恰好抓到
 该抓的那项且不误伤其它项 —— 拿没验过的工具去验补丁等于没验。
+
+> 补丁的两段权威源码另存于 `scripts/server_patch/bmac_preprocess_patch.py`（进版本库、
+> 有 `tests/test_server_pivot_patch.py` 盯着行为）。**不要**用 `scripts/server_src/`
+> —— 那是从服务器抓下来的第三方源码副本，被 `.gitignore:58` 挡在版本库外。
 
 ## 11. 本期不做（YAGNI）
 
