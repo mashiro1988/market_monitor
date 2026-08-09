@@ -1,6 +1,12 @@
 # Web3 快讯与加密事件池(二期 A)设计稿
 
-版本:v1.0(2026-08-09,与用户逐节确认后落盘,待用户复核)
+版本:v1.1(2026-08-09,与用户逐节确认后落盘)
+**状态:已全量实施并部署上线(2026-08-09, commit 1a0e391)**。实施计划见
+docs/superpowers/plans/2026-08-09-web3-crypto-news-event-pool.md(14 任务 TDD 分步)。
+实施期的两处偏离(均为更优解,已在计划 Self-Review 记录):
+1. 币安可交易性**不落库、读时派生**(上下架随时变,冻结成列会过期);
+2. 加密源独立成 CRYPTO_NEWS_SOURCES 字典而非在 NEWS_SOURCES 里加标记——后者同时是
+   标注候选新闻的源白名单,物理隔离比"记得加过滤"可靠。
 上游:docs/specs/news-research-discussion.md v0.3 §3(二线·Web3 叙事发现)
 一期底盘:docs/specs/news-research-phase1-event-pool.md(research_events 已预留 event_type)
 
