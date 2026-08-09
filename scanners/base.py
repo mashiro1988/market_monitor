@@ -39,6 +39,9 @@ class NewsRecord:
     language: str = "zh"
     categories: Optional[str] = None
     published_at: Optional[datetime] = None  # 原始发布时间
+    # 市场归属：macro=宏观线 / crypto=加密线（web3 二期A）。落库到 news_items.market，
+    # 决定这条新闻走哪套打分口径、进哪个事件池。
+    market: str = "macro"
 
 
 @dataclass
