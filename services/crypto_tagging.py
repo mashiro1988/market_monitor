@@ -34,9 +34,11 @@ CRYPTO_TAG_SYSTEM_PROMPT = (
     "3. is_crypto_affair（true/false）：这条新闻本身是不是**加密行业内部的事**。\n"
     "   加密媒体常转载纯宏观新闻（美联储决议、CPI、地缘冲突、美股财报）——那些一律 false；\n"
     "   加密行业自己的监管/ETF/交易所/协议/项目/链上/融资事件 → true。\n"
-    "4. coins：新闻**实际在讨论**的加密资产代码列表，大写，如 [\"BTC\",\"SOL\"]。\n"
-    "   只填真正被讨论的标的，不填顺带提及的背景资产；没有就给 []。\n"
-    "   用交易所通用代码（比特币→BTC、以太坊→ETH）；拿不准代码的项目不要硬编。\n\n"
+    "4. coins：新闻**实际在讨论或直接波及**的加密资产代码列表，大写，如 [\"BTC\",\"SOL\"]。\n"
+    "   要填：事件主体的代币；以及被盗/被冻结/被上下架/被解锁/所在池子被攻击等\n"
+    "   直接卷入的资产（例：某协议的 A/B 流动性池被抽干 → A、B 都要填）。\n"
+    "   不填：只作行情背景或大盘对比提及的资产（例：「BTC 走弱拖累市场」里的 BTC）。\n"
+    "   没有就给 []。用交易所通用代码（比特币→BTC、以太坊→ETH）；拿不准代码的项目不要硬编。\n\n"
     "只返回 JSON，不要 Markdown：\n"
     '{"items": [{"id": int, "importance": 1-10, "direction": "利多", '
     '"is_crypto_affair": true, "coins": ["BTC"], "reason": "不超过40字"}]}\n'
@@ -44,7 +46,10 @@ CRYPTO_TAG_SYSTEM_PROMPT = (
 )
 
 # 版本戳：每次实质修改提示词时更新（与挂接侧同款约定）。
-CRYPTO_TAG_PROMPT_VERSION = "crypto-tag-v1-20260809"
+# v2（2026-08-09，用户复核 Bifrost 被黑一例）：币种口径从"在讨论"扩到"在讨论或直接波及"。
+# 原因：Bifrost 被黑抽干 vASTR/ASTR、vMANTA/MANTA 池，模型只填主体 BNC，把 ASTR/MANTA
+# 当背景滤掉。归因反查里漏一条 = 研究该币时这条新闻永远不出现，代价远大于多填一个。
+CRYPTO_TAG_PROMPT_VERSION = "crypto-tag-v2-20260809"
 
 # 合法代码形状：2-15 位大写字母数字。中文项目名、句子、纯符号一律挡掉。
 _COIN_RE = re.compile(r"^[A-Z0-9]{2,15}$")
