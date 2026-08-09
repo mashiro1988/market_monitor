@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 import config
+from models.crypto import NewsCoin
 from models.news import NewsItem, NewsPriceAnnotation
 from models.price import PriceSnapshot
 from models.research import ResearchEvent, ResearchEventLink
@@ -33,22 +34,29 @@ def _get_event(session: Session, event_id: int) -> ResearchEvent:
     return e
 
 
+EVENT_TYPES = ("macro", "crypto")
+
+
 def create_event(session: Session, name: str, news_ids: list[int],
                  gate_keywords: str | None = None, created_from: str = "manual",
                  backscan_hours: float | None = None,
-                 now: datetime | None = None) -> ResearchEvent:
-    """立案(spec §6.1):仅人工,强制 ≥1 条新闻;出生即 active;自动回扫 72h。"""
+                 now: datetime | None = None,
+                 event_type: str = "macro") -> ResearchEvent:
+    """立案(spec §6.1):仅人工,强制 ≥1 条新闻;出生即 active;自动回扫 72h。
+    event_type 决定这个事件收哪条线的新闻(web3 二期A design §4)。"""
     if not news_ids:
         raise ValueError("立案必须至少挂一条新闻")
     if created_from not in ("annotation", "manual"):
         raise ValueError(f"非法 created_from: {created_from!r}")
+    if event_type not in EVENT_TYPES:
+        raise ValueError(f"非法 event_type: {event_type!r}")
     found = {int(i) for (i,) in session.query(NewsItem.id)
              .filter(NewsItem.id.in_(news_ids)).all()}
     missing = {int(i) for i in news_ids} - found
     if missing:
         raise ValueError(f"新闻不存在: {sorted(missing)}")
     now = now or utc_now_naive()
-    event = ResearchEvent(name=name, status="active",
+    event = ResearchEvent(name=name, status="active", event_type=event_type,
                           gate_keywords=(gate_keywords or None),
                           created_from=created_from, status_changed_at=now)
     session.add(event)
@@ -57,7 +65,9 @@ def create_event(session: Session, name: str, news_ids: list[int],
         session.add(ResearchEventLink(event_id=event.id, news_id=int(nid),
                                       link_source="human"))
     session.commit()
-    clear_link_cursor(session, backscan_hours or config.EVENT_BACKSCAN_DEFAULT_HOURS, now=now)
+    # 回扫只清同线新闻的游标:立个加密事件不该把宏观新闻整批重排队
+    clear_link_cursor(session, backscan_hours or config.EVENT_BACKSCAN_DEFAULT_HOURS,
+                      now=now, market=event_type)
     return event
 
 
@@ -199,9 +209,24 @@ def _event_links(session: Session, event_id: int, include_detached: bool = False
     return q.order_by(NewsItem.timestamp.desc()).all()
 
 
+def _event_coins(session: Session, event_id: int) -> list[str]:
+    """事件涉及哪些币 = 时间轴新闻提及币种的并集(web3 二期A design §4)。
+
+    读时派生、不落库:与一期"挂接表不存业务数值"同一铁律——摘下证据、重打标、
+    补挂新闻,币种清单都应自动跟着变,存一份就会立刻过期。"""
+    rows = (session.query(NewsCoin.coin)
+            .join(ResearchEventLink, ResearchEventLink.news_id == NewsCoin.news_id)
+            .filter(ResearchEventLink.event_id == event_id,
+                    ResearchEventLink.detached.is_(False))
+            .distinct().all())
+    return sorted({r[0] for r in rows})
+
+
 def list_events(session: Session, status: str | None = None, q: str | None = None,
-                now: datetime | None = None) -> list[dict]:
-    """事件列表(spec §9.1):最新证据倒序 + 派生徽章;搜索覆盖名称+关键词(含已关闭)。"""
+                now: datetime | None = None,
+                event_type: str | None = None) -> list[dict]:
+    """事件列表(spec §9.1):最新证据倒序 + 派生徽章;搜索覆盖名称+关键词(含已关闭)。
+    event_type 不传 = 两条线都要(工作台"全部"档)。"""
     now = now or utc_now_naive()
     badge_map = _driver_badge_map(session)
     today_start, today_end = bj_day_bounds(bj_date_of(now))
@@ -209,6 +234,8 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
     query = session.query(ResearchEvent)
     if status:
         query = query.filter(ResearchEvent.status == status)
+    if event_type:
+        query = query.filter(ResearchEvent.event_type == event_type)
     if q:
         like = f"%{q}%"
         query = query.filter((ResearchEvent.name.like(like)) |
@@ -219,6 +246,9 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
         last_ts = rows[0][1].timestamp if rows else None
         out.append({
             "id": e.id, "name": e.name, "status": e.status,
+            "event_type": e.event_type or "macro",
+            # 币种只对加密事件有意义;宏观事件恒空,免得宏观卡片挂一串无关代码
+            "coins": _event_coins(session, e.id) if e.event_type == "crypto" else [],
             "gate_keywords": e.gate_keywords, "created_from": e.created_from,
             "merged_into_id": e.merged_into_id, "closed_reason": e.closed_reason,
             "evidence_count": len(rows),

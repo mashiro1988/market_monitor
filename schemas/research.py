@@ -9,6 +9,8 @@ class ResearchEventItem(BaseModel):
     id: int
     name: str
     status: str
+    event_type: str = "macro"                # macro / crypto（web3 二期A）
+    coins: list[str] = Field(default_factory=list)   # 加密事件的派生币种（读时算，宏观恒空）
     gate_keywords: str | None = None
     created_from: str
     merged_into_id: int | None = None
@@ -31,6 +33,7 @@ class ResearchEventCreateRequest(BaseModel):
     news_ids: list[int] = Field(default_factory=list)
     gate_keywords: str | None = None
     created_from: str = "manual"             # annotation / manual
+    event_type: str = "macro"                # macro / crypto（web3 二期A）
 
 
 class ResearchEventPatchRequest(BaseModel):

@@ -429,6 +429,8 @@ export type NewsItemSchema = {
   topic: string | null;
   magnitude_tier: string | null;
   news_direction: string | null;
+  is_crypto_affair: boolean | null;
+  coins: string[];
 };
 
 export type NewsLinksResponse = {
@@ -546,12 +548,15 @@ export type ResearchEventCreateRequest = {
   news_ids?: number[];
   gate_keywords?: string | null;
   created_from?: string;
+  event_type?: string;
 };
 
 export type ResearchEventItem = {
   id: number;
   name: string;
   status: string;
+  event_type: string;
+  coins: string[];
   gate_keywords: string | null;
   created_from: string;
   merged_into_id: number | null;

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from schemas.common import TimeFields
 
@@ -23,6 +23,9 @@ class NewsItemSchema(TimeFields):
     topic: str | None = None            # 主题（NEWS_TOPICS 之一）
     magnitude_tier: str | None = None   # a-priori 量级 大/中/小
     news_direction: str | None = None   # 对风险资产应然方向 利多/利空/中性
+    # —— 加密线字段（web3 二期A，宏观新闻恒为默认值）——
+    is_crypto_affair: bool | None = None        # 语义闸判定：false=加密源转载的纯宏观新闻
+    coins: list[str] = Field(default_factory=list)   # 新闻实际在讨论的币种代码
 
 
 class NewsResponse(BaseModel):

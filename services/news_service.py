@@ -69,6 +69,84 @@ def to_news_schema(item: NewsItem) -> NewsItemSchema:
     )
 
 
+def _enabled_crypto_sources() -> list[str]:
+    """加密源白名单。与宏观分开取:CRYPTO_NEWS_SOURCES 刻意不并进 NEWS_SOURCES
+    (那个字典同时是标注候选新闻的源白名单,混进去就污染标注池)。"""
+    return [k for k, v in getattr(config, "CRYPTO_NEWS_SOURCES", {}).items()
+            if v.get("enabled")]
+
+
+def list_crypto_sources() -> list[NewsSourceMeta]:
+    return [NewsSourceMeta(key=key, name=cfg.get("name") or key.upper(),
+                           language=cfg.get("language", "zh"))
+            for key, cfg in getattr(config, "CRYPTO_NEWS_SOURCES", {}).items()
+            if cfg.get("enabled")]
+
+
+def get_crypto_news(
+    session: Session,
+    sources: list[str] | None = None,
+    hours_back: int = 24,
+    min_llm_importance: int = 0,
+    affair_only: bool = False,
+    coin: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> NewsResponse:
+    """加密快讯(web3 二期A design §4):独立页面,与宏观新闻页互不干扰。
+
+    min_llm_importance 默认 0 = 不按分数拦:加密线的小币新闻分数天然低,
+    正是二期B 异动归因要研究的对象,拦掉等于把原料掐了。
+    """
+    from models.crypto import NewsCoin
+
+    page, page_size = clamp_page(page, page_size)
+    hours_back = max(1, min(int(hours_back or 24), 24 * 30))
+    min_llm_importance = max(0, min(int(min_llm_importance or 0), 10))
+    cutoff = utc_now_naive() - timedelta(hours=hours_back)
+
+    query = (session.query(NewsItem)
+             .filter(NewsItem.market == "crypto", NewsItem.timestamp >= cutoff)
+             .filter(NewsItem.source.in_(sources or _enabled_crypto_sources())))
+    if affair_only:
+        query = query.filter(NewsItem.is_crypto_affair.is_(True))
+    if coin:
+        code = coin.strip().upper()
+        query = query.filter(NewsItem.id.in_(
+            session.query(NewsCoin.news_id).filter(NewsCoin.coin == code)))
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.filter(or_(NewsItem.title.ilike(like), NewsItem.content.ilike(like)))
+
+    candidates = query.order_by(NewsItem.timestamp.desc()).limit(5000).all()
+    filtered = [i for i in candidates
+                if passes_default_importance_filter(i, min_llm_importance)]
+    total = len(filtered)
+    start = (page - 1) * page_size
+    page_items = filtered[start:start + page_size]
+
+    coin_map: dict[int, list[str]] = {}
+    if page_items:
+        rows = (session.query(NewsCoin.news_id, NewsCoin.coin)
+                .filter(NewsCoin.news_id.in_([i.id for i in page_items])).all())
+        for news_id, code in rows:
+            coin_map.setdefault(news_id, []).append(code)
+
+    items = []
+    for item in page_items:
+        schema = to_news_schema(item)
+        schema.is_crypto_affair = item.is_crypto_affair
+        schema.coins = sorted(coin_map.get(item.id, []))
+        items.append(schema)
+
+    return NewsResponse(
+        items=items, total=total, page=page, page_size=page_size,
+        zh_count=sum(1 for i in filtered if i.language == "zh"),
+        en_count=sum(1 for i in filtered if i.language == "en"),
+    )
+
+
 def get_news(
     session: Session,
     sources: list[str] | None = None,

@@ -201,6 +201,29 @@ def news_sources_list() -> list[NewsSourceMeta]:
     return news_service.list_sources()
 
 
+@router.get("/crypto/news", response_model=NewsResponse)
+def crypto_news(
+    sources: list[str] | None = Query(default=None),
+    hours_back: int = 24,
+    min_llm_importance: int = 0,          # 0 = 不限：加密线不按分数拦（design §3）
+    affair_only: bool = False,            # 只看币圈事务（滤掉加密源转载的纯宏观）
+    coin: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+) -> NewsResponse:
+    return news_service.get_crypto_news(
+        db, sources=_csv_list(sources), hours_back=hours_back,
+        min_llm_importance=min_llm_importance, affair_only=affair_only,
+        coin=coin, search=search, page=page, page_size=page_size)
+
+
+@router.get("/crypto/news/sources", response_model=list[NewsSourceMeta])
+def crypto_news_sources_list() -> list[NewsSourceMeta]:
+    return news_service.list_crypto_sources()
+
+
 @router.get("/predictions", response_model=PredictionsResponse)
 def predictions(hours: int = 24, search: str | None = None, db: Session = Depends(get_db)) -> PredictionsResponse:
     return prediction_service.get_predictions(db, hours=hours, search=search)
@@ -485,8 +508,9 @@ def _event_item(db: Session, event_id: int) -> ResearchEventItem:
 @router.get("/research/events", response_model=ResearchEventsResponse)
 def research_events_list(status: str | None = Query(default=None),
                          q: str | None = Query(default=None),
+                         event_type: str | None = Query(default=None),
                          db: Session = Depends(get_db)) -> ResearchEventsResponse:
-    rows = event_pool.list_events(db, status=status, q=q)
+    rows = event_pool.list_events(db, status=status, q=q, event_type=event_type)
     for r in rows:
         ts = r.pop("last_evidence_at")
         r["last_evidence_at"] = ts.isoformat(timespec="seconds") if ts else None
@@ -499,7 +523,8 @@ def research_event_create(request: ResearchEventCreateRequest,
     try:
         e = event_pool.create_event(db, request.name, request.news_ids,
                                     gate_keywords=request.gate_keywords,
-                                    created_from=request.created_from)
+                                    created_from=request.created_from,
+                                    event_type=request.event_type)
     except ValueError as exc:
         raise ApiError("INVALID_EVENT", str(exc), status_code=400) from exc
     return _event_item(db, e.id)
