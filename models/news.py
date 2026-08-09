@@ -34,11 +34,18 @@ class NewsItem(Base):
     tagged_at = Column(DateTime, nullable=True)          # 打标时间；NULL = 未打标（回灌待处理）
     event_linked_at = Column(DateTime, nullable=True)    # 挂接游标:空=待处理;四种结果都盖章(news-research-phase1 spec §3.3)
     rescore_attempts = Column(Integer, nullable=True)    # 补评分尝试次数,NULL≈0;达上限不再重试(news-rescore 2026-08-06)
+    # 市场归属:macro=宏观线(现有四源) / crypto=加密线(web3 二期A)。分流总开关——
+    # 宏观的补评分/打标/行为命中/挂接全部只认 macro,加密线走自己的独立口径。
+    market = Column(String(8), nullable=False, default="macro", server_default="macro")
+    # 加密线语义闸(design §3):加密源转载的纯宏观新闻为 0,不进加密事件挂接。
+    # 宏观新闻恒为 NULL——该判定只对加密线有意义。
+    is_crypto_affair = Column(Boolean, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
         Index("ix_news_source_id", "source", "source_id"),
         Index("ix_news_timestamp", "timestamp"),
+        Index("ix_news_market_ts", "market", "timestamp"),
     )
 
 

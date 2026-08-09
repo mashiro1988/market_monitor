@@ -38,6 +38,7 @@ def rescore_unscored(session: Session, limit: int | None = None,
     cutoff = now - timedelta(hours=window_hours)
     rows = (session.query(NewsItem)
             .filter(NewsItem.llm_importance.is_(None),
+                    NewsItem.market == "macro",     # 加密线由 crypto_tagging 打分，别用宏观口径补
                     NewsItem.created_at >= cutoff,
                     func.coalesce(NewsItem.rescore_attempts, 0) < max_attempts)
             .order_by(NewsItem.created_at.desc())

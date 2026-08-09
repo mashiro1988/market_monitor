@@ -148,7 +148,10 @@ def tag_untagged(session: Session, limit: int = 500, batch_size: int | None = No
     batch_size = int(batch_size or config.DEEPSEEK_BATCH_SIZE)
     todo = (
         session.query(NewsItem)
-        .filter(NewsItem.tagged_at.is_(None), NewsItem.traditional_open.isnot(None))
+        # market 护栏：加密线走 services/crypto_tagging 的独立口径（web3 二期A design §2），
+        # 宏观提示词按"对 BTC/纳指的冲击"校准，喂币圈新闻会打歪且反向污染宏观标注池。
+        .filter(NewsItem.tagged_at.is_(None), NewsItem.traditional_open.isnot(None),
+                NewsItem.market == "macro")
         .order_by(NewsItem.timestamp.desc())
         .limit(max(1, limit))
         .all()

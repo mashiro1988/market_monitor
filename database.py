@@ -72,9 +72,13 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
                 "traditional_open": "BOOLEAN",
                 "tagged_at": "DATETIME",
                 "rescore_attempts": "INTEGER",
+                # web3 二期A：市场归属（存量行由 DEFAULT 直接盖成 macro）+ 加密语义闸判定
+                "market": "VARCHAR(8) NOT NULL DEFAULT 'macro'",
+                "is_crypto_affair": "BOOLEAN",
             }.items():
                 if column_name not in existing:
                     conn.execute(text(f"ALTER TABLE news_items ADD COLUMN {column_name} {column_type}"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_market_ts ON news_items (market, timestamp)"))
             if run_migrations:
                 conn.execute(text("DROP INDEX IF EXISTS ix_news_content_hash"))
             if run_migrations and "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:

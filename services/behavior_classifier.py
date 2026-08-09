@@ -95,6 +95,7 @@ def _news_ids(session: Session, start: datetime, end: datetime) -> list[int]:
         session.query(NewsItem.id)
         .filter(NewsItem.timestamp >= start - pad,
                 NewsItem.timestamp <= end + pad,
+                NewsItem.market == "macro",     # 行为分类看的是 BTC/纳指，币圈新闻不算命中
                 (NewsItem.llm_importance.is_(None))
                 | (NewsItem.llm_importance >= config.EVENT_LINK_MIN_IMPORTANCE))
         .order_by(NewsItem.timestamp.asc())

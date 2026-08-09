@@ -384,6 +384,45 @@ NEWS_SOURCES = {
 }
 
 # ============================================================
+# 加密新闻源（web3 二期A design §1）
+# **刻意不并进 NEWS_SOURCES**：那个字典是宏观白名单，标注上下文与自动标注的候选
+# 新闻都从它取源（services/annotation_service.py::_annotation_news_sources），
+# 加密源混进去会直接污染已校准的标注池。分开放 = 结构上防污染。
+# ============================================================
+CRYPTO_NEWS_ENABLED = os.getenv("CRYPTO_NEWS_ENABLED", "1") == "1"
+BLOCKBEATS_API_KEY = os.getenv("BLOCKBEATS_API_KEY", "")
+
+CRYPTO_NEWS_SOURCES = {
+    # BlockBeats Pro API：老的 open-api/open-flash 已软下线（匿名请求恒返回空数组，
+    # 2026-08-09 服务器实探），现走 Pro API + api-key 请求头。取全量而非仅重要档：
+    # 二期B 要归因的小币新闻基本都落在非重要档里，只取重要档等于掐断原料。
+    "blockbeats": {
+        "enabled": True,
+        "language": "zh",
+        "name": "BlockBeats",
+        "api_url": "https://api-pro.theblockbeats.info/v1/newsflash",
+        "page_size": 30,          # Pro API 单页上限 50
+        "max_pages": 2,           # 5 分钟一轮，60 条足够覆盖（实测约 70-150 条/天）
+        "lang": "cn",
+    },
+    # 币安官方公告：上新/下架/合约上市——"某币为什么突然拉起来"命中率最高的官方口径。
+    # 站点 CMS 接口，无服务承诺、可能改版；失败上抛由 NewsScanner 记源错误。
+    "binance_ann": {
+        "enabled": True,
+        "language": "en",
+        "name": "Binance公告",
+        "api_url": "https://www.binance.com/bapi/apex/v1/public/apex/cms/article/list/query",
+        "page_size": 20,
+    },
+}
+
+# 币安公告目录：(catalogId, 中文说明)。营销活动类目录刻意不订。
+BINANCE_ANN_CATALOGS = (
+    (48, "新币上线"),
+    (161, "下架"),
+)
+
+# ============================================================
 # Polymarket 预测市场配置
 # ============================================================
 POLYMARKET = {

@@ -9,6 +9,7 @@ from models.tracked_market import TrackedMarket
 from models.sector import CmcSymbolCategory, SectorReturn
 from models.behavior import BehaviorSegment, BehaviorDailySummary
 from models.research import ResearchEvent, ResearchEventLink
+from models.crypto import NewsCoin
 
 
 def create_all_tables(engine):
