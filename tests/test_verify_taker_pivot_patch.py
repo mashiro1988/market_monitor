@@ -4,6 +4,7 @@
 （目录结构 / 文件命名 / DataFrame 列名都照抄真实服务器），分别注入五种坏法，
 断言 verify_taker_pivot_patch.py 每次都恰好抓到该抓的那一项、且不误伤其它项。
 """
+import os
 import pickle
 import subprocess
 import sys
@@ -15,6 +16,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "verify_taker_pivot_patch.py"
+
+# Windows 下 Python 子进程往管道写 stdout 默认用 ANSI 码页（中文系统 = GBK），
+# 而这里按 UTF-8 解码，中文检查名会全变成 �、逐项断言全挂。
+# 钉死子进程的 stdio 编码；Linux 上 stdio 本就是 UTF-8，此变量等于无操作。
+_UTF8_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 
 N_ROWS, N_SYMS = 60, 8
 SYMS = [f"SYM{i}USDT" for i in range(N_SYMS)]
@@ -95,6 +101,7 @@ def _run(root: Path):
          "--backup", str(root / "backup" / "market_pivot_spot_2026.pkl"),
          "--symbols", "4", "--times", "10"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=_UTF8_ENV,
     )
     return proc.returncode, proc.stdout
 
@@ -228,6 +235,7 @@ def test_missing_backup_is_reported_not_silently_skipped(tmp_path):
         [sys.executable, str(SCRIPT), "--year", "2026",
          "--data-root", str(tmp_path), "--symbols", "2", "--times", "5"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=_UTF8_ENV,
     )
     assert proc.returncode == 1
     checks = _checks(proc.stdout)
