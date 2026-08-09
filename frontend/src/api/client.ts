@@ -47,6 +47,11 @@ export class ApiError extends Error {
   }
 }
 
+/** 动作失败的用户可见文案:优先后端 message,空/非 ApiError 时退回调用方兜底词。 */
+export function apiErrorText(err: unknown, fallback: string): string {
+  return err instanceof ApiError && err.payload.message ? err.payload.message : fallback;
+}
+
 const API_BASE = "/api";
 const AUTH_STORAGE_KEY = "marketMonitor.authToken";
 

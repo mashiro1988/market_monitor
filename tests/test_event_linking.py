@@ -227,3 +227,48 @@ def test_suggest_keywords_rejects_bad_json(session, monkeypatch):
     monkeypatch.setattr(event_linking, "_call_keyword_suggester", lambda c: "不是JSON")
     with pytest.raises(ValueError):
         event_linking.suggest_keywords(session, "e", [n.id])
+
+
+def test_suggest_keywords_retries_once_on_transient_failure(session, monkeypatch):
+    """DeepSeek 偶发空返回(线上 2026-08-09 实测):单发调用要自动重试一次。"""
+    n = _news(session, "苹果供应链传出调价")
+    calls = []
+
+    def flaky(content):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("DeepSeek 关键词建议返回空 content")
+        return json.dumps({"keywords": ["苹果", "Apple"]})
+
+    monkeypatch.setattr(event_linking, "_call_keyword_suggester", flaky)
+    out = event_linking.suggest_keywords(session, "苹果调价", [n.id])
+    assert out == ["苹果", "Apple"]
+    assert len(calls) == 2          # 第一次失败,重试一次即成功
+
+
+def test_suggest_keywords_retries_on_bad_json_then_succeeds(session, monkeypatch):
+    n = _news(session, "y")
+    responses = ["不是JSON", json.dumps({"keywords": ["词"]})]
+    calls = []
+
+    def flaky(content):
+        calls.append(1)
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr(event_linking, "_call_keyword_suggester", flaky)
+    assert event_linking.suggest_keywords(session, "e", [n.id]) == ["词"]
+    assert len(calls) == 2
+
+
+def test_suggest_keywords_raises_after_second_failure(session, monkeypatch):
+    n = _news(session, "x")
+    calls = []
+
+    def broken(content):
+        calls.append(1)
+        raise RuntimeError("DeepSeek 关键词建议返回空 content")
+
+    monkeypatch.setattr(event_linking, "_call_keyword_suggester", broken)
+    with pytest.raises(RuntimeError):
+        event_linking.suggest_keywords(session, "e", [n.id])
+    assert len(calls) == 2          # 只重试一次,不无限重打

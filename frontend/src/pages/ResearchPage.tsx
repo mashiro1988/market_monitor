@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, FolderSearch, Search } from "lucide-react";
-import { api } from "../api/client";
+import { api, apiErrorText } from "../api/client";
 import type { NewsItem, ObsResult, ResearchEventItem, TimelineItem } from "../api/types";
 import { Button, PageHeader } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
@@ -137,7 +137,10 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
   });
   const events = useQuery({ queryKey: ["research-events", "active"],
                             queryFn: () => api.researchEvents({ status: "active" }) });
+  // 失败必须可见:改名/关键词/关闭/合并/回扫失败若静默,页面看着像"点了没反应"
+  const [actionError, setActionError] = useState("");
   const invalidate = () => {
+    setActionError("");
     void qc.invalidateQueries({ queryKey: ["research-timeline", eventId] });
     onChanged();
   };
@@ -146,15 +149,18 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
     mutationFn: ({ id, body }: { id: number; body: Parameters<typeof api.researchLinkPatch>[1] }) =>
       api.researchLinkPatch(id, body),
     onSuccess: invalidate,
+    onError: (err) => setActionError(apiErrorText(err, "挂接修改失败")),
   });
   const patchEvent = useMutation({
     mutationFn: (body: Parameters<typeof api.researchEventPatch>[1]) =>
       api.researchEventPatch(eventId, body),
     onSuccess: invalidate,
+    onError: (err) => setActionError(apiErrorText(err, "事件操作失败")),
   });
   const backscan = useMutation({
     mutationFn: (days_: number) => api.researchBackscan(eventId, days_),
     onSuccess: invalidate,
+    onError: (err) => setActionError(apiErrorText(err, "回扫失败")),
   });
 
   // 加载/报错也必须套在 .rp-detail 里:否则拿不到展开区的上边距,会直接贴住上面的卡片
@@ -172,6 +178,7 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
         <span className="subsection-title">#{event.id} {event.name}</span>
         <span className="s-badge none">{event.status === "active" ? "进行中" : "已关闭"}</span>
         {pending_relink > 0 && <span className="s-badge mid">回扫进行中(剩 {pending_relink} 条)</span>}
+        {actionError && <span style={{ color: "var(--danger)" }}>{actionError}</span>}
         <span style={{ flex: 1 }} />
         <Dropdown label="管理" align="right">
           <MenuItem onClick={() => {
@@ -288,15 +295,18 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
 
 function RevivalTab({ onChanged }: { onChanged: () => void }) {
   const revival = useQuery({ queryKey: ["research-revival"], queryFn: () => api.researchRevival() });
+  const [reopenError, setReopenError] = useState("");
   const reopen = useMutation({
     mutationFn: (eventId: number) => api.researchEventPatch(eventId, { status: "active" }),
-    onSuccess: onChanged,
+    onSuccess: () => { setReopenError(""); onChanged(); },
+    onError: (err) => setReopenError(apiErrorText(err, "重开失败")),
   });
   return (
     <div className="panel">
       <div className="rp-filters rp-filters-head">
         <h2>旧事重提</h2>
         <span className="muted">近 7 天命中已关闭事件关键词的新闻</span>
+        {reopenError && <span style={{ color: "var(--danger)" }}>{reopenError}</span>}
       </div>
       {revival.isLoading && <LoadingState label="扫描沉睡事件" />}
       {(revival.data?.items ?? []).length === 0 && !revival.isLoading &&

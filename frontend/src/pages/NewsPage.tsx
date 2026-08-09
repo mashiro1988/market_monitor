@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { api } from "../api/client";
+import { api, apiErrorText } from "../api/client";
 import type { NewsItem } from "../api/types";
 import { Button, PageHeader, SelectControl, TextInput } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
@@ -49,22 +49,31 @@ function TriageBar({ picked, onDone }: { picked: number[]; onDone: () => void })
   const [name, setName] = useState("");
   const [keywords, setKeywords] = useState("");
   const [target, setTarget] = useState("");
+  // 失败必须可见:2026-08-09 线上 AI 建议 400 被静默吞掉,用户只见"毫无反应"
+  const [errorMsg, setErrorMsg] = useState("");
   const events = useQuery({ queryKey: ["research-events", "active"],
                             queryFn: () => api.researchEvents({ status: "active" }) });
-  const finish = () => { setName(""); setKeywords(""); setTarget(""); onDone(); };
+  const finish = () => { setName(""); setKeywords(""); setTarget(""); setErrorMsg(""); onDone(); };
   const create = useMutation({
     mutationFn: () => api.researchEventCreate({
       name, news_ids: picked, gate_keywords: keywords || null, created_from: "manual" }),
     onSuccess: finish,
+    onError: (err) => setErrorMsg(apiErrorText(err, "立事件失败")),
   });
   const suggest = useMutation({
     mutationFn: () => api.researchSuggestKeywords({ name, news_ids: picked }),
-    onSuccess: (r) => setKeywords((r.keywords ?? []).join("、")),
+    onSuccess: (r) => {
+      const kws = r.keywords ?? [];
+      setKeywords(kws.join("、"));
+      setErrorMsg(kws.length ? "" : "AI 未返回建议,可再试一次");
+    },
+    onError: (err) => setErrorMsg(apiErrorText(err, "AI 建议失败")),
   });
   const attach = useMutation({
     mutationFn: (eventId: number) =>
       Promise.all(picked.map((nid) => api.researchLinkCreate({ event_id: eventId, news_id: nid }))),
     onSuccess: finish,
+    onError: (err) => setErrorMsg(apiErrorText(err, "挂接失败")),
   });
   return (
     <div className="rp-pickbar">
@@ -86,6 +95,7 @@ function TriageBar({ picked, onDone }: { picked: number[]; onDone: () => void })
           <option key={o.id} value={o.id}>#{o.id} {o.name}</option>
         ))}
       </select>
+      {errorMsg && <span style={{ color: "var(--danger)" }}>{errorMsg}</span>}
     </div>
   );
 }

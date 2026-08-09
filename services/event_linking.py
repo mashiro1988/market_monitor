@@ -270,12 +270,8 @@ def _call_keyword_suggester(user_content: str) -> str:
     return result.content
 
 
-def suggest_keywords(session: Session, name: str, news_ids: list[int]) -> list[str]:
-    """AI 建议关键词(spec §5.2):即用即弃不留痕;落库的永远是人确认后的版本。"""
-    rows = session.query(NewsItem).filter(NewsItem.id.in_(news_ids)).all()
-    items = [{"title": (n.title or "")[:160], "content": (n.content or "")[:200]} for n in rows]
-    user = f"事件名:{name}\n种子新闻:\n{json.dumps(items, ensure_ascii=False)}"
-    raw = _call_keyword_suggester(user).strip()
+def _parse_suggest_response(raw: str) -> list[str]:
+    raw = raw.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
         raw = re.sub(r"\s*```$", "", raw).strip()
@@ -288,6 +284,21 @@ def suggest_keywords(session: Session, name: str, news_ids: list[int]) -> list[s
         raise ValueError("关键词建议缺少 keywords 列表")
     out = [str(k).strip() for k in kws if str(k).strip()]
     return out[:6]
+
+
+def suggest_keywords(session: Session, name: str, news_ids: list[int]) -> list[str]:
+    """AI 建议关键词(spec §5.2):即用即弃不留痕;落库的永远是人确认后的版本。
+    单发调用没有游标重试兜底,DeepSeek 偶发空返回/坏 JSON 时自动重试一次再抛。"""
+    rows = session.query(NewsItem).filter(NewsItem.id.in_(news_ids)).all()
+    items = [{"title": (n.title or "")[:160], "content": (n.content or "")[:200]} for n in rows]
+    user = f"事件名:{name}\n种子新闻:\n{json.dumps(items, ensure_ascii=False)}"
+    last_exc: Exception = RuntimeError("关键词建议未执行")
+    for _attempt in range(2):
+        try:
+            return _parse_suggest_response(_call_keyword_suggester(user))
+        except (RuntimeError, ValueError) as exc:
+            last_exc = exc
+    raise last_exc
 
 
 def clear_link_cursor(session: Session, hours: float, now: datetime | None = None) -> int:
