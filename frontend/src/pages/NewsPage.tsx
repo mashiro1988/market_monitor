@@ -153,11 +153,9 @@ export function NewsPage() {
   const [jin10Importance, setJin10Importance] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  // 两个勾选项各管一件事(两个快讯页用语统一):
-  //   bufferOnly = 过滤列表(只留没挂过事件的);triageMode = 打开立案勾选框
-  // 原先合成一个勾选项,与加密页的「勾选立案」看着像、做的事不同,反而费解
+  // 一个勾选项管到底:过滤列表(只留没挂过事件的)+ 打开立案勾选框。
+  // 两个快讯页共用这一个名字与这一套行为(用户拍板:语义相近就别拆成两个框)。
   const [bufferOnly, setBufferOnly] = useState(false);
-  const [triageMode, setTriageMode] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
   const debouncedSearch = useDebouncedValue(search, 350);
   const normalizedSearch = debouncedSearch.trim();
@@ -196,7 +194,7 @@ export function NewsPage() {
   // 中英分栏完全按 language 字段切分；新加源不需要再改这里。
   const items = news.data?.items ?? [];
   const total = news.data?.total ?? 0;
-  const canTriage = triageMode;                        // 立案勾选框由「勾选立案」单独控制
+  const canTriage = bufferOnly;                        // 勾上即可挑证据立案
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = page;
 
@@ -210,19 +208,15 @@ export function NewsPage() {
         <SelectControl label="Jin10" value={jin10Importance} onChange={(value) => { setJin10Importance(value); setPage(1); }} options={importantOptions} />
         <TextInput label="关键词" value={search} onChange={(value) => { setSearch(value); setPage(1); }} placeholder="标题或正文" />
         <label className="field">
-          <span>范围</span>
-          <label className="rp-check">
-            <input type="checkbox" checked={bufferOnly}
-                   onChange={(ev) => { setBufferOnly(ev.target.checked); setPage(1); }} />
-            只看未挂事件
-          </label>
-        </label>
-        <label className="field">
           <span>立案</span>
           <label className="rp-check">
-            <input type="checkbox" checked={triageMode}
-                   onChange={(ev) => { setTriageMode(ev.target.checked); setPicked([]); }} />
-            勾选立案
+            <input type="checkbox" checked={bufferOnly}
+                   onChange={(ev) => {
+                     setBufferOnly(ev.target.checked);
+                     setPicked([]);
+                     setPage(1);
+                   }} />
+            只看未挂事件
           </label>
         </label>
       </div>

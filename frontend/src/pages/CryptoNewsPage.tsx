@@ -84,9 +84,8 @@ export function CryptoNewsPage() {
   const [coin, setCoin] = useState("");
   const [search, setSearch] = useState("");
   const [affairOnly, setAffairOnly] = useState(false);
-  // 与宏观新闻页同一套用语:unlinkedOnly=过滤,triageMode=打开立案勾选框
+  // 与宏观新闻页同一个名字、同一套行为:过滤未挂事件 + 打开立案勾选框
   const [unlinkedOnly, setUnlinkedOnly] = useState(false);
-  const [triageMode, setTriageMode] = useState(false);
   const [page, setPage] = useState(1);
   const [picked, setPicked] = useState<number[]>([]);
 
@@ -135,6 +134,7 @@ export function CryptoNewsPage() {
         <SelectControl label="回溯" value={hours} onChange={resetPage(setHours)} options={hourOptions} />
         <TextInput label="币种" value={coin} onChange={resetPage(setCoin)} placeholder="如 SOL" />
         <TextInput label="关键词" value={search} onChange={resetPage(setSearch)} placeholder="标题或正文" />
+        {/* 每个勾选框各占一个 .field:.field 是纵向 grid,塞两个会上下堆叠不好看 */}
         <label className="field">
           <span>范围</span>
           <label className="rp-check">
@@ -142,23 +142,22 @@ export function CryptoNewsPage() {
                    onChange={(ev) => { setAffairOnly(ev.target.checked); setPage(1); }} />
             只看币圈事务
           </label>
-          <label className="rp-check">
-            <input type="checkbox" checked={unlinkedOnly}
-                   onChange={(ev) => { setUnlinkedOnly(ev.target.checked); setPage(1); }} />
-            只看未挂事件
-          </label>
         </label>
         <label className="field">
           <span>立案</span>
           <label className="rp-check">
-            <input type="checkbox" checked={triageMode}
-                   onChange={(ev) => { setTriageMode(ev.target.checked); setPicked([]); }} />
-            勾选立案
+            <input type="checkbox" checked={unlinkedOnly}
+                   onChange={(ev) => {
+                     setUnlinkedOnly(ev.target.checked);
+                     setPicked([]);
+                     setPage(1);
+                   }} />
+            只看未挂事件
           </label>
         </label>
       </div>
       {news.isLoading ? <LoadingState /> : news.error ? <ErrorState error={news.error} /> : null}
-      {triageMode && picked.length > 0 &&
+      {unlinkedOnly && picked.length > 0 &&
         <TriageBar picked={picked} onDone={afterTriage} eventType="crypto" />}
       <section className="panel">
         <div className="panel-head">
@@ -167,7 +166,7 @@ export function CryptoNewsPage() {
         </div>
         {items.length ? items.map((item) => (
           <CryptoRow key={item.id} item={item}
-                     picked={triageMode ? picked.includes(item.id) : null}
+                     picked={unlinkedOnly ? picked.includes(item.id) : null}
                      onPick={(checked) => setPicked(checked
                        ? [...picked, item.id] : picked.filter((x) => x !== item.id))} />
         )) : <EmptyState title="当前筛选下没有加密快讯" />}
