@@ -43,6 +43,9 @@ export function eventCardChips(e: ResearchEventItem): { text: string; cls: strin
   chips.push({ text: `昨日 +${e.yesterday_new}`, cls: e.yesterday_new > 0 ? "rp-yday" : "muted" });
   if (e.days_since_last != null && e.days_since_last >= 3)
     chips.push({ text: `${e.days_since_last} 天无新证据`, cls: "ref-neutral" });
+  // 加密事件的涉及币种(读时由时间轴新闻派生;宏观事件后端恒给空数组)
+  for (const coin of (e.coins ?? []).slice(0, 5))
+    chips.push({ text: coin, cls: "s-badge mid" });
   return chips;
 }
 
@@ -115,6 +118,14 @@ const MOVE_OPTIONS = [
 const PAGE_SIZE = 50;
 
 // ---- 事件详情(时间轴工作台)----
+
+/** 关闭事件前的留词提醒（web3 二期A design §4，宏观加密一体）：关键词为空 =
+ *  沉睡监听失灵，这个事件关掉后「旧事重提」永远不会再唤醒它。 */
+export function closeEventPrompt(gateKeywords: string | null | undefined): string {
+  return (gateKeywords ?? "").trim()
+    ? ""
+    : "该事件还没有沉睡关键词——关闭后「旧事重提」将无法唤醒它。建议先补关键词再关闭。";
+}
 
 function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () => void }) {
   const qc = useQueryClient();
@@ -192,6 +203,8 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
           }}>关键词</MenuItem>
           {event.status === "active" ? (
             <MenuItem onClick={() => {
+              const warn = closeEventPrompt(event.gate_keywords);
+              if (warn && !window.confirm(`${warn}\n\n仍要关闭吗?`)) return;
               const reason = window.prompt("关闭原因", "");
               if (reason !== null) patchEvent.mutate({ status: "closed", closed_reason: reason });
             }}>关闭事件</MenuItem>
@@ -330,8 +343,15 @@ export function ResearchPage() {
   const [selected, setSelected] = useState<number | null>(null);
   const [tab, setTab] = useState<"events" | "revival">("events");
   const [q, setQ] = useState("");
-  const events = useQuery({ queryKey: ["research-events", "all", q],
-                            queryFn: () => api.researchEvents(q ? { q } : {}) });
+  // 事件类型筛选(web3 二期A):默认宏观——现有使用习惯不变,加密线另有一档
+  const [eventType, setEventType] = useState<"macro" | "crypto" | "">("macro");
+  const events = useQuery({
+    queryKey: ["research-events", "all", q, eventType],
+    queryFn: () => api.researchEvents({
+      ...(q ? { q } : {}),
+      ...(eventType ? { event_type: eventType } : {}),
+    }),
+  });
   const stats = useQuery({ queryKey: ["research-stats"], queryFn: () => api.researchStats(),
                            refetchInterval: 60_000 });
   const refresh = () => {
@@ -346,7 +366,8 @@ export function ResearchPage() {
 
   return (
     <section>
-      <PageHeader title="宏观事件池" />
+      <PageHeader title={eventType === "crypto" ? "加密事件池"
+                          : eventType === "" ? "研究事件池" : "宏观事件池"} />
       <div className="rp-topbar">
         {stats.data?.link_rate != null && (
           <span className="muted" title="过闸新闻里模型挂上的占比(并行期观察,spec §13.3)">
@@ -359,6 +380,11 @@ export function ResearchPage() {
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {tab === "events" && ([["macro", "宏观"], ["crypto", "加密"], ["", "全部"]] as const).map(
+          ([value, label]) => (
+            <Button key={label} kind={eventType === value ? "primary" : "ghost"}
+                    onClick={() => { setEventType(value); setSelected(null); }}>{label}</Button>
+          ))}
         <Button kind={tab === "events" ? "primary" : "ghost"} onClick={() => setTab("events")}>事件</Button>
         <Button kind={tab === "revival" ? "primary" : "ghost"} onClick={() => setTab("revival")}>旧事重提</Button>
       </div>

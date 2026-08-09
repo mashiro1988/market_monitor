@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eventCardChips, fmtObs, isHotMove, OBS_HOT_PCT, fmtScore } from "./ResearchPage";
+import { closeEventPrompt, eventCardChips, fmtObs, isHotMove, OBS_HOT_PCT, fmtScore } from "./ResearchPage";
 import type { ObsResult, ResearchEventItem } from "../api/types";
 
 describe("fmtObs", () => {
@@ -78,5 +78,18 @@ describe("eventCardChips", () => {
       .toBe(false);
     expect(eventCardChips({ ...base, days_since_last: 5 }).map((c) => c.text))
       .toContain("5 天无新证据");
+  });
+});
+
+describe("closeEventPrompt", () => {
+  it("关键词为空时提醒留沉睡词(web3 二期A design §4:宏观加密一体)", () => {
+    const msg = closeEventPrompt(null);
+    expect(msg).toContain("沉睡关键词");
+    expect(closeEventPrompt("")).toBe(msg);
+    expect(closeEventPrompt("   ")).toBe(msg);
+  });
+
+  it("已有关键词时不啰嗦", () => {
+    expect(closeEventPrompt("霍尔木兹、美伊")).toBe("");
   });
 });

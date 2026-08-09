@@ -6,6 +6,7 @@ import { AppShell } from "./components/AppShell";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AnnotationsPage } from "./pages/AnnotationsPage";
 import { BehaviorPage } from "./pages/BehaviorPage";
+import { CryptoNewsPage } from "./pages/CryptoNewsPage";
 import { MarketPage } from "./pages/MarketPage";
 import { NewsPage } from "./pages/NewsPage";
 import { PredictionsPage } from "./pages/PredictionsPage";
@@ -31,6 +32,7 @@ const router = createBrowserRouter([
       { path: "market", element: <MarketPage /> },
       { path: "sectors", element: <SectorRotationPage /> },
       { path: "news", element: <NewsPage /> },
+      { path: "crypto-news", element: <CryptoNewsPage /> },
       { path: "predictions", element: <PredictionsPage /> },
       { path: "alerts", element: <AlertsPage /> },
       { path: "annotations", element: <AnnotationsPage /> },

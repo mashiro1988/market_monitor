@@ -44,19 +44,24 @@ function useDebouncedValue(value: string, delayMs: number) {
 
 
 /** 立案操作条:勾了几条未挂事件的新闻后,直接在这里立事件或挂到已有事件
- *  (原事件池「缓冲区」页签整体搬来,buffer-into-news design §2.1)。 */
-function TriageBar({ picked, onDone }: { picked: number[]; onDone: () => void }) {
+ *  (原事件池「缓冲区」页签整体搬来,buffer-into-news design §2.1)。
+ *  eventType 决定立的是宏观还是加密事件,并据此只列同线的可挂事件(web3 二期A design §4)。 */
+export function TriageBar({ picked, onDone, eventType = "macro" }:
+                          { picked: number[]; onDone: () => void; eventType?: "macro" | "crypto" }) {
   const [name, setName] = useState("");
   const [keywords, setKeywords] = useState("");
   const [target, setTarget] = useState("");
   // 失败必须可见:2026-08-09 线上 AI 建议 400 被静默吞掉,用户只见"毫无反应"
   const [errorMsg, setErrorMsg] = useState("");
-  const events = useQuery({ queryKey: ["research-events", "active"],
-                            queryFn: () => api.researchEvents({ status: "active" }) });
+  const events = useQuery({
+    queryKey: ["research-events", "active", eventType],
+    queryFn: () => api.researchEvents({ status: "active", event_type: eventType }),
+  });
   const finish = () => { setName(""); setKeywords(""); setTarget(""); setErrorMsg(""); onDone(); };
   const create = useMutation({
     mutationFn: () => api.researchEventCreate({
-      name, news_ids: picked, gate_keywords: keywords || null, created_from: "manual" }),
+      name, news_ids: picked, gate_keywords: keywords || null, created_from: "manual",
+      event_type: eventType }),
     onSuccess: finish,
     onError: (err) => setErrorMsg(apiErrorText(err, "立事件失败")),
   });
@@ -80,7 +85,11 @@ function TriageBar({ picked, onDone }: { picked: number[]; onDone: () => void })
       <span>已选 {picked.length} 条 →</span>
       <input placeholder="事件名(一个待重定价的变量;中文短名≤20字)" value={name}
              onChange={(ev) => setName(ev.target.value)} style={{ width: 260 }} />
-      <input placeholder="免闸关键词(顿号分隔,可 AI 建议)" value={keywords}
+      {/* 加密线不设分数闸,这个字段只在关闭事件后当沉睡监听词用(design §3/§4) */}
+      <input placeholder={eventType === "crypto"
+                            ? "关键词(顿号分隔;关闭后靠它旧事重提)"
+                            : "免闸关键词(顿号分隔,可 AI 建议)"}
+             value={keywords}
              onChange={(ev) => setKeywords(ev.target.value)} style={{ width: 220 }} />
       <Button kind="secondary" disabled={!name || suggest.isPending}
               onClick={() => suggest.mutate()}>AI 建议</Button>

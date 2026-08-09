@@ -117,6 +117,18 @@ export const api = {
     buffer_only?: boolean;          // 仅看未挂事件(= 事件池缓冲区口径)
   }) => request<NewsResponse>(`/news${buildQuery(params)}`),
   newsSources: () => request<NewsSourceMeta[]>("/news/sources"),
+  // 加密快讯（web3 二期A）：独立页面，与宏观新闻互不干扰
+  cryptoNews: (params: {
+    sources?: string[];
+    hours_back?: number;
+    min_llm_importance?: number;
+    affair_only?: boolean;          // 只看币圈事务（滤掉加密源转载的纯宏观）
+    coin?: string;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }) => request<NewsResponse>(`/crypto/news${buildQuery(params)}`),
+  cryptoNewsSources: () => request<NewsSourceMeta[]>("/crypto/news/sources"),
   predictions: (params: { hours?: number; search?: string }) =>
     request<PredictionsResponse>(`/predictions${buildQuery(params)}`),
   predictionFamilies: (params: { hours?: number; search?: string }) =>
@@ -180,7 +192,7 @@ export const api = {
   sectorTokens: (category: string) =>
     request<SectorTokensResponse>(`/sectors/${encodeURIComponent(category)}/tokens`),
   // 研究事件池(news-research-phase1 spec §9.3)
-  researchEvents: (params: { status?: string; q?: string } = {}) =>
+  researchEvents: (params: { status?: string; q?: string; event_type?: string } = {}) =>
     request<import("./types").ResearchEventsResponse>(`/research/events${buildQuery(params)}`),
   researchEventCreate: (body: import("./types").ResearchEventCreateRequest) =>
     request<import("./types").ResearchEventItem>("/research/events", { method: "POST", body: JSON.stringify(body) }),
