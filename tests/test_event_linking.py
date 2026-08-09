@@ -104,8 +104,9 @@ def test_link_unprocessed_stamps_and_links(session, monkeypatch):
     low = _news(session, "低分且不命中", score=3)
     junk = _news(session, "金十数据整理：每日热门ETF", score=9)
 
-    def fake_call(user_content):
+    def fake_call(user_content, system_prompt=None):
         assert "苹果调价" in user_content        # 活跃池摘要进了提示词
+        assert system_prompt == event_linking.LINK_SYSTEM_PROMPT   # 宏观轮用宏观提示词
         return json.dumps({"items": [
             {"id": hit.id, "event_id": e.id, "confidence": 0.9},
             {"id": no.id, "event_id": None, "confidence": 0.9},
@@ -128,7 +129,7 @@ def test_link_unprocessed_empty_pool_skips_everything(session, monkeypatch):
     _news(session, "有新闻但没事件", score=9)
     called = []
     monkeypatch.setattr(event_linking, "_call_linker",
-                        lambda c: called.append(c) or "{}")
+                        lambda c, p=None: called.append(c) or "{}")
     stats = event_linking.link_unprocessed(session)
     assert stats == {"processed": 0, "linked": 0, "called": 0}
     assert not called                    # 池空:零调用,游标也不动(spec §4.1)
@@ -137,7 +138,7 @@ def test_link_unprocessed_empty_pool_skips_everything(session, monkeypatch):
 def test_link_unprocessed_batch_failure_keeps_cursor(session, monkeypatch):
     _event(session, "事件X")
     n = _news(session, "会失败的批", score=9)
-    def boom(user_content):
+    def boom(user_content, system_prompt=None):
         raise RuntimeError("网络超时")
     monkeypatch.setattr(event_linking, "_call_linker", boom)
     stats = event_linking.link_unprocessed(session)
@@ -150,7 +151,7 @@ def test_link_unprocessed_invalid_item_not_stamped(session, monkeypatch):
     e = _event(session, "事件X")
     good = _news(session, "合法条", score=9)
     bad = _news(session, "被模型漏答的条", score=9)
-    monkeypatch.setattr(event_linking, "_call_linker", lambda c: json.dumps(
+    monkeypatch.setattr(event_linking, "_call_linker", lambda c, p=None: json.dumps(
         {"items": [{"id": good.id, "event_id": None, "confidence": 0.9}]}))
     event_linking.link_unprocessed(session)
     session.refresh(good); session.refresh(bad)
@@ -161,7 +162,8 @@ def test_link_unprocessed_invalid_item_not_stamped(session, monkeypatch):
 def test_untagged_news_not_picked(session, monkeypatch):
     _event(session, "事件X")
     n = _news(session, "还没打标", score=9, tagged=False)
-    monkeypatch.setattr(event_linking, "_call_linker", lambda c: json.dumps({"items": []}))
+    monkeypatch.setattr(event_linking, "_call_linker",
+                        lambda c, p=None: json.dumps({"items": []}))
     event_linking.link_unprocessed(session)
     session.refresh(n)
     assert n.event_linked_at is None     # tagged_at 为空的不进挂接(评分未必跑过)

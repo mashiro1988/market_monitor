@@ -36,9 +36,10 @@ def _split_keywords(raw: str | None) -> list[str]:
     return [w.strip() for w in re.split(r"[、,，]", raw) if w.strip()]
 
 
-def _active_events(session: Session) -> list[ResearchEvent]:
+def _active_events(session: Session, event_type: str = "macro") -> list[ResearchEvent]:
     return (session.query(ResearchEvent)
-            .filter(ResearchEvent.status == "active")
+            .filter(ResearchEvent.status == "active",
+                    ResearchEvent.event_type == event_type)
             .order_by(ResearchEvent.id.asc()).all())
 
 
@@ -55,12 +56,25 @@ def _news_text(news: NewsItem) -> str:
 
 
 def passes_gate(news: NewsItem, keywords: list[str]) -> bool:
-    """闸门(spec §4.1):≥6 或未评分 或命中任一进行中事件关键词。
+    """宏观闸门(spec §4.1):≥6 或未评分 或命中任一进行中事件关键词。
     免闸≠指定归属——挂到哪仍由模型对整个活跃池判断。"""
     if news.llm_importance is None or news.llm_importance >= config.EVENT_LINK_MIN_IMPORTANCE:
         return True
     text = _news_text(news)
     return any(k.lower() in text for k in keywords)
+
+
+def passes_crypto_gate(news: NewsItem) -> bool:
+    """加密线的闸是**语义闸**(web3 二期A design §3):加密源转载的纯宏观新闻
+    (美联储/CPI/地缘)不进加密事件池——宏观自有宏观线管。
+
+    分数闸在加密线**不设**:加密线 200-300 条/天量能扛得住全量过模型,而小币新闻
+    分数天然低,用分数拦等于把二期B 异动归因的原料掐掉。"""
+    return news.is_crypto_affair is True
+
+
+# 市场 → 事件类型:两条线各看各的池子。人工跨挂不受此限(在 event_pool.py)。
+MARKET_EVENT_TYPE = {"macro": "macro", "crypto": "crypto"}
 
 
 LINK_SYSTEM_PROMPT = (
@@ -77,6 +91,22 @@ LINK_SYSTEM_PROMPT = (
 
 # 版本戳:每次实质性修改 LINK_SYSTEM_PROMPT 时更新;随每条 auto 挂接落库。
 LINK_PROMPT_VERSION = "link-v1-20260802"
+
+CRYPTO_LINK_SYSTEM_PROMPT = (
+    "你是加密市场研究助理。下面给你一份【活跃事件池】和一批加密新闻,判断每条新闻"
+    "是否是池中某个事件的新证据。\n"
+    "规则:\n"
+    "- 只做归类,不评判新闻重要性;新闻与所有事件都无关 → event_id 给 null(不挂)。\n"
+    "- 不确定就不挂:只有主体(项目/协议/交易所/资产)与事态确实属于该事件才挂。\n"
+    "- 同一个币可能同时有多条事件线(如解锁与生态基金是两件事),按事态归属判断,"
+    "别只看币名相同就挂。\n"
+    "- 转载/同一起源的重复报道照挂(时间轴自会显示簇拥,人工把关兜底)。\n"
+    "只返回 JSON,不要 Markdown:\n"
+    '{"items": [{"id": 新闻id, "event_id": 事件编号或null, "confidence": 0.9}, ...]}\n'
+    "confidence 三档:0.9=明确属于;0.65=大概率属于;0.3=勉强(倾向不挂)。\n"
+    "每条输入新闻在 items 里有且仅有一项,id 严格对应输入;event_id 必须是池中编号。"
+)
+CRYPTO_LINK_PROMPT_VERSION = "crypto-link-v1-20260809"
 
 VALID_CONFIDENCES = (0.9, 0.65, 0.3)
 
@@ -103,13 +133,13 @@ def _build_link_payload(pool_summary: str, news_list: list[NewsItem]) -> str:
             f"【新闻,共 {len(items)} 条】\n{json.dumps({'news': items}, ensure_ascii=False)}")
 
 
-def _call_linker(user_content: str) -> str:
+def _call_linker(user_content: str, system_prompt: str = LINK_SYSTEM_PROMPT) -> str:
     if not config.DEEPSEEK_API_KEY:
         raise RuntimeError("DEEPSEEK_API_KEY 未配置,无法挂接")
     payload = {
         "model": config.DEEPSEEK_MODEL,
         "messages": [
-            {"role": "system", "content": LINK_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
         "response_format": {"type": "json_object"},
@@ -172,35 +202,42 @@ def _parse_link_response(raw: str, valid_news_ids: set[int],
 
 
 def _create_auto_link(session: Session, event_id: int, news_id: int,
-                      confidence: float | None) -> ResearchEventLink:
+                      confidence: float | None,
+                      prompt_version: str = LINK_PROMPT_VERSION) -> ResearchEventLink:
     existing = (session.query(ResearchEventLink)
                 .filter_by(event_id=event_id, news_id=news_id).first())
     if existing:
         return existing        # 唯一约束:已有挂接(含人工/已摘下)不重复建、不覆盖
     link = ResearchEventLink(event_id=event_id, news_id=news_id, link_source="auto",
                              auto_event_id=event_id, confidence=confidence,
-                             prompt_version=LINK_PROMPT_VERSION)
+                             prompt_version=prompt_version)
     session.add(link)
     return link
 
 
 def link_unprocessed(session: Session, limit: int = 200,
-                     batch_size: int | None = None) -> dict:
+                     batch_size: int | None = None, market: str = "macro") -> dict:
     """tick 入口(spec §4.1):处理游标为空的新闻,四种结果都盖章。
-    返回 {"processed": 盖章数, "linked": 新增挂接数, "called": 进LLM条数}。"""
+    返回 {"processed": 盖章数, "linked": 新增挂接数, "called": 进LLM条数}。
+
+    market="macro" 走分数闸 + 关键词免闸;market="crypto" 走语义闸
+    (is_crypto_affair,web3 二期A design §3)。两条线各看各的事件池。"""
     stats = {"processed": 0, "linked": 0, "called": 0}
-    events = _active_events(session)
+    is_crypto = market == "crypto"
+    events = _active_events(session, MARKET_EVENT_TYPE.get(market, "macro"))
     if not events:
         return stats                     # 池空整段跳过,零调用、游标不动
     keywords = _keyword_pool(events)
     todo = (session.query(NewsItem)
-            .filter(NewsItem.tagged_at.isnot(None), NewsItem.event_linked_at.is_(None))
+            .filter(NewsItem.tagged_at.isnot(None), NewsItem.event_linked_at.is_(None),
+                    NewsItem.market == market)
             .order_by(NewsItem.timestamp.desc())
             .limit(max(1, limit)).all())
     now = utc_now_naive()
     to_llm: list[NewsItem] = []
     for n in todo:
-        if _is_blacklisted(n) or not passes_gate(n, keywords):
+        gate_ok = passes_crypto_gate(n) if is_crypto else passes_gate(n, keywords)
+        if _is_blacklisted(n) or not gate_ok:
             n.event_linked_at = now      # 不够格/黑名单:盖章零调用
             stats["processed"] += 1
         else:
@@ -208,6 +245,8 @@ def link_unprocessed(session: Session, limit: int = 200,
     session.commit()
     if not to_llm:
         return stats
+    system_prompt = CRYPTO_LINK_SYSTEM_PROMPT if is_crypto else LINK_SYSTEM_PROMPT
+    prompt_version = CRYPTO_LINK_PROMPT_VERSION if is_crypto else LINK_PROMPT_VERSION
     pool_summary = _pool_summary(session, events)
     valid_event_ids = {int(e.id) for e in events}
     batch_size = int(batch_size or config.DEEPSEEK_BATCH_SIZE)
@@ -215,7 +254,7 @@ def link_unprocessed(session: Session, limit: int = 200,
         chunk = to_llm[i:i + batch_size]
         stats["called"] += len(chunk)
         try:
-            raw = _call_linker(_build_link_payload(pool_summary, chunk))
+            raw = _call_linker(_build_link_payload(pool_summary, chunk), system_prompt)
             parsed = _parse_link_response(raw, {int(n.id) for n in chunk}, valid_event_ids)
         except Exception as exc:         # 整批失败:不盖游标,下轮重试
             logger.error(f"[EventLink] 分片挂接失败({len(chunk)} 条): {exc}")
@@ -227,7 +266,7 @@ def link_unprocessed(session: Session, limit: int = 200,
             if n is None:
                 continue
             if r["event_id"] is not None:
-                _create_auto_link(session, r["event_id"], nid, r["confidence"])
+                _create_auto_link(session, r["event_id"], nid, r["confidence"], prompt_version)
                 stats["linked"] += 1
             n.event_linked_at = now      # 只有合法解析条目盖章(含"不挂")
             stats["processed"] += 1
@@ -301,24 +340,30 @@ def suggest_keywords(session: Session, name: str, news_ids: list[int]) -> list[s
     raise last_exc
 
 
-def clear_link_cursor(session: Session, hours: float, now: datetime | None = None) -> int:
+def clear_link_cursor(session: Session, hours: float, now: datetime | None = None,
+                      market: str = "macro") -> int:
     """回扫=清游标(spec §6.3):范围内**当前够格**(过闸或命中关键词、不在黑名单)
     且**无未摘下挂接**的新闻,游标清空 → 下轮 tick 对着更新后的池子自然重收。
-    立案/重开/改关键词勾选时用默认 72h;深回扫按钮传更大的 hours。返回清空条数。"""
+    立案/重开/改关键词勾选时用默认 72h;深回扫按钮传更大的 hours。返回清空条数。
+
+    "当前够格"按 market 各判各的:加密线走语义闸,别把转载宏观又捞回来。"""
     now = now or utc_now_naive()
-    events = _active_events(session)
+    is_crypto = market == "crypto"
+    events = _active_events(session, MARKET_EVENT_TYPE.get(market, "macro"))
     keywords = _keyword_pool(events)
     cutoff = now - timedelta(hours=hours)
     linked_ids = {row[0] for row in session.query(ResearchEventLink.news_id)
                   .filter(ResearchEventLink.detached.is_(False)).all()}
     rows = (session.query(NewsItem)
             .filter(NewsItem.timestamp >= cutoff,
+                    NewsItem.market == market,
                     NewsItem.event_linked_at.isnot(None)).all())
     cleared = 0
     for n in rows:
         if int(n.id) in linked_ids:
             continue
-        if _is_blacklisted(n) or not passes_gate(n, keywords):
+        gate_ok = passes_crypto_gate(n) if is_crypto else passes_gate(n, keywords)
+        if _is_blacklisted(n) or not gate_ok:
             continue
         n.event_linked_at = None
         cleared += 1

@@ -228,6 +228,7 @@ def run_scan_once():
 
         _tag_new_news()
         _rescore_unscored_news()
+        _tag_crypto_news()
         _link_new_news()
 
         logger.info("[Scan] 开始预测市场扫描...")
@@ -321,6 +322,26 @@ def _rescore_unscored_news() -> None:
         session.close()
 
 
+def _tag_crypto_news() -> None:
+    """加密新闻打四件套(web3 二期A design §2):重要性+方向+币圈事务+提及币种。
+    放在挂接之前——本轮打上的 is_crypto_affair 当轮就参与加密语义闸。
+    守卫与宏观打标同款:无 key/开关关静默跳过,异常自吞不影响本轮扫描。"""
+    if not getattr(config, "DEEPSEEK_API_KEY", ""):
+        return
+    if not getattr(config, "CRYPTO_NEWS_ENABLED", False):
+        return
+    from services.crypto_tagging import tag_untagged_crypto
+    session = get_session()
+    try:
+        tagged = tag_untagged_crypto(session)
+        if tagged:
+            logger.info(f"[CryptoTag] 本轮打标 {tagged} 条")
+    except Exception as exc:
+        logger.exception(f"[CryptoTag] 打标失败,不影响本轮扫描: {exc}")
+    finally:
+        session.close()
+
+
 def _link_new_news() -> None:
     """挂接游标为空的新闻到活跃事件池(news-research-phase1 spec §4.1)。
     与打标同模式:无 key/开关关静默跳过;异常自吞不影响本轮扫描。"""
@@ -334,6 +355,12 @@ def _link_new_news() -> None:
         stats = link_unprocessed(session, limit=200)
         if stats["processed"] or stats["linked"]:
             logger.info(f"[EventLink] 本轮盖章 {stats['processed']} 条,新挂 {stats['linked']} 条")
+        # 加密线独立跑一轮:各看各的事件池,闸门也不同(语义闸 vs 分数闸)
+        if getattr(config, "CRYPTO_NEWS_ENABLED", False):
+            c_stats = link_unprocessed(session, limit=200, market="crypto")
+            if c_stats["processed"] or c_stats["linked"]:
+                logger.info(f"[EventLink/crypto] 本轮盖章 {c_stats['processed']} 条,"
+                            f"新挂 {c_stats['linked']} 条")
     except Exception as exc:
         logger.exception(f"[EventLink] 挂接失败,不影响本轮扫描: {exc}")
     finally:

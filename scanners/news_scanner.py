@@ -32,6 +32,17 @@ class NewsScanner(SourceHealthMixin):
         # 添加 Bloomberg RSS 源
         self.sources.extend(create_rss_sources())
 
+        # 加密源（web3 二期A）：与宏观源同池采集、同表落库，靠 NewsRecord.market 分流。
+        # BlockBeats 无 key 时不注册——注册了每轮都会抛错刷屏。
+        if getattr(config, "CRYPTO_NEWS_ENABLED", False):
+            crypto_cfg = getattr(config, "CRYPTO_NEWS_SOURCES", {})
+            if crypto_cfg.get("blockbeats", {}).get("enabled") and config.BLOCKBEATS_API_KEY:
+                from scanners.sources.blockbeats_source import BlockBeatsSource
+                self.sources.append(BlockBeatsSource())
+            if crypto_cfg.get("binance_ann", {}).get("enabled"):
+                from scanners.sources.binance_ann_source import BinanceAnnouncementSource
+                self.sources.append(BinanceAnnouncementSource())
+
         self.scorer = NewsScorer()
         self._reset_source_statuses()
 
@@ -67,8 +78,9 @@ class NewsScanner(SourceHealthMixin):
         )
 
         # 对所有保留新闻补充 DeepSeek V4 价格波动重要性评分；不覆盖源端 importance。
+        # 只打宏观：加密线用 services/crypto_tagging 的独立口径（web3 二期A design §2）。
         if self.scorer.enabled:
-            all_records = self.scorer.enrich_batch(all_records)
+            self.scorer.enrich_batch(self._macro_only(all_records))
 
         # 按发布时间降序排列（无 published_at 的条目排在最后）
         all_records.sort(
@@ -189,7 +201,7 @@ class NewsScanner(SourceHealthMixin):
 
         range_records.sort(key=lambda r: r.published_at or datetime.min, reverse=True)
         if should_score and self.scorer.enabled:
-            range_records = self.scorer.enrich_batch(range_records)
+            self.scorer.enrich_batch(self._macro_only(range_records))
         range_records.sort(key=lambda r: r.published_at or datetime.min, reverse=True)
         inserted = self._save_records(range_records, end_time, skip_existing=True)
         logger.info(
@@ -222,6 +234,13 @@ class NewsScanner(SourceHealthMixin):
                 self._record_source_error(source.name, e, stage="backfill")
                 logger.error(f"[NewsBackfill] {source.name} 回补失败: {e}")
         return records
+
+    @staticmethod
+    def _macro_only(records: list[NewsRecord]) -> list[NewsRecord]:
+        """宏观 scorer 的提示词按"对 BTC/纳指的宏观冲击"校准，喂加密新闻会把
+        "小币上合约"这类币圈关键事打成低分，还会反向污染宏观口径；加密线的分
+        由 services/crypto_tagging 用独立口径给（web3 二期A design §2）。"""
+        return [r for r in records if getattr(r, "market", "macro") != "crypto"]
 
     @staticmethod
     def _filter_existing_records(records: list[NewsRecord]) -> list[NewsRecord]:
@@ -335,6 +354,7 @@ class NewsScanner(SourceHealthMixin):
                     # 出生即定：传统市场开没开，纯日历，不依赖打标（news-impact-engine Phase 1，
                     # 是后续"可打标"判断与台账滤休市的前置条件）。
                     traditional_open=market_calendar.is_traditional_open(item_ts),
+                    market=getattr(r, "market", "macro"),
                 )
                 session.add(item)
                 saved += 1
