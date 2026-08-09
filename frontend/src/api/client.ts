@@ -212,6 +212,7 @@ export const api = {
     request<import("./types").NewsLinksResponse>(`/research/news/${newsId}/links`),
   researchBuffer: (params: { days?: number; min_score?: number; q?: string; drivers_only?: boolean } = {}) =>
     request<import("./types").BufferResponse>(`/research/buffer${buildQuery(params)}`),
-  researchRevival: () => request<import("./types").RevivalResponse>("/research/revival"),
+  researchRevival: (eventType?: string) =>
+    request<import("./types").RevivalResponse>(`/research/revival${buildQuery({ event_type: eventType })}`),
   researchStats: () => request<import("./types").ResearchStats>("/research/stats")
 };

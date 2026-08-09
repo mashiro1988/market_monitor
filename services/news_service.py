@@ -93,6 +93,7 @@ def get_crypto_news(
     search: str | None = None,
     page: int = 1,
     page_size: int = 50,
+    unlinked_only: bool = False,
 ) -> NewsResponse:
     """加密快讯(web3 二期A design §4):独立页面,与宏观新闻页互不干扰。
 
@@ -122,6 +123,11 @@ def get_crypto_news(
     candidates = query.order_by(NewsItem.timestamp.desc()).limit(5000).all()
     filtered = [i for i in candidates
                 if passes_default_importance_filter(i, min_llm_importance)]
+    if unlinked_only:
+        # 与宏观页「只看未挂事件」共用同一个判定函数,口径不会两处漂移
+        from services.event_pool import buffer_predicate
+        is_buffer = buffer_predicate(session, market="crypto")
+        filtered = [i for i in filtered if is_buffer(i)]
     total = len(filtered)
     start = (page - 1) * page_size
     page_items = filtered[start:start + page_size]

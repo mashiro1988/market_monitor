@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import config
@@ -56,7 +57,11 @@ def create_event(session: Session, name: str, news_ids: list[int],
     if missing:
         raise ValueError(f"新闻不存在: {sorted(missing)}")
     now = now or utc_now_naive()
+    # 人看的序号:同类型内 max+1,只增不补(中间的事件没了也不重排,免得你记的 #3 变成别人)
+    max_no = (session.query(func.max(ResearchEvent.display_no))
+              .filter(ResearchEvent.event_type == event_type).scalar() or 0)
     event = ResearchEvent(name=name, status="active", event_type=event_type,
+                          display_no=int(max_no) + 1,
                           gate_keywords=(gate_keywords or None),
                           created_from=created_from, status_changed_at=now)
     session.add(event)
@@ -246,6 +251,8 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
         last_ts = rows[0][1].timestamp if rows else None
         out.append({
             "id": e.id, "name": e.name, "status": e.status,
+            # display_no 是人看的号(各类型自排);id 仍是程序内部唯一标识
+            "display_no": e.display_no or e.id,
             "event_type": e.event_type or "macro",
             # 币种只对加密事件有意义;宏观事件恒空,免得宏观卡片挂一串无关代码
             "coins": _event_coins(session, e.id) if e.event_type == "crypto" else [],
@@ -318,10 +325,13 @@ def event_timeline(session: Session, event_id: int, now: datetime | None = None,
     if page_size is not None:
         page_size = max(1, int(page_size))
         items = items[(page - 1) * page_size: page * page_size]
+    # 回扫队列按本事件所属的线统计:加密页不该显示宏观的积压(两条线各跑各的挂接)
     pending_relink = (session.query(NewsItem)
                       .filter(NewsItem.tagged_at.isnot(None),
-                              NewsItem.event_linked_at.is_(None)).count())
-    return {"event": {"id": e.id, "name": e.name, "status": e.status,
+                              NewsItem.event_linked_at.is_(None),
+                              NewsItem.market == (e.event_type or "macro")).count())
+    return {"event": {"id": e.id, "display_no": e.display_no or e.id,
+                      "name": e.name, "status": e.status,
                       "gate_keywords": e.gate_keywords, "created_from": e.created_from,
                       "closed_reason": e.closed_reason, "merged_into_id": e.merged_into_id},
             "items": items, "pending_relink": pending_relink,
@@ -338,21 +348,28 @@ def news_links(session: Session, news_id: int) -> list[dict]:
              "event_status": e.status} for l, e in rows]
 
 
-def buffer_predicate(session: Session):
+def buffer_predicate(session: Session, market: str = "macro"):
     """返回"这条新闻算不算缓冲区"的判定函数(spec §6.4:过闸 + 非黑名单 + 无未摘下挂接)。
 
-    口径的唯一来源:缓冲区页签与新闻快讯的"仅看未挂事件"共用它,
-    防两处各写一遍而慢慢漂移(buffer-into-news-page design §1.1)。
+    口径的唯一来源:缓冲区页签与两个快讯页的"只看未挂事件"共用它,
+    防各处各写一遍而慢慢漂移(buffer-into-news-page design §1.1)。
     活跃事件关键词与已挂 news_id 集合在这里查一次,判定本身不再碰库。
+
+    market="crypto" 时闸门换语义闸(web3 二期A design §3):加密线不设分数闸,
+    转载宏观的新闻本来就不进加密事件池,自然也不算它的待研究缓冲。
     """
-    keywords = _keyword_pool(_active_events(session))
+    from services.event_linking import MARKET_EVENT_TYPE, passes_crypto_gate
+
+    is_crypto = market == "crypto"
+    keywords = _keyword_pool(_active_events(session, MARKET_EVENT_TYPE.get(market, "macro")))
     linked = {row[0] for row in session.query(ResearchEventLink.news_id)
               .filter(ResearchEventLink.detached.is_(False)).all()}
 
     def _is_buffer(news: NewsItem) -> bool:
         if int(news.id) in linked:
             return False
-        return not _is_blacklisted(news) and passes_gate(news, keywords)
+        gate_ok = passes_crypto_gate(news) if is_crypto else passes_gate(news, keywords)
+        return not _is_blacklisted(news) and gate_ok
 
     return _is_buffer
 
@@ -384,21 +401,29 @@ def buffer_news(session: Session, days: int = 3, min_score: int | None = None,
     return out
 
 
-def revival_matches(session: Session, days: int = 7, now: datetime | None = None) -> list[dict]:
-    """沉睡监听(spec §7):近 N 天新闻命中**已关闭**事件关键词;纯文本现算,零 LLM。"""
+def revival_matches(session: Session, days: int = 7, now: datetime | None = None,
+                    event_type: str | None = None) -> list[dict]:
+    """沉睡监听(spec §7):近 N 天新闻命中**已关闭**事件关键词;纯文本现算,零 LLM。
+    event_type 让两个事件池页各看各的旧事重提(web3 二期A)。"""
     now = now or utc_now_naive()
-    closed = (session.query(ResearchEvent)
-              .filter(ResearchEvent.status == "closed",
-                      ResearchEvent.gate_keywords.isnot(None)).all())
+    query = (session.query(ResearchEvent)
+             .filter(ResearchEvent.status == "closed",
+                     ResearchEvent.gate_keywords.isnot(None)))
+    if event_type:
+        query = query.filter(ResearchEvent.event_type == event_type)
+    closed = query.all()
     watchlist = [(e, [k.lower() for k in _split_keywords(e.gate_keywords)])
                  for e in closed]
     watchlist = [(e, ks) for e, ks in watchlist if ks]
     if not watchlist:
         return []
     out = []
-    rows = (session.query(NewsItem)
-            .filter(NewsItem.timestamp >= now - timedelta(days=days))
-            .order_by(NewsItem.timestamp.desc()).all())
+    news_q = (session.query(NewsItem)
+              .filter(NewsItem.timestamp >= now - timedelta(days=days)))
+    if event_type:
+        # 各线只拿自己的新闻:加密事件的沉睡词不该被宏观新闻唤醒,反之亦然
+        news_q = news_q.filter(NewsItem.market == event_type)
+    rows = news_q.order_by(NewsItem.timestamp.desc()).all()
     for n in rows:
         if _is_blacklisted(n):
             continue

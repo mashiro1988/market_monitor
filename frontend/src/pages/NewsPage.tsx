@@ -153,7 +153,11 @@ export function NewsPage() {
   const [jin10Importance, setJin10Importance] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // 两个勾选项各管一件事(两个快讯页用语统一):
+  //   bufferOnly = 过滤列表(只留没挂过事件的);triageMode = 打开立案勾选框
+  // 原先合成一个勾选项,与加密页的「勾选立案」看着像、做的事不同,反而费解
   const [bufferOnly, setBufferOnly] = useState(false);
+  const [triageMode, setTriageMode] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
   const debouncedSearch = useDebouncedValue(search, 350);
   const normalizedSearch = debouncedSearch.trim();
@@ -192,7 +196,7 @@ export function NewsPage() {
   // 中英分栏完全按 language 字段切分；新加源不需要再改这里。
   const items = news.data?.items ?? [];
   const total = news.data?.total ?? 0;
-  const canTriage = bufferOnly;                        // 勾选立案 = 开了"仅看未挂事件"
+  const canTriage = triageMode;                        // 立案勾选框由「勾选立案」单独控制
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = page;
 
@@ -210,7 +214,15 @@ export function NewsPage() {
           <label className="rp-check">
             <input type="checkbox" checked={bufferOnly}
                    onChange={(ev) => { setBufferOnly(ev.target.checked); setPage(1); }} />
-            仅看未挂事件
+            只看未挂事件
+          </label>
+        </label>
+        <label className="field">
+          <span>立案</span>
+          <label className="rp-check">
+            <input type="checkbox" checked={triageMode}
+                   onChange={(ev) => { setTriageMode(ev.target.checked); setPicked([]); }} />
+            勾选立案
           </label>
         </label>
       </div>

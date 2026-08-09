@@ -146,6 +146,14 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
         if "behavior_daily_summaries" in table_names:
             migrate_behavior_daily_basis(conn)
 
+        # research_events：补人看的序号列（web3 二期A：加密事件池自己从 #1 排）。
+        if "research_events" in table_names:
+            existing = {col["name"] for col in inspector.get_columns("research_events")}
+            if "display_no" not in existing:
+                conn.execute(text("ALTER TABLE research_events ADD COLUMN display_no INTEGER"))
+            if run_migrations:
+                migrate_event_display_no(conn)
+
 
 def migrate_behavior_daily_basis(conn) -> bool:
     """behavior_daily_summaries 北京日口径切换（2026-07-29）：
@@ -187,6 +195,36 @@ _REACTION_UPGRADE = {
 }
 # news-impact-engine Phase 3a：退场角色（综述/解释/矛盾并入 noise = 从 news_roles 移除）。
 _RETIRED_ROLES = {"post_hoc_explanation", "contradictory"}
+
+
+def migrate_event_display_no(conn) -> int:
+    """research_events.display_no 回填（web3 二期A：加密事件池独立序号）。
+
+    每种 event_type 内按 id 升序编 1..N；已有号的行不动（幂等，且新事件由
+    event_pool.create_event 自己取 max+1，不会与回填打架）。返回回填行数。
+    """
+    from sqlalchemy import inspect as _inspect
+
+    if "research_events" not in _inspect(conn).get_table_names():
+        return 0
+    rows = conn.execute(text(
+        "SELECT id, event_type FROM research_events WHERE display_no IS NULL ORDER BY id ASC"
+    )).fetchall()
+    if not rows:
+        return 0
+    # 各类型已用到的最大号（含本次之前已回填的），避免与存量号冲突
+    used = {r[0]: (r[1] or 0) for r in conn.execute(text(
+        "SELECT event_type, MAX(display_no) FROM research_events "
+        "WHERE display_no IS NOT NULL GROUP BY event_type"
+    )).fetchall()}
+    filled = 0
+    for event_id, event_type in rows:
+        etype = event_type or "macro"
+        used[etype] = used.get(etype, 0) + 1
+        conn.execute(text("UPDATE research_events SET display_no = :no WHERE id = :id"),
+                     {"no": used[etype], "id": event_id})
+        filled += 1
+    return filled
 
 
 def migrate_news_event_cursor(conn) -> bool:

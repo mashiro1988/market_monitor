@@ -12,7 +12,10 @@ class ResearchEvent(Base):
     __tablename__ = "research_events"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_type = Column(String(16), nullable=False, default="macro")   # 二期叙事共用本表时加 narrative
+    event_type = Column(String(16), nullable=False, default="macro")   # macro / crypto(web3 二期A)
+    # 人看的序号:每种类型各从 1 排(加密事件池 #1 起),只增不补。
+    # 程序内部(挂接、时间轴、合并、路由)一律仍用主键 id——display_no 只负责展示。
+    display_no = Column(Integer, nullable=True)
     name = Column(String(80), nullable=False)
     status = Column(String(10), nullable=False, default="active")      # active / closed
     gate_keywords = Column(Text, nullable=True)       # 顿号分隔;空=不免闸;已关闭事件的词走沉睡监听

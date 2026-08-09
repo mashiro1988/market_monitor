@@ -127,7 +127,8 @@ export function closeEventPrompt(gateKeywords: string | null | undefined): strin
     : "该事件还没有沉睡关键词——关闭后「旧事重提」将无法唤醒它。建议先补关键词再关闭。";
 }
 
-function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () => void }) {
+function EventDetail({ eventId, onChanged, eventType }:
+                     { eventId: number; onChanged: () => void; eventType: "macro" | "crypto" }) {
   const qc = useQueryClient();
   const [days, setDays] = useState(0);
   const [minScore, setMinScore] = useState(0);
@@ -146,8 +147,11 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
     // 改筛选/翻页时留住上一页,避免整块塌成"加载中"再弹回来
     placeholderData: (previous) => previous,
   });
-  const events = useQuery({ queryKey: ["research-events", "active"],
-                            queryFn: () => api.researchEvents({ status: "active" }) });
+  // 只列同线的可挂/可合并事件:加密页不该冒出宏观事件当合并目标
+  const events = useQuery({
+    queryKey: ["research-events", "active", eventType],
+    queryFn: () => api.researchEvents({ status: "active", event_type: eventType }),
+  });
   // 失败必须可见:改名/关键词/关闭/合并/回扫失败若静默,页面看着像"点了没反应"
   const [actionError, setActionError] = useState("");
   const invalidate = () => {
@@ -186,7 +190,7 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
   return (
     <div className="rp-detail">
       <div className="rp-detail-head">
-        <span className="subsection-title">#{event.id} {event.name}</span>
+        <span className="subsection-title">#{event.display_no} {event.name}</span>
         <span className="s-badge none">{event.status === "active" ? "进行中" : "已关闭"}</span>
         {pending_relink > 0 && <span className="s-badge mid">回扫进行中(剩 {pending_relink} 条)</span>}
         {actionError && <span style={{ color: "var(--danger)" }}>{actionError}</span>}
@@ -218,9 +222,9 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
                 <div className="rp-menu-hint">合并到…</div>
                 {activeOptions.map((o) => (
                   <MenuItem key={o.id} onClick={() => {
-                    if (window.confirm(`把「${event.name}」合并入 #${o.id} ${o.name}?`))
+                    if (window.confirm(`把「${event.name}」合并入 #${o.display_no} ${o.name}?`))
                       patchEvent.mutate({ merge_into_id: o.id });
-                  }}>#{o.id} {o.name}</MenuItem>
+                  }}>#{o.display_no} {o.name}</MenuItem>
                 ))}
               </>}
           <div className="rp-menu-sep" />
@@ -284,7 +288,7 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
               {activeOptions.map((o) => (
                 <MenuItem key={o.id}
                           onClick={() => patchLink.mutate({ id: it.link.id, body: { event_id: o.id } })}>
-                  #{o.id} {o.name}
+                  #{o.display_no} {o.name}
                 </MenuItem>
               ))}
               {activeOptions.length > 0 && <div className="rp-menu-sep" />}
@@ -306,8 +310,10 @@ function EventDetail({ eventId, onChanged }: { eventId: number; onChanged: () =>
 
 // ---- 旧事重提(沉睡监听,spec §7)----
 
-function RevivalTab({ onChanged }: { onChanged: () => void }) {
-  const revival = useQuery({ queryKey: ["research-revival"], queryFn: () => api.researchRevival() });
+function RevivalTab({ onChanged, eventType }:
+                    { onChanged: () => void; eventType: "macro" | "crypto" }) {
+  const revival = useQuery({ queryKey: ["research-revival", eventType],
+                             queryFn: () => api.researchRevival(eventType) });
   const [reopenError, setReopenError] = useState("");
   const reopen = useMutation({
     mutationFn: (eventId: number) => api.researchEventPatch(eventId, { status: "active" }),
@@ -338,19 +344,21 @@ function RevivalTab({ onChanged }: { onChanged: () => void }) {
 
 // ---- 主页面 ----
 
-export function ResearchPage() {
+/** 事件池页壳:宏观与加密各一个独立页面(web3 二期A,用户拍板不混在一页)。
+ *  两条线数据完全隔离——事件、旧事重提、序号体系都各排各的。 */
+function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
+  eventType: "macro" | "crypto";
+  title: string;
+  newsHref: string;
+  newsLabel: string;
+}) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<number | null>(null);
   const [tab, setTab] = useState<"events" | "revival">("events");
   const [q, setQ] = useState("");
-  // 事件类型筛选(web3 二期A):默认宏观——现有使用习惯不变,加密线另有一档
-  const [eventType, setEventType] = useState<"macro" | "crypto" | "">("macro");
   const events = useQuery({
     queryKey: ["research-events", "all", q, eventType],
-    queryFn: () => api.researchEvents({
-      ...(q ? { q } : {}),
-      ...(eventType ? { event_type: eventType } : {}),
-    }),
+    queryFn: () => api.researchEvents({ ...(q ? { q } : {}), event_type: eventType }),
   });
   const stats = useQuery({ queryKey: ["research-stats"], queryFn: () => api.researchStats(),
                            refetchInterval: 60_000 });
@@ -366,8 +374,7 @@ export function ResearchPage() {
 
   return (
     <section>
-      <PageHeader title={eventType === "crypto" ? "加密事件池"
-                          : eventType === "" ? "研究事件池" : "宏观事件池"} />
+      <PageHeader title={title} />
       <div className="rp-topbar">
         {stats.data?.link_rate != null && (
           <span className="muted" title="过闸新闻里模型挂上的占比(并行期观察,spec §13.3)">
@@ -380,24 +387,19 @@ export function ResearchPage() {
           </span>
         )}
         <span style={{ flex: 1 }} />
-        {tab === "events" && ([["macro", "宏观"], ["crypto", "加密"], ["", "全部"]] as const).map(
-          ([value, label]) => (
-            <Button key={label} kind={eventType === value ? "primary" : "ghost"}
-                    onClick={() => { setEventType(value); setSelected(null); }}>{label}</Button>
-          ))}
         <Button kind={tab === "events" ? "primary" : "ghost"} onClick={() => setTab("events")}>事件</Button>
         <Button kind={tab === "revival" ? "primary" : "ghost"} onClick={() => setTab("revival")}>旧事重提</Button>
       </div>
 
-      {tab === "revival" && <RevivalTab onChanged={refresh} />}
+      {tab === "revival" && <RevivalTab onChanged={refresh} eventType={eventType} />}
       {tab === "events" && (
         <div className="panel">
           <div className="panel-head">
             <h2><FolderSearch size={16} /> 进行中({active.length})</h2>
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <a href="/news" className="muted" style={{ fontSize: 13 }}
-                 title="缓冲区已并入新闻快讯:在那边选「紧凑 + 仅看未挂事件」勾选立案">
-                去新闻快讯挑证据 →
+              <a href={newsHref} className="muted" style={{ fontSize: 13 }}
+                 title="缓冲区已并入快讯页:在那边勾「只看未挂事件」+「勾选立案」挑证据">
+                {newsLabel} →
               </a>
               <input placeholder="搜事件名/关键词(含已关闭)" value={q}
                      onChange={(ev) => setQ(ev.target.value)} />
@@ -412,7 +414,7 @@ export function ResearchPage() {
               <button type="button" key={e.id}
                       className={`rp-card${selected === e.id ? " selected" : ""}`}
                       onClick={() => setSelected(selected === e.id ? null : e.id)}>
-                <span className="rp-card-name" title={e.name}>#{e.id} {e.name}</span>
+                <span className="rp-card-name" title={e.name}>#{e.display_no} {e.name}</span>
                 <span className="rp-card-chips">
                   {eventCardChips(e).map((c, i) => <span key={i} className={c.cls}>{c.text}</span>)}
                 </span>
@@ -422,16 +424,22 @@ export function ResearchPage() {
               </button>
             ))}
           </div>
-          {selected != null && <EventDetail eventId={selected} onChanged={refresh} />}
+          {selected != null &&
+            <EventDetail eventId={selected} onChanged={refresh} eventType={eventType} />}
           {closed.length > 0 && (
             <details className="rp-closed">
               <summary>已关闭({closed.length})</summary>
               {closed.map((e) => (
                 <div key={e.id} className="rp-row rp-row-closed"
                      onClick={() => setSelected(selected === e.id ? null : e.id)}>
-                  <span className="rp-title">#{e.id} {e.name}</span>
+                  <span className="rp-title">#{e.display_no} {e.name}</span>
                   <span className="muted">{e.closed_reason ?? ""}</span>
-                  {e.merged_into_id != null && <span className="muted">→ #{e.merged_into_id}</span>}
+                  {/* 合并目标用它自己的展示号(同类型内查得到);查不到再退回 id */}
+                  {e.merged_into_id != null && (
+                    <span className="muted">
+                      → #{rows.find((r) => r.id === e.merged_into_id)?.display_no ?? e.merged_into_id}
+                    </span>
+                  )}
                 </div>
               ))}
             </details>
@@ -440,6 +448,16 @@ export function ResearchPage() {
       )}
     </section>
   );
+}
+
+export function ResearchPage() {
+  return <EventPoolPage eventType="macro" title="宏观事件池"
+                        newsHref="/news" newsLabel="去新闻快讯挑证据" />;
+}
+
+export function CryptoResearchPage() {
+  return <EventPoolPage eventType="crypto" title="加密事件池"
+                        newsHref="/crypto-news" newsLabel="去加密快讯挑证据" />;
 }
 
 export default ResearchPage;

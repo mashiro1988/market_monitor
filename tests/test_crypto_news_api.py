@@ -83,3 +83,43 @@ def test_search_matches_title(session):
 def test_crypto_sources_listed():
     keys = {s.key for s in news_service.list_crypto_sources()}
     assert "blockbeats" in keys and "binance_ann" in keys
+
+
+def test_unlinked_only_filters_attached_news(session):
+    """「只看未挂事件」:已挂到事件上的新闻退出列表(与宏观页同口径)。"""
+    from models.research import ResearchEvent, ResearchEventLink
+
+    kept = _news(session, "还没挂事件")
+    attached = _news(session, "已挂事件")
+    evt = ResearchEvent(name="某加密事件", event_type="crypto", status="active",
+                        created_from="manual")
+    session.add(evt); session.commit()
+    session.add(ResearchEventLink(event_id=evt.id, news_id=attached.id, link_source="human"))
+    session.commit()
+
+    resp = news_service.get_crypto_news(session, unlinked_only=True)
+    assert [i.title for i in resp.items] == ["还没挂事件"]
+    # 不勾选时两条都在
+    assert len(news_service.get_crypto_news(session).items) == 2
+
+
+def test_unlinked_only_uses_crypto_semantic_gate(session):
+    """加密线的缓冲口径走语义闸:转载宏观不算待研究(它本来就不进加密事件池)。"""
+    _news(session, "币圈事务", affair=True, score=2)
+    _news(session, "转载宏观", affair=False, score=9)
+    resp = news_service.get_crypto_news(session, unlinked_only=True)
+    assert [i.title for i in resp.items] == ["币圈事务"]
+
+
+def test_detached_link_returns_to_buffer(session):
+    """摘下的挂接不算挂过:证据被摘下后该新闻要能重新被立案。"""
+    from models.research import ResearchEvent, ResearchEventLink
+
+    n = _news(session, "被摘下的新闻")
+    evt = ResearchEvent(name="某加密事件", event_type="crypto", status="active",
+                        created_from="manual")
+    session.add(evt); session.commit()
+    session.add(ResearchEventLink(event_id=evt.id, news_id=n.id, link_source="human",
+                                  detached=True))
+    session.commit()
+    assert len(news_service.get_crypto_news(session, unlinked_only=True).items) == 1

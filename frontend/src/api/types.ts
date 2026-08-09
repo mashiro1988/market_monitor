@@ -556,6 +556,7 @@ export type ResearchEventItem = {
   name: string;
   status: string;
   event_type: string;
+  display_no: number;
   coins: string[];
   gate_keywords: string | null;
   created_from: string;
@@ -690,6 +691,7 @@ export type TimeFields = {
 
 export type TimelineEventHead = {
   id: number;
+  display_no: number;
   name: string;
   status: string;
   gate_keywords: string | null;

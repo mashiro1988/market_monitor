@@ -84,13 +84,16 @@ export function CryptoNewsPage() {
   const [coin, setCoin] = useState("");
   const [search, setSearch] = useState("");
   const [affairOnly, setAffairOnly] = useState(false);
+  // 与宏观新闻页同一套用语:unlinkedOnly=过滤,triageMode=打开立案勾选框
+  const [unlinkedOnly, setUnlinkedOnly] = useState(false);
   const [triageMode, setTriageMode] = useState(false);
   const [page, setPage] = useState(1);
   const [picked, setPicked] = useState<number[]>([]);
 
   const sources = useQuery({ queryKey: ["crypto-news-sources"], queryFn: api.cryptoNewsSources });
   const news = useQuery({
-    queryKey: ["crypto-news", source, importance, hours, coin, search, affairOnly, page],
+    queryKey: ["crypto-news", source, importance, hours, coin, search, affairOnly,
+               unlinkedOnly, page],
     queryFn: () => api.cryptoNews({
       sources: source ? [source] : undefined,
       min_llm_importance: Number(importance),
@@ -98,6 +101,7 @@ export function CryptoNewsPage() {
       coin: coin.trim() || undefined,
       search: search.trim() || undefined,
       ...(affairOnly ? { affair_only: true } : {}),
+      ...(unlinkedOnly ? { unlinked_only: true } : {}),
       page,
       page_size: PAGE_SIZE,
     }),
@@ -138,6 +142,11 @@ export function CryptoNewsPage() {
                    onChange={(ev) => { setAffairOnly(ev.target.checked); setPage(1); }} />
             只看币圈事务
           </label>
+          <label className="rp-check">
+            <input type="checkbox" checked={unlinkedOnly}
+                   onChange={(ev) => { setUnlinkedOnly(ev.target.checked); setPage(1); }} />
+            只看未挂事件
+          </label>
         </label>
         <label className="field">
           <span>立案</span>
@@ -153,7 +162,7 @@ export function CryptoNewsPage() {
         <TriageBar picked={picked} onDone={afterTriage} eventType="crypto" />}
       <section className="panel">
         <div className="panel-head">
-          <h2>{affairOnly ? "币圈事务" : "全部加密快讯"}</h2>
+          <h2>{unlinkedOnly ? "未挂事件的加密快讯" : affairOnly ? "币圈事务" : "全部加密快讯"}</h2>
           <span className="muted">{total} 条</span>
         </div>
         {items.length ? items.map((item) => (

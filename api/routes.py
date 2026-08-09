@@ -209,6 +209,7 @@ def crypto_news(
     affair_only: bool = False,            # 只看币圈事务（滤掉加密源转载的纯宏观）
     coin: str | None = None,
     search: str | None = None,
+    unlinked_only: bool = False,          # 只看未挂事件（与宏观页同口径、同判定函数）
     page: int = 1,
     page_size: int = 50,
     db: Session = Depends(get_db),
@@ -216,7 +217,8 @@ def crypto_news(
     return news_service.get_crypto_news(
         db, sources=_csv_list(sources), hours_back=hours_back,
         min_llm_importance=min_llm_importance, affair_only=affair_only,
-        coin=coin, search=search, page=page, page_size=page_size)
+        coin=coin, search=search, unlinked_only=unlinked_only,
+        page=page, page_size=page_size)
 
 
 @router.get("/crypto/news/sources", response_model=list[NewsSourceMeta])
@@ -633,8 +635,10 @@ def research_buffer(days: int = Query(default=3, ge=1, le=30),
 
 @router.get("/research/revival", response_model=RevivalResponse)
 def research_revival(days: int = Query(default=7, ge=1, le=30),
+                     event_type: str | None = Query(default=None),
                      db: Session = Depends(get_db)) -> RevivalResponse:
-    return RevivalResponse(items=event_pool.revival_matches(db, days=days))
+    return RevivalResponse(items=event_pool.revival_matches(db, days=days,
+                                                            event_type=event_type))
 
 
 @router.get("/research/stats", response_model=ResearchStats)

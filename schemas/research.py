@@ -10,6 +10,7 @@ class ResearchEventItem(BaseModel):
     name: str
     status: str
     event_type: str = "macro"                # macro / crypto（web3 二期A）
+    display_no: int = 0                      # 人看的序号：每种类型各从 1 排；id 才是内部标识
     coins: list[str] = Field(default_factory=list)   # 加密事件的派生币种（读时算，宏观恒空）
     gate_keywords: str | None = None
     created_from: str
@@ -96,6 +97,7 @@ class TimelineItem(BaseModel):
 
 class TimelineEventHead(BaseModel):
     id: int
+    display_no: int = 0                      # 人看的序号（各类型自排）
     name: str
     status: str
     gate_keywords: str | None = None
