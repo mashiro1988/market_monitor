@@ -673,6 +673,30 @@ export type SuggestKeywordsResponse = {
   keywords: string[];
 };
 
+export type SweepCreatedEvent = {
+  id: number;
+  display_no: number;
+  name: string;
+  news_count: number;
+  why: string;
+};
+
+export type SweepRequest = {
+  event_type: string;
+  dry_run: boolean;
+};
+
+export type SweepResponse = {
+  event_type: string;
+  scanned: number;
+  truncated: boolean;
+  created: SweepCreatedEvent[];
+  attached: number;
+  skipped_new_events: number;
+  duration_seconds: number;
+  dry_run: boolean;
+};
+
 export type TaskStatus = {
   task_id: string;
   status: string;

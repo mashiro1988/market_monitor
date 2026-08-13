@@ -59,11 +59,13 @@ from schemas.research import (
     RevivalResponse,
     SuggestKeywordsRequest,
     SuggestKeywordsResponse,
+    SweepRequest,
+    SweepResponse,
     TimelineResponse,
 )
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, behavior_views, event_linking, event_pool, market_service, news_service, prediction_service, sector_service, task_service
+from services import alerts_service, annotation_service, behavior_views, event_linking, event_pool, market_service, news_service, pool_sweep, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -642,5 +644,22 @@ def research_revival(days: int = Query(default=7, ge=1, le=30),
 
 
 @router.get("/research/stats", response_model=ResearchStats)
-def research_stats(db: Session = Depends(get_db)) -> ResearchStats:
-    return ResearchStats(**event_pool.daily_stats(db))
+def research_stats(event_type: str | None = Query(default=None),
+                   db: Session = Depends(get_db)) -> ResearchStats:
+    # event_type 传了各线各算(两个池子页各看各的挂接率);不传 = 旧混算口径
+    return ResearchStats(**event_pool.daily_stats(db, market=event_type))
+
+
+@router.post("/research/sweep", response_model=SweepResponse)
+def research_sweep(request: SweepRequest, db: Session = Depends(get_db)) -> SweepResponse:
+    """AI 梳理(2026-08-13 design):同步长调用(思考模型,1-5 分钟)。
+    Nginx 的 proxy_read_timeout 600s(deployment.md Phase 5)已覆盖此时长。"""
+    try:
+        return SweepResponse(**pool_sweep.run_sweep(
+            db, event_type=request.event_type, dry_run=request.dry_run))
+    except pool_sweep.SweepBusy as exc:
+        raise ApiError("SWEEP_BUSY", str(exc), status_code=409) from exc
+    except ValueError as exc:
+        raise ApiError("SWEEP_INVALID", str(exc), status_code=400) from exc
+    except RuntimeError as exc:        # DeepSeek 故障/坏输出:上游问题,不是请求错误
+        raise ApiError("SWEEP_FAILED", str(exc), status_code=502) from exc

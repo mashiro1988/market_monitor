@@ -93,6 +93,14 @@ DEEPSEEK_REASONER_READ_TIMEOUT = float(os.getenv("DEEPSEEK_REASONER_READ_TIMEOUT
 DEEPSEEK_REASONER_BATCH_READ_TIMEOUT = float(os.getenv("DEEPSEEK_REASONER_BATCH_READ_TIMEOUT", "600"))
 DEEPSEEK_REASONER_EFFORT = os.getenv("DEEPSEEK_REASONER_EFFORT", "max")  # "high" | "max"
 
+# 事件池 AI 梳理(pool sweep,2026-08-13 design):按钮触发,reasoner 全池盘点。
+# 窗口/上限给足预算:800 条标题+摘要约 6-7 万 token 输入,v4-pro 上下文放得下;
+# max_tokens 同时覆盖 reasoning_content + content,盘点思考量大,给到 24k。
+RESEARCH_SWEEP_DAYS = int(os.getenv("RESEARCH_SWEEP_DAYS", "7"))
+RESEARCH_SWEEP_MAX_NEWS = int(os.getenv("RESEARCH_SWEEP_MAX_NEWS", "800"))
+RESEARCH_SWEEP_MAX_TOKENS = int(os.getenv("RESEARCH_SWEEP_MAX_TOKENS", "24000"))
+RESEARCH_SWEEP_MAX_NEW_EVENTS = int(os.getenv("RESEARCH_SWEEP_MAX_NEW_EVENTS", "8"))
+
 # 企业微信机器人 Webhook
 WECHAT_WORK_WEBHOOK = os.getenv("WECHAT_WORK_WEBHOOK", "")
 

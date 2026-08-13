@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, FolderSearch, Search } from "lucide-react";
 import { api, apiErrorText } from "../api/client";
-import type { NewsItem, ObsResult, ResearchEventItem, TimelineItem } from "../api/types";
+import type { NewsItem, ObsResult, ResearchEventItem, SweepResponse, TimelineItem } from "../api/types";
 import { Button, PageHeader } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 
@@ -360,13 +360,24 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
     queryKey: ["research-events", "all", q, eventType],
     queryFn: () => api.researchEvents({ ...(q ? { q } : {}), event_type: eventType }),
   });
-  const stats = useQuery({ queryKey: ["research-stats"], queryFn: () => api.researchStats(),
+  // 各线各看各的当日挂接率(2026-08-13 sweep design):宏观页别被加密线冲稀,反之亦然
+  const stats = useQuery({ queryKey: ["research-stats", eventType],
+                           queryFn: () => api.researchStats(eventType),
                            refetchInterval: 60_000 });
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["research-events"] });
     void qc.invalidateQueries({ queryKey: ["research-buffer"] });
     void qc.invalidateQueries({ queryKey: ["research-revival"] });
+    void qc.invalidateQueries({ queryKey: ["research-stats"] });
   };
+  // AI 梳理:同步长调用(1-5 分钟),期间按钮置灰;结果面板展示新立/补挂,可收起
+  const [sweepResult, setSweepResult] = useState<SweepResponse | null>(null);
+  const [sweepError, setSweepError] = useState("");
+  const sweep = useMutation({
+    mutationFn: () => api.researchSweep(eventType),
+    onSuccess: (r) => { setSweepError(""); setSweepResult(r); refresh(); },
+    onError: (err) => setSweepError(apiErrorText(err, "梳理失败")),
+  });
 
   const rows = events.data?.items ?? [];
   const active = rows.filter((r) => r.status === "active");
@@ -387,10 +398,46 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
           </span>
         )}
         <span style={{ flex: 1 }} />
+        <Button kind="secondary" disabled={sweep.isPending}
+                onClick={() => {
+                  if (window.confirm("AI 梳理:让思考模型盘点近 7 天未挂接快讯,自动立案 + 补挂证据"
+                                     + "(立错的随时可关闭/摘下)。约 1-5 分钟,期间别关页面。开始?"))
+                    sweep.mutate();
+                }}>
+          {sweep.isPending ? "梳理中…(约 1-5 分钟)" : "AI 梳理"}
+        </Button>
         <Button kind={tab === "events" ? "primary" : "ghost"} onClick={() => setTab("events")}>事件</Button>
         <Button kind={tab === "revival" ? "primary" : "ghost"} onClick={() => setTab("revival")}>旧事重提</Button>
       </div>
 
+      {sweepError && (
+        <div className="panel">
+          <span style={{ color: "var(--danger)" }}>AI 梳理失败:{sweepError}</span>
+        </div>
+      )}
+      {sweepResult && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2>AI 梳理结果</h2>
+            <span className="muted">
+              扫描 {sweepResult.scanned} 条未挂快讯{sweepResult.truncated ? "(超上限截断)" : ""}
+              {" · 思考 "}{Math.round(sweepResult.duration_seconds)}s
+              {" · 新立 "}{sweepResult.created.length} 个事件 · 补挂 {sweepResult.attached} 条
+              {sweepResult.skipped_new_events > 0 && ` · 超额未立 ${sweepResult.skipped_new_events} 个`}
+            </span>
+            <button type="button" className="link-button" onClick={() => setSweepResult(null)}>收起</button>
+          </div>
+          {sweepResult.created.length === 0
+            ? <EmptyState title="模型没发现值得新立的事件" />
+            : sweepResult.created.map((c) => (
+                <div key={c.id || c.name} className="rp-row">
+                  <span className="rp-title">#{c.display_no} {c.name}</span>
+                  <span className="s-badge mid">{c.news_count} 条</span>
+                  <span className="muted">{c.why}</span>
+                </div>
+              ))}
+        </div>
+      )}
       {tab === "revival" && <RevivalTab onChanged={refresh} eventType={eventType} />}
       {tab === "events" && (
         <div className="panel">
@@ -414,7 +461,11 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
               <button type="button" key={e.id}
                       className={`rp-card${selected === e.id ? " selected" : ""}`}
                       onClick={() => setSelected(selected === e.id ? null : e.id)}>
-                <span className="rp-card-name" title={e.name}>#{e.display_no} {e.name}</span>
+                <span className="rp-card-name" title={e.name}>
+                  #{e.display_no} {e.name}
+                  {e.created_from === "sweep" &&
+                    <span className="s-badge weak" title="AI 梳理立案(可关闭/合并/摘证据)"> AI</span>}
+                </span>
                 <span className="rp-card-chips">
                   {eventCardChips(e).map((c, i) => <span key={i} className={c.cls}>{c.text}</span>)}
                 </span>

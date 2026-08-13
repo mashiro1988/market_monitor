@@ -19,7 +19,7 @@ from models.price import PriceSnapshot
 from models.research import ResearchEvent, ResearchEventLink
 from services.event_linking import (
     _active_events, _is_blacklisted, _keyword_pool, _split_keywords,
-    clear_link_cursor, passes_gate,
+    clear_link_cursor, passes_crypto_gate, passes_gate,
 )
 from services.news_service import to_news_schema
 from services.theme_ledger import (
@@ -42,13 +42,20 @@ def create_event(session: Session, name: str, news_ids: list[int],
                  gate_keywords: str | None = None, created_from: str = "manual",
                  backscan_hours: float | None = None,
                  now: datetime | None = None,
-                 event_type: str = "macro") -> ResearchEvent:
-    """立案(spec §6.1):仅人工,强制 ≥1 条新闻;出生即 active;自动回扫 72h。
-    event_type 决定这个事件收哪条线的新闻(web3 二期A design §4)。"""
+                 event_type: str = "macro",
+                 link_source: str = "human",
+                 prompt_version: str | None = None) -> ResearchEvent:
+    """立案(spec §6.1):强制 ≥1 条新闻;出生即 active;自动回扫 72h。
+    event_type 决定这个事件收哪条线的新闻(web3 二期A design §4)。
+    created_from="sweep" 是 AI 梳理按钮落的草稿(2026-08-13 design):立案权仍不给
+    定时任务,只在人点按钮时行使;梳理种子挂接传 link_source="auto"+prompt_version,
+    auto_event_id 记本事件——纠错率审计对梳理产物同样生效。"""
     if not news_ids:
         raise ValueError("立案必须至少挂一条新闻")
-    if created_from not in ("annotation", "manual"):
+    if created_from not in ("annotation", "manual", "sweep"):
         raise ValueError(f"非法 created_from: {created_from!r}")
+    if link_source not in ("human", "auto"):
+        raise ValueError(f"非法 link_source: {link_source!r}")
     if event_type not in EVENT_TYPES:
         raise ValueError(f"非法 event_type: {event_type!r}")
     found = {int(i) for (i,) in session.query(NewsItem.id)
@@ -67,8 +74,10 @@ def create_event(session: Session, name: str, news_ids: list[int],
     session.add(event)
     session.flush()
     for nid in news_ids:
-        session.add(ResearchEventLink(event_id=event.id, news_id=int(nid),
-                                      link_source="human"))
+        session.add(ResearchEventLink(
+            event_id=event.id, news_id=int(nid), link_source=link_source,
+            auto_event_id=(event.id if link_source == "auto" else None),
+            prompt_version=prompt_version))
     session.commit()
     # 回扫只清同线新闻的游标:立个加密事件不该把宏观新闻整批重排队
     clear_link_cursor(session, backscan_hours or config.EVENT_BACKSCAN_DEFAULT_HOURS,
@@ -436,24 +445,41 @@ def revival_matches(session: Session, days: int = 7, now: datetime | None = None
     return out
 
 
-def daily_stats(session: Session, now: datetime | None = None) -> dict:
-    """并行期观察数字(spec §9.1/§13.3):当日(北京日)挂接率/纠错率,近似口径。"""
+def daily_stats(session: Session, now: datetime | None = None,
+                market: str | None = None) -> dict:
+    """并行期观察数字(spec §9.1/§13.3):当日(北京日)挂接率/纠错率,近似口径。
+    market 传了只算那条线(两个池子页各看各的,2026-08-13 sweep design):加密新闻
+    按语义闸判"过闸",宏观按分数闸;不传 = 两线混算(历史口径,兼容旧调用)。"""
     now = now or utc_now_naive()
     start, end = bj_day_bounds(bj_date_of(now))
-    events = _active_events(session)
+    events = _active_events(session, market or "macro")
     keywords = _keyword_pool(events)
-    processed = (session.query(NewsItem)
-                 .filter(NewsItem.event_linked_at >= start,
-                         NewsItem.event_linked_at < end).all())
-    gated = [n for n in processed if not _is_blacklisted(n) and passes_gate(n, keywords)]
-    auto_today = (session.query(ResearchEventLink)
-                  .filter(ResearchEventLink.auto_event_id.isnot(None),
-                          ResearchEventLink.created_at >= start,
-                          ResearchEventLink.created_at < end).all())
+    processed_q = (session.query(NewsItem)
+                   .filter(NewsItem.event_linked_at >= start,
+                           NewsItem.event_linked_at < end))
+    if market:
+        processed_q = processed_q.filter(NewsItem.market == market)
+
+    def _gate(n: NewsItem) -> bool:
+        # 各线各自的闸:老 market=NULL 行按宏观闸走(二期A 前的历史数据)
+        return passes_crypto_gate(n) if n.market == "crypto" else passes_gate(n, keywords)
+
+    gated = [n for n in processed_q.all() if not _is_blacklisted(n) and _gate(n)]
+    auto_q = (session.query(ResearchEventLink)
+              .filter(ResearchEventLink.auto_event_id.isnot(None),
+                      ResearchEventLink.created_at >= start,
+                      ResearchEventLink.created_at < end))
+    if market:
+        auto_q = (auto_q.join(NewsItem, NewsItem.id == ResearchEventLink.news_id)
+                  .filter(NewsItem.market == market))
+    auto_today = auto_q.all()
     corrected = [l for l in auto_today if l.detached or l.event_id != l.auto_event_id]
-    pending_relink = (session.query(NewsItem)
-                      .filter(NewsItem.tagged_at.isnot(None),
-                              NewsItem.event_linked_at.is_(None)).count())
+    pending_q = (session.query(NewsItem)
+                 .filter(NewsItem.tagged_at.isnot(None),
+                         NewsItem.event_linked_at.is_(None)))
+    if market:
+        pending_q = pending_q.filter(NewsItem.market == market)
+    pending_relink = pending_q.count()
     return {
         "gated_processed_today": len(gated),
         "auto_linked_today": len(auto_today),

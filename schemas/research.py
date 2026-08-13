@@ -166,3 +166,28 @@ class ResearchStats(BaseModel):
     corrected_today: int = 0
     correction_rate: float | None = None
     pending_relink: int = 0
+
+
+class SweepRequest(BaseModel):
+    """AI 梳理(2026-08-13 design):按钮触发,同步长调用。"""
+    event_type: str = "macro"                # macro / crypto,各池各梳各的
+    dry_run: bool = False                    # True = 只看模型提案,不落库(验收用)
+
+
+class SweepCreatedEvent(BaseModel):
+    id: int = 0                              # dry_run 时为 0(未落库)
+    display_no: int = 0
+    name: str
+    news_count: int = 0
+    why: str = ""                            # 模型一句话立案理由,结果面板展示
+
+
+class SweepResponse(BaseModel):
+    event_type: str
+    scanned: int = 0                         # 本次喂给模型的未挂快讯条数
+    truncated: bool = False                  # 超 RESEARCH_SWEEP_MAX_NEWS 被截断(不静默)
+    created: list[SweepCreatedEvent] = Field(default_factory=list)
+    attached: int = 0                        # 补挂到现有事件的证据条数
+    skipped_new_events: int = 0              # 模型提案超上限被丢弃的个数(不静默)
+    duration_seconds: float = 0.0            # LLM 思考耗时
+    dry_run: bool = False
