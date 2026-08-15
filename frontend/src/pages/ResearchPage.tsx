@@ -255,6 +255,22 @@ function EventDetail({ eventId, onChanged, onDeleted, eventType }:
     onSuccess: () => { onDeleted(); onChanged(); },
     onError: (err) => setActionError(apiErrorText(err, "删除失败")),
   });
+  // AI 建议关键词(2026-08-15 用户点名):复用立案时的建议接口(spec §5.2,即用即弃),
+  // 拿当前时间轴证据当种子;建议并入现有词后进 prompt,落库的永远是人确认过的版本
+  const suggest = useMutation({
+    mutationFn: ({ name, ids }: { name: string; ids: number[]; current: string }) =>
+      api.researchSuggestKeywords({ name, news_ids: ids }),
+    onSuccess: (r, vars) => {
+      setActionError("");
+      const merged = vars.current.split(/[、,，]/).map((s) => s.trim()).filter(Boolean);
+      for (const k of r.keywords) if (!merged.includes(k)) merged.push(k);
+      const kw = window.prompt(
+        "AI 建议关键词(已并入现有词,可删改;顿号分隔;每个词单独命中都应与本事件相关)",
+        merged.join("、"));
+      if (kw !== null) patchEvent.mutate({ gate_keywords: kw, keywords_backscan: true });
+    },
+    onError: (err) => setActionError(apiErrorText(err, "AI 建议关键词失败")),
+  });
 
   // 加载/报错也必须套在 .rp-detail 里:否则拿不到展开区的上边距,会直接贴住上面的卡片
   if (timeline.isLoading && !timeline.data)
@@ -271,6 +287,7 @@ function EventDetail({ eventId, onChanged, onDeleted, eventType }:
         <span className="subsection-title">#{event.display_no} {event.name}</span>
         <span className="s-badge none">{event.status === "active" ? "进行中" : "已关闭"}</span>
         {pending_relink > 0 && <span className="s-badge mid">回扫进行中(剩 {pending_relink} 条)</span>}
+        {suggest.isPending && <span className="muted">AI 正在按时间轴证据拟词…</span>}
         {actionError && <span style={{ color: "var(--danger)" }}>{actionError}</span>}
         <span style={{ flex: 1 }} />
         <Dropdown label="管理" align="right">
@@ -283,6 +300,14 @@ function EventDetail({ eventId, onChanged, onDeleted, eventType }:
                                      event.gate_keywords ?? "");
             if (kw !== null) patchEvent.mutate({ gate_keywords: kw, keywords_backscan: true });
           }}>关键词</MenuItem>
+          <MenuItem onClick={() => {
+            const ids = items.map((it) => it.news.id).slice(0, 12);
+            if (ids.length === 0) {
+              setActionError("当前筛选下没有证据可供 AI 参考,清掉筛选再试");
+              return;
+            }
+            suggest.mutate({ name: event.name, ids, current: event.gate_keywords ?? "" });
+          }}>关键词(AI 建议)</MenuItem>
           {event.status === "active" ? (
             <MenuItem onClick={() => {
               const warn = closeEventPrompt(event.gate_keywords);
