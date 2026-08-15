@@ -57,6 +57,16 @@ export function fmtBjShort(bj: string | null | undefined): string {
   return bj ? bj.slice(5, 16) : "—";
 }
 
+/** 顿号/中英文逗号分隔的免闸词 → 去空去重数组(关键词编辑面板用,与后端 _split_keywords 同一口径)。 */
+export function splitKeywords(raw: string | null | undefined): string[] {
+  const out: string[] = [];
+  for (const part of (raw ?? "").split(/[、,，]/)) {
+    const w = part.trim();
+    if (w && !out.includes(w)) out.push(w);
+  }
+  return out;
+}
+
 // ---- 通用小件 ----
 
 /** 点外面就收起的下拉菜单(管理菜单/改归属菜单共用)。 */
@@ -255,20 +265,15 @@ function EventDetail({ eventId, onChanged, onDeleted, eventType }:
     onSuccess: () => { onDeleted(); onChanged(); },
     onError: (err) => setActionError(apiErrorText(err, "删除失败")),
   });
-  // AI 建议关键词(2026-08-15 用户点名):复用立案时的建议接口(spec §5.2,即用即弃),
-  // 拿当前时间轴证据当种子;建议并入现有词后进 prompt,落库的永远是人确认过的版本
+  // 关键词编辑面板(2026-08-15 用户点名):旧词列成标签可逐个删,AI 建议单独一排可逐个采,
+  // 落库的永远是人确认过的版本(保存才 PATCH + 回扫 72h)
+  const [kwDraft, setKwDraft] = useState<string[] | null>(null);   // null=面板关闭
+  const [kwSuggestions, setKwSuggestions] = useState<string[]>([]);
+  const [kwInput, setKwInput] = useState("");
   const suggest = useMutation({
-    mutationFn: ({ name, ids }: { name: string; ids: number[]; current: string }) =>
+    mutationFn: ({ name, ids }: { name: string; ids: number[] }) =>
       api.researchSuggestKeywords({ name, news_ids: ids }),
-    onSuccess: (r, vars) => {
-      setActionError("");
-      const merged = vars.current.split(/[、,，]/).map((s) => s.trim()).filter(Boolean);
-      for (const k of r.keywords) if (!merged.includes(k)) merged.push(k);
-      const kw = window.prompt(
-        "AI 建议关键词(已并入现有词,可删改;顿号分隔;每个词单独命中都应与本事件相关)",
-        merged.join("、"));
-      if (kw !== null) patchEvent.mutate({ gate_keywords: kw, keywords_backscan: true });
-    },
+    onSuccess: (r) => { setActionError(""); setKwSuggestions(r.keywords); },
     onError: (err) => setActionError(apiErrorText(err, "AI 建议关键词失败")),
   });
 
@@ -296,18 +301,10 @@ function EventDetail({ eventId, onChanged, onDeleted, eventType }:
             if (name) patchEvent.mutate({ name });
           }}>改名</MenuItem>
           <MenuItem onClick={() => {
-            const kw = window.prompt("免闸关键词(顿号分隔;每个词单独命中都应与本事件相关)",
-                                     event.gate_keywords ?? "");
-            if (kw !== null) patchEvent.mutate({ gate_keywords: kw, keywords_backscan: true });
+            setKwDraft(splitKeywords(event.gate_keywords));
+            setKwSuggestions([]);
+            setKwInput("");
           }}>关键词</MenuItem>
-          <MenuItem onClick={() => {
-            const ids = items.map((it) => it.news.id).slice(0, 12);
-            if (ids.length === 0) {
-              setActionError("当前筛选下没有证据可供 AI 参考,清掉筛选再试");
-              return;
-            }
-            suggest.mutate({ name: event.name, ids, current: event.gate_keywords ?? "" });
-          }}>关键词(AI 建议)</MenuItem>
           {event.status === "active" ? (
             <MenuItem onClick={() => {
               const warn = closeEventPrompt(event.gate_keywords);
@@ -345,6 +342,73 @@ function EventDetail({ eventId, onChanged, onDeleted, eventType }:
           }}>深回扫…</MenuItem>
         </Dropdown>
       </div>
+
+      {kwDraft !== null && (
+        <div className="panel" style={{ margin: "8px 0" }}>
+          <div className="panel-head">
+            <h2>免闸关键词</h2>
+            <span className="muted">
+              每个词单独命中都应与本事件相关;禁单字与泛词。点 × 删除不恰当的词,点 + 采用 AI 建议。
+            </span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center",
+                        gap: 6, padding: "6px 0" }}>
+            <span className="muted">现有:</span>
+            {kwDraft.length === 0 &&
+              <span className="muted">(空——没有词,关闭后沉睡监听不会唤醒它)</span>}
+            {kwDraft.map((k) => (
+              <span key={k} className="s-badge mid">
+                {k}
+                <button type="button" className="link-button" title="删除该词"
+                        onClick={() => setKwDraft(kwDraft.filter((x) => x !== k))}>×</button>
+              </span>
+            ))}
+          </div>
+          {kwSuggestions.filter((k) => !kwDraft.includes(k)).length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center",
+                          gap: 6, padding: "6px 0" }}>
+              <span className="muted">AI 建议:</span>
+              {kwSuggestions.filter((k) => !kwDraft.includes(k)).map((k) => (
+                <span key={k} className="s-badge none">
+                  {k}
+                  <button type="button" className="link-button" title="采用该词"
+                          onClick={() => setKwDraft([...kwDraft, k])}>+</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", paddingTop: 6 }}>
+            <input placeholder="手动加词,回车确认" value={kwInput}
+                   onChange={(ev) => setKwInput(ev.target.value)}
+                   onKeyDown={(ev) => {
+                     if (ev.key !== "Enter") return;
+                     const w = kwInput.trim();
+                     if (w && !kwDraft.includes(w)) setKwDraft([...kwDraft, w]);
+                     setKwInput("");
+                   }} />
+            <Button kind="secondary" disabled={suggest.isPending}
+                    onClick={() => {
+                      const ids = items.map((it) => it.news.id).slice(0, 12);
+                      if (ids.length === 0) {
+                        setActionError("当前筛选下没有证据可供 AI 参考,清掉筛选再试");
+                        return;
+                      }
+                      suggest.mutate({ name: event.name, ids });
+                    }}>
+              {suggest.isPending ? "AI 拟词中…" : "AI 建议"}
+            </Button>
+            <span style={{ flex: 1 }} />
+            <Button kind="ghost"
+                    onClick={() => { setKwDraft(null); setKwSuggestions([]); }}>取消</Button>
+            <Button kind="primary" disabled={patchEvent.isPending}
+                    onClick={() => patchEvent.mutate(
+                      { gate_keywords: kwDraft.join("、"), keywords_backscan: true },
+                      { onSuccess: () => { setKwDraft(null); setKwSuggestions([]); } })}>
+              保存并回扫 72h
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="rp-filters">
         <FilterSelect label="时间窗" value={days} options={DAY_OPTIONS} onChange={resetPage(setDays)} />

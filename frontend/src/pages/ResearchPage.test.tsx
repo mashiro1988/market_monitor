@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { closeEventPrompt, eventCardChips, fmtObs, isHotMove, OBS_HOT_PCT, fmtScore } from "./ResearchPage";
+import { closeEventPrompt, eventCardChips, fmtObs, isHotMove, OBS_HOT_PCT, fmtScore, splitKeywords } from "./ResearchPage";
 import type { ObsResult, ResearchEventItem } from "../api/types";
 
 describe("fmtObs", () => {
@@ -78,6 +78,17 @@ describe("eventCardChips", () => {
       .toBe(false);
     expect(eventCardChips({ ...base, days_since_last: 5 }).map((c) => c.text))
       .toContain("5 天无新证据");
+  });
+});
+
+describe("splitKeywords", () => {
+  it("顿号/中英文逗号混用都能切,去空去重保序(与后端 _split_keywords 同口径)", () => {
+    expect(splitKeywords("伊朗、霍尔木兹,美伊，伊朗、 ")).toEqual(["伊朗", "霍尔木兹", "美伊"]);
+  });
+
+  it("空值/纯空白给空数组(编辑面板显示'空'占位)", () => {
+    expect(splitKeywords(null)).toEqual([]);
+    expect(splitKeywords("  ")).toEqual([]);
   });
 });
 
