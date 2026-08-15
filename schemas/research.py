@@ -175,23 +175,51 @@ class SweepRequest(BaseModel):
 
 
 class SweepCreatedEvent(BaseModel):
-    id: int = 0                              # dry_run 时为 0(未落库)
+    id: int = 0
     display_no: int = 0
     name: str
     news_count: int = 0
-    why: str = ""                            # 模型一句话立案理由,结果面板展示
+    why: str = ""
+
+
+class SweepNewsBrief(BaseModel):
+    """提案成员快讯摘要:让人不点进快讯页也能判断该不该立。"""
+    id: int
+    t: str = ""                              # 北京无关:直接是 UTC 存储时刻 MM-DD HH:MM
+    title: str = ""
+
+
+class SweepProposal(BaseModel):
+    """梳理提案(2026-08-15 提案制):只描述、不落库;采纳时原样传回 apply。"""
+    name: str
+    keywords: list[str] = Field(default_factory=list)
+    news_ids: list[int] = Field(default_factory=list)
+    why: str = ""
+    news: list[SweepNewsBrief] = Field(default_factory=list)
 
 
 class SweepResponse(BaseModel):
     event_type: str
     scanned: int = 0                         # 本次喂给模型的未挂快讯条数
     truncated: bool = False                  # 超 RESEARCH_SWEEP_MAX_NEWS 被截断(不静默)
-    created: list[SweepCreatedEvent] = Field(default_factory=list)
-    attached: int = 0                        # 补挂到现有事件的证据条数
+    proposals: list[SweepProposal] = Field(default_factory=list)   # 新事件提案,待人采纳
+    attached: int = 0                        # 已自动补挂到现有事件的证据条数
     skipped_new_events: int = 0              # 模型提案超上限被丢弃的个数(不静默)
     vetoed: int = 0                          # 撞否决清单(用户删过的同名主题)被拦的个数
     duration_seconds: float = 0.0            # LLM 思考耗时
     dry_run: bool = False
+
+
+class SweepApplyRequest(BaseModel):
+    """采纳勾选的提案(签字环节):news 摘要字段可原样带回,后端忽略。"""
+    event_type: str = "macro"
+    events: list[SweepProposal] = Field(default_factory=list)
+
+
+class SweepApplyResponse(BaseModel):
+    event_type: str
+    created: list[SweepCreatedEvent] = Field(default_factory=list)
+    skipped_existing: list[str] = Field(default_factory=list)   # 同名活跃事件,跳过未立
 
 
 class DeleteEventResponse(BaseModel):

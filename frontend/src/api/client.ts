@@ -219,10 +219,16 @@ export const api = {
     request<import("./types").RevivalResponse>(`/research/revival${buildQuery({ event_type: eventType })}`),
   researchStats: (eventType?: "macro" | "crypto") =>
     request<import("./types").ResearchStats>(`/research/stats${buildQuery({ event_type: eventType })}`),
-  // AI 梳理(2026-08-13):思考模型长调用(1-5 分钟);fetch 无超时,由服务端与 Nginx 600s 兜底
+  // AI 梳理(2026-08-13,08-15 改提案制):思考模型长调用(1-5 分钟),只出提案+自动补挂
   researchSweep: (eventType: "macro" | "crypto") =>
     request<import("./types").SweepResponse>("/research/sweep", {
       method: "POST",
       body: JSON.stringify({ event_type: eventType })
+    }),
+  // 采纳勾选的提案(签字环节):只有这一步会真正立案
+  researchSweepApply: (eventType: "macro" | "crypto", events: import("./types").SweepProposal[]) =>
+    request<import("./types").SweepApplyResponse>("/research/sweep/apply", {
+      method: "POST",
+      body: JSON.stringify({ event_type: eventType, events })
     })
 };

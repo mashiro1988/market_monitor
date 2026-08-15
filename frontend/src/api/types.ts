@@ -679,12 +679,37 @@ export type SuggestKeywordsResponse = {
   keywords: string[];
 };
 
+export type SweepApplyRequest = {
+  event_type: string;
+  events: SweepProposal[];
+};
+
+export type SweepApplyResponse = {
+  event_type: string;
+  created: SweepCreatedEvent[];
+  skipped_existing: string[];
+};
+
 export type SweepCreatedEvent = {
   id: number;
   display_no: number;
   name: string;
   news_count: number;
   why: string;
+};
+
+export type SweepNewsBrief = {
+  id: number;
+  t: string;
+  title: string;
+};
+
+export type SweepProposal = {
+  name: string;
+  keywords: string[];
+  news_ids: number[];
+  why: string;
+  news: SweepNewsBrief[];
 };
 
 export type SweepRequest = {
@@ -696,7 +721,7 @@ export type SweepResponse = {
   event_type: string;
   scanned: number;
   truncated: boolean;
-  created: SweepCreatedEvent[];
+  proposals: SweepProposal[];
   attached: number;
   skipped_new_events: number;
   vetoed: number;

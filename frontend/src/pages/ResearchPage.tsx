@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, FolderSearch, Search } from "lucide-react";
 import { api, apiErrorText } from "../api/client";
-import type { NewsItem, ObsResult, ResearchEventItem, SweepResponse, TimelineItem } from "../api/types";
+import type {
+  NewsItem, ObsResult, ResearchEventItem, SweepApplyResponse, SweepProposal,
+  SweepResponse, TimelineItem,
+} from "../api/types";
 import { Button, PageHeader } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 
@@ -410,13 +413,25 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
     void qc.invalidateQueries({ queryKey: ["research-revival"] });
     void qc.invalidateQueries({ queryKey: ["research-stats"] });
   };
-  // AI 梳理:同步长调用(1-5 分钟),期间按钮置灰;结果面板展示新立/补挂,可收起
+  // AI 梳理(提案制,2026-08-15 用户拍板):模型只出提案,勾选「采纳」后才立案;
+  // 补挂到现有事件的部分自动落(与 5min 挂接器同一权限,auto 链可摘可审)
   const [sweepResult, setSweepResult] = useState<SweepResponse | null>(null);
+  const [sweepChecked, setSweepChecked] = useState<boolean[]>([]);
   const [sweepError, setSweepError] = useState("");
+  const [applyDone, setApplyDone] = useState<SweepApplyResponse | null>(null);
   const sweep = useMutation({
     mutationFn: () => api.researchSweep(eventType),
-    onSuccess: (r) => { setSweepError(""); setSweepResult(r); refresh(); },
+    onSuccess: (r) => {
+      setSweepError(""); setApplyDone(null);
+      setSweepResult(r); setSweepChecked(r.proposals.map(() => true));
+      refresh();                        // 补挂已落库,事件卡片计数会变
+    },
     onError: (err) => setSweepError(apiErrorText(err, "梳理失败")),
+  });
+  const applySweep = useMutation({
+    mutationFn: (events: SweepProposal[]) => api.researchSweepApply(eventType, events),
+    onSuccess: (r) => { setSweepError(""); setApplyDone(r); setSweepResult(null); refresh(); },
+    onError: (err) => setSweepError(apiErrorText(err, "采纳失败")),
   });
 
   const rows = events.data?.items ?? [];
@@ -440,8 +455,9 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
         <span style={{ flex: 1 }} />
         <Button kind="secondary" disabled={sweep.isPending}
                 onClick={() => {
-                  if (window.confirm("AI 梳理:让思考模型盘点近 7 天未挂接快讯,自动立案 + 补挂证据"
-                                     + "(立错的随时可关闭/摘下)。约 1-5 分钟,期间别关页面。开始?"))
+                  if (window.confirm("AI 梳理:让思考模型盘点近 7 天未挂接快讯——新事件只出提案"
+                                     + "(勾选采纳后才立案),现有事件的漏网证据自动补挂(可摘)。"
+                                     + "约 1-5 分钟,期间别关页面。开始?"))
                     sweep.mutate();
                 }}>
           {sweep.isPending ? "梳理中…(约 1-5 分钟)" : "AI 梳理"}
@@ -458,25 +474,69 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
       {sweepResult && (
         <div className="panel">
           <div className="panel-head">
-            <h2>AI 梳理结果</h2>
+            <h2>AI 梳理提案</h2>
             <span className="muted">
               扫描 {sweepResult.scanned} 条未挂快讯{sweepResult.truncated ? "(超上限截断)" : ""}
               {" · 思考 "}{Math.round(sweepResult.duration_seconds)}s
-              {" · 新立 "}{sweepResult.created.length} 个事件 · 补挂 {sweepResult.attached} 条
-              {sweepResult.skipped_new_events > 0 && ` · 超额未立 ${sweepResult.skipped_new_events} 个`}
+              {" · 提案 "}{sweepResult.proposals.length} 个 · 已自动补挂 {sweepResult.attached} 条
+              {sweepResult.skipped_new_events > 0 && ` · 超额未提 ${sweepResult.skipped_new_events} 个`}
               {sweepResult.vetoed > 0 && ` · 命中否决 ${sweepResult.vetoed} 个`}
             </span>
-            <button type="button" className="link-button" onClick={() => setSweepResult(null)}>收起</button>
+            <button type="button" className="link-button" onClick={() => setSweepResult(null)}>全部忽略</button>
           </div>
-          {sweepResult.created.length === 0
+          {sweepResult.proposals.length === 0
             ? <EmptyState title="模型没发现值得新立的事件" />
-            : sweepResult.created.map((c) => (
-                <div key={c.id || c.name} className="rp-row">
-                  <span className="rp-title">#{c.display_no} {c.name}</span>
-                  <span className="s-badge mid">{c.news_count} 条</span>
-                  <span className="muted">{c.why}</span>
+            : (
+              <>
+                {sweepResult.proposals.map((p, i) => (
+                  <div key={p.name} className="rp-news-item">
+                    <label style={{ display: "flex", alignItems: "center", gap: 8,
+                                    padding: "6px 0", cursor: "pointer" }}>
+                      <input type="checkbox" checked={sweepChecked[i] ?? true}
+                             onChange={(ev) => {
+                               const next = [...sweepChecked];
+                               next[i] = ev.target.checked;
+                               setSweepChecked(next);
+                             }} />
+                      <span className="rp-title">{p.name}</span>
+                      <span className="s-badge mid">{p.news_ids.length} 条</span>
+                      <span className="muted">{p.why}</span>
+                    </label>
+                    <details className="rp-news-body">
+                      <summary className="muted">成员快讯({p.news.length})</summary>
+                      {p.news.map((n) => (
+                        <div key={n.id} className="muted">[{n.t}] {n.title}</div>
+                      ))}
+                    </details>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
+                  <Button kind="primary"
+                          disabled={applySweep.isPending
+                                    || sweepChecked.filter(Boolean).length === 0}
+                          onClick={() => applySweep.mutate(
+                            sweepResult.proposals.filter((_, i) => sweepChecked[i]))}>
+                    {applySweep.isPending ? "立案中…"
+                      : `采纳选中(${sweepChecked.filter(Boolean).length})并立案`}
+                  </Button>
                 </div>
-              ))}
+              </>
+            )}
+        </div>
+      )}
+      {applyDone && (
+        <div className="panel">
+          <div className="panel-head">
+            <h2>已立案</h2>
+            <span className="muted">
+              {applyDone.created.length > 0
+                ? applyDone.created.map((c) => `#${c.display_no} ${c.name}`).join(" · ")
+                : "无"}
+              {applyDone.skipped_existing.length > 0 &&
+                ` · 跳过同名:${applyDone.skipped_existing.join("、")}`}
+            </span>
+            <button type="button" className="link-button" onClick={() => setApplyDone(null)}>收起</button>
+          </div>
         </div>
       )}
       {tab === "revival" && <RevivalTab onChanged={refresh} eventType={eventType} />}

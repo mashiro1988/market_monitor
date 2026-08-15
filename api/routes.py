@@ -60,6 +60,8 @@ from schemas.research import (
     RevivalResponse,
     SuggestKeywordsRequest,
     SuggestKeywordsResponse,
+    SweepApplyRequest,
+    SweepApplyResponse,
     SweepRequest,
     SweepResponse,
     TimelineResponse,
@@ -663,8 +665,8 @@ def research_stats(event_type: str | None = Query(default=None),
 
 @router.post("/research/sweep", response_model=SweepResponse)
 def research_sweep(request: SweepRequest, db: Session = Depends(get_db)) -> SweepResponse:
-    """AI 梳理(2026-08-13 design):同步长调用(思考模型,1-5 分钟)。
-    Nginx 的 proxy_read_timeout 600s(deployment.md Phase 5)已覆盖此时长。"""
+    """AI 梳理(2026-08-13 design,2026-08-15 改提案制):同步长调用(思考模型,1-5 分钟),
+    新事件只出提案等人采纳,补挂自动落。Nginx proxy_read_timeout 600s 已覆盖此时长。"""
     try:
         return SweepResponse(**pool_sweep.run_sweep(
             db, event_type=request.event_type, dry_run=request.dry_run))
@@ -674,3 +676,15 @@ def research_sweep(request: SweepRequest, db: Session = Depends(get_db)) -> Swee
         raise ApiError("SWEEP_INVALID", str(exc), status_code=400) from exc
     except RuntimeError as exc:        # DeepSeek 故障/坏输出:上游问题,不是请求错误
         raise ApiError("SWEEP_FAILED", str(exc), status_code=502) from exc
+
+
+@router.post("/research/sweep/apply", response_model=SweepApplyResponse)
+def research_sweep_apply(request: SweepApplyRequest,
+                         db: Session = Depends(get_db)) -> SweepApplyResponse:
+    """采纳勾选的梳理提案(签字环节,2026-08-15):只有这里会真正立案。"""
+    try:
+        return SweepApplyResponse(**pool_sweep.apply_proposals(
+            db, event_type=request.event_type,
+            events=[e.model_dump() for e in request.events]))
+    except ValueError as exc:
+        raise ApiError("SWEEP_APPLY_INVALID", str(exc), status_code=400) from exc

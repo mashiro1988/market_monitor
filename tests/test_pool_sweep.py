@@ -67,7 +67,7 @@ def test_run_sweep_rejects_bad_event_type(session):
         pool_sweep.run_sweep(session, event_type="stocks")
 
 
-def test_run_sweep_creates_attaches_and_audits(session, monkeypatch):
+def test_run_sweep_proposes_and_attaches(session, monkeypatch):
     exist = create_event(session, "已有事件", news_ids=[_news(session, "种子").id])
     a = _news(session, "同主题一")
     b = _news(session, "同主题二")
@@ -79,16 +79,42 @@ def test_run_sweep_creates_attaches_and_audits(session, monkeypatch):
     })
     monkeypatch.setattr(pool_sweep, "_call_sweep", lambda payload: (canned, 9.9))
     out = pool_sweep.run_sweep(session, event_type="macro")
-    assert (out["scanned"], out["attached"], len(out["created"])) == (3, 1, 1)
-    e = session.query(ResearchEvent).filter_by(name="新聚出的事件").one()
-    assert (e.created_from, e.event_type) == ("sweep", "macro")
+    # 提案制(2026-08-15):新事件不落库、只出提案(带成员摘要);补挂照常自动落
+    assert (out["scanned"], out["attached"], len(out["proposals"])) == (3, 1, 1)
+    p = out["proposals"][0]
+    assert p["name"] == "新聚出的事件" and p["news_ids"] == [a.id, b.id]
+    assert [n["id"] for n in p["news"]] == [a.id, b.id] and p["news"][0]["title"]
+    assert session.query(ResearchEvent).count() == 1          # 只有原来那个
+    add = session.query(ResearchEventLink).filter_by(event_id=exist.id, news_id=c.id).one()
+    assert (add.link_source, add.confidence, add.prompt_version) == (
+        "auto", 0.65, pool_sweep.SWEEP_PROMPT_VERSION)
+
+
+def test_apply_proposals_creates_with_provenance(session):
+    a, b = _news(session, "一"), _news(session, "二")
+    out = pool_sweep.apply_proposals(session, "macro", [
+        {"name": "人批准的事件", "keywords": ["词词", "x"], "news_ids": [a.id, b.id, a.id]},
+    ])
+    assert out["skipped_existing"] == [] and out["created"][0]["news_count"] == 2
+    e = session.query(ResearchEvent).filter_by(name="人批准的事件").one()
+    assert (e.created_from, e.gate_keywords) == ("sweep", "词词")   # 单字剔、重复 id 去重
     links = session.query(ResearchEventLink).filter_by(event_id=e.id).all()
-    assert {l.news_id for l in links} == {a.id, b.id}
-    # 梳理产物必须进纠错率审计口径:auto + auto_event_id + prompt_version
+    assert len(links) == 2
+    # 采纳落库的种子链必须进纠错率审计口径:auto + auto_event_id + prompt_version
     assert all((l.link_source, l.auto_event_id, l.prompt_version)
                == ("auto", e.id, pool_sweep.SWEEP_PROMPT_VERSION) for l in links)
-    add = session.query(ResearchEventLink).filter_by(event_id=exist.id, news_id=c.id).one()
-    assert (add.link_source, add.confidence) == ("auto", 0.65)
+
+
+def test_apply_proposals_skips_existing_and_validates(session):
+    create_event(session, "已有事件", news_ids=[_news(session, "种子").id])
+    n = _news(session, "x")
+    out = pool_sweep.apply_proposals(session, "macro",
+                                     [{"name": "已有事件", "news_ids": [n.id]}])
+    assert out["created"] == [] and out["skipped_existing"] == ["已有事件"]
+    with pytest.raises(ValueError):
+        pool_sweep.apply_proposals(session, "macro", [{"name": "", "news_ids": [n.id]}])
+    with pytest.raises(ValueError):
+        pool_sweep.apply_proposals(session, "stocks", [])
 
 
 def test_run_sweep_same_name_becomes_attach(session, monkeypatch):
@@ -98,19 +124,24 @@ def test_run_sweep_same_name_becomes_attach(session, monkeypatch):
                                          "news_ids": [a.id, b.id]}], "attach": []})
     monkeypatch.setattr(pool_sweep, "_call_sweep", lambda payload: (canned, 1.0))
     out = pool_sweep.run_sweep(session, event_type="macro")
-    # 模型重新发明现有事件 → 不重复立案,成员降级为补挂证据
-    assert out["created"] == [] and out["attached"] == 2
+    # 模型重新发明现有事件 → 不进提案,成员降级为补挂证据
+    assert out["proposals"] == [] and out["attached"] == 2
     assert session.query(ResearchEvent).count() == 1
 
 
 def test_run_sweep_dry_run_writes_nothing(session, monkeypatch):
-    a, b = _news(session, "一"), _news(session, "二")
+    exist = create_event(session, "已有事件", news_ids=[_news(session, "种子").id])
+    a, b, c = _news(session, "一"), _news(session, "二"), _news(session, "三")
     canned = json.dumps({"new_events": [{"name": "草稿事件", "keywords": ["词词"],
-                                         "news_ids": [a.id, b.id], "why": "w"}], "attach": []})
+                                         "news_ids": [a.id, b.id], "why": "w"}],
+                         "attach": [{"news_id": c.id, "event_id": exist.id,
+                                     "confidence": 0.9}]})
     monkeypatch.setattr(pool_sweep, "_call_sweep", lambda payload: (canned, 1.0))
     out = pool_sweep.run_sweep(session, event_type="macro", dry_run=True)
-    assert out["dry_run"] and out["created"][0]["name"] == "草稿事件"
-    assert session.query(ResearchEvent).count() == 0
+    assert out["dry_run"] and out["proposals"][0]["name"] == "草稿事件"
+    assert out["attached"] == 1        # dry_run 连补挂也只计数不落库
+    assert session.query(ResearchEvent).count() == 1
+    assert session.query(ResearchEventLink).filter_by(news_id=c.id).count() == 0
 
 
 def test_run_sweep_vetoes_deleted_names(session, monkeypatch):
@@ -128,8 +159,8 @@ def test_run_sweep_vetoes_deleted_names(session, monkeypatch):
 
     monkeypatch.setattr(pool_sweep, "_call_sweep", spy)
     out = pool_sweep.run_sweep(session, event_type="macro")
-    # 撞否决清单:不再立同名事件,计数不静默;提示词里也带了否决清单
-    assert out["vetoed"] == 1 and out["created"] == []
+    # 撞否决清单:不进提案,计数不静默;提示词里也带了否决清单
+    assert out["vetoed"] == 1 and out["proposals"] == []
     assert "已否决主题" in seen["payload"] and "垃圾主题" in seen["payload"]
     assert session.query(ResearchEvent).filter_by(status="deleted").count() == 1
 
@@ -139,7 +170,7 @@ def test_run_sweep_no_news_skips_llm(session, monkeypatch):
         raise AssertionError("空输入不该调 LLM")
     monkeypatch.setattr(pool_sweep, "_call_sweep", boom)
     out = pool_sweep.run_sweep(session, event_type="macro")
-    assert out["scanned"] == 0 and out["created"] == []
+    assert out["scanned"] == 0 and out["proposals"] == []
 
 
 def test_run_sweep_crypto_semantic_gate(session, monkeypatch):

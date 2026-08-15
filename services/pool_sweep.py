@@ -3,14 +3,17 @@
 
 与挂接器(event_linking)的分工:挂接器逐条问"这条新闻挂到哪个进行中事件";
 梳理是**集合层盘点**——把近 N 天未挂接的过闸快讯全量摊开,让思考模型一次看全局:
-1) 该立而未立的事件聚出来(new_events);2) 属于现有事件的漏网证据补挂(attach);
+1) 该立而未立的事件聚成**提案**(proposals,不落库,等人勾选采纳——2026-08-15 用户
+   拍板改提案制:"很多我觉得没必要",立案回到事前签字);
+2) 属于现有事件的漏网证据补挂(attach,照旧自动落——挂的都是人批准过的主题,与
+   5min 挂接器同一权限,auto 链可摘可审);
 3) 其余日常流水不动。按钮触发、同步返回,不进定时任务(用户拍板 2026-08-13)。
 
-铁律照旧:
-- 立案落库走 create_event(created_from="sweep"),种子挂接记 link_source="auto" +
-  prompt_version——纠错率审计对梳理产物同样生效,人随时摘下/改归属/关闭。
+铁律:
+- 立案只在 apply_proposals(人勾选后调用)落库:create_event(created_from="sweep"),
+  种子挂接记 link_source="auto" + prompt_version——纠错率审计对梳理产物同样生效。
 - 防幻觉与挂接器同一套:新闻 id 必须在本批、事件 id 必须在活跃池,非法条目整条丢弃。
-- 有上限就要说出来:截断/超额丢弃都写进返回值,不静默。
+- 有上限就要说出来:截断/超额丢弃/命中否决都写进返回值,不静默。
 """
 from __future__ import annotations
 
@@ -191,7 +194,7 @@ def run_sweep(session: Session, event_type: str = "macro", days: int | None = No
                           ResearchEvent.event_type == event_type).all()}
         news, truncated = _gather(session, event_type, days, config.RESEARCH_SWEEP_MAX_NEWS)
         base = {"event_type": event_type, "scanned": len(news), "truncated": truncated,
-                "created": [], "attached": 0, "skipped_new_events": 0, "vetoed": 0,
+                "proposals": [], "attached": 0, "skipped_new_events": 0, "vetoed": 0,
                 "duration_seconds": 0.0, "dry_run": dry_run}
         if not news:
             return base
@@ -223,21 +226,18 @@ def run_sweep(session: Session, event_type: str = "macro", days: int | None = No
             base["skipped_new_events"] = over
             creates = creates[:config.RESEARCH_SWEEP_MAX_NEW_EVENTS]
 
+        # 提案制(2026-08-15):新事件一律只提案不落库,带成员快讯摘要供人审阅;
+        # 采纳走 apply_proposals(前端把勾选的提案原样传回,无状态)
+        brief = {int(n.id): {"id": int(n.id),
+                             "t": n.timestamp.strftime("%m-%d %H:%M") if n.timestamp else "",
+                             "title": (n.title or "")[:100]} for n in news}
+        base["proposals"] = [{"name": ne["name"], "keywords": ne["keywords"],
+                              "news_ids": ne["news_ids"], "why": ne["why"],
+                              "news": [brief[nid] for nid in ne["news_ids"] if nid in brief]}
+                             for ne in creates]
         if dry_run:
-            base["created"] = [{"id": 0, "display_no": 0, "name": ne["name"],
-                                "news_count": len(ne["news_ids"]), "why": ne["why"]}
-                               for ne in creates]
             base["attached"] = len(attaches)
             return base
-
-        for ne in creates:
-            e = create_event(session, ne["name"], ne["news_ids"],
-                             gate_keywords="、".join(ne["keywords"]) or None,
-                             created_from="sweep", event_type=event_type,
-                             link_source="auto", prompt_version=SWEEP_PROMPT_VERSION)
-            base["created"].append({"id": int(e.id), "display_no": int(e.display_no or 0),
-                                    "name": e.name, "news_count": len(ne["news_ids"]),
-                                    "why": ne["why"]})
         applied = 0
         for a in attaches:
             dup = (session.query(ResearchEventLink)
@@ -249,9 +249,43 @@ def run_sweep(session: Session, event_type: str = "macro", days: int | None = No
             applied += 1
         session.commit()
         base["attached"] = applied
-        logger.info("[PoolSweep] {} 梳理完成:扫描 {} 条,新立 {},补挂 {},llm {}s",
-                    event_type, len(news), len(base["created"]), applied,
+        logger.info("[PoolSweep] {} 梳理完成:扫描 {} 条,提案 {},补挂 {},llm {}s",
+                    event_type, len(news), len(base["proposals"]), applied,
                     base["duration_seconds"])
         return base
     finally:
         _SWEEP_LOCK.release()
+
+
+def apply_proposals(session: Session, event_type: str, events: list[dict]) -> dict:
+    """采纳提案(2026-08-15):立案的签字环节——只有这里会真正建事件。
+    无状态:前端把 run_sweep 返回的提案(勾选子集)原样传回;成员 id 由 create_event
+    校验存在性,同名活跃事件跳过并报告(提案到采纳之间可能有并发立案)。"""
+    if event_type not in MARKET_EVENT_TYPE:
+        raise ValueError(f"非法 event_type: {event_type!r}")
+    if len(events) > 20:
+        raise ValueError("一次最多采纳 20 个提案")
+    active_names = {(e.name or "").casefold() for e in _active_events(session, event_type)}
+    created, skipped = [], []
+    for ev in events:
+        name = str(ev.get("name") or "").strip()[:80]
+        try:
+            ids = sorted({int(i) for i in (ev.get("news_ids") or [])})
+        except (TypeError, ValueError):
+            raise ValueError(f"提案「{name or '?'}」的成员 id 不合法")
+        kws = [str(k).strip()[:24] for k in (ev.get("keywords") or [])
+               if len(str(k).strip()) >= 2][:8]
+        if not name or not ids:
+            raise ValueError("提案缺名字或成员快讯")
+        if name.casefold() in active_names:
+            skipped.append(name)
+            continue
+        e = create_event(session, name, ids, gate_keywords="、".join(kws) or None,
+                         created_from="sweep", event_type=event_type,
+                         link_source="auto", prompt_version=SWEEP_PROMPT_VERSION)
+        active_names.add(name.casefold())
+        created.append({"id": int(e.id), "display_no": int(e.display_no or 0),
+                        "name": e.name, "news_count": len(ids), "why": ""})
+    logger.info("[PoolSweep] {} 采纳:立案 {},跳过同名 {}", event_type,
+                len(created), len(skipped))
+    return {"event_type": event_type, "created": created, "skipped_existing": skipped}
