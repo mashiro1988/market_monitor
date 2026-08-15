@@ -198,6 +198,9 @@ export const api = {
     request<import("./types").ResearchEventItem>("/research/events", { method: "POST", body: JSON.stringify(body) }),
   researchEventPatch: (id: number, body: import("./types").ResearchEventPatchRequest) =>
     request<import("./types").ResearchEventItem>(`/research/events/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  // 软删除(2026-08-13):事件从界面彻底消失,证据摘下退回缓冲区(留痕,纠错率照审)
+  researchEventDelete: (id: number) =>
+    request<import("./types").DeleteEventResponse>(`/research/events/${id}`, { method: "DELETE" }),
   researchSuggestKeywords: (body: import("./types").SuggestKeywordsRequest) =>
     request<import("./types").SuggestKeywordsResponse>("/research/events/suggest-keywords", { method: "POST", body: JSON.stringify(body) }),
   researchBackscan: (id: number, days: number) =>

@@ -127,8 +127,77 @@ export function closeEventPrompt(gateKeywords: string | null | undefined): strin
     : "该事件还没有沉睡关键词——关闭后「旧事重提」将无法唤醒它。建议先补关键词再关闭。";
 }
 
-function EventDetail({ eventId, onChanged, eventType }:
-                     { eventId: number; onChanged: () => void; eventType: "macro" | "crypto" }) {
+/** 时间轴单行:标题可点开(与快讯页 CryptoRow 同款折叠),展开显示评分理由/正文/原文。
+ *  单行截断只是版面约束,不该逼人跳回快讯页搜原文(2026-08-13 用户点名)。 */
+function TimelineRow({ it, activeOptions, onReassign, onDetach }: {
+  it: TimelineItem;
+  activeOptions: ResearchEventItem[];
+  onReassign: (linkId: number, eventId: number) => void;
+  onDetach: (linkId: number, reason: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const obs = fmtObs(it.obs);
+  const score = fmtScore(it.news.llm_importance);
+  return (
+    <div className="rp-news-item">
+      <div className="rp-row rp-row-timeline">
+        <span className="rp-time">{fmtBjShort(it.news.timestamp_bj)}</span>
+        <span className="rp-source">{it.news.source}</span>
+        <span className={score.cls}>{score.text}</span>
+        <span className={it.news.news_direction === "利多" ? "up-text"
+                         : it.news.news_direction === "利空" ? "down-text" : "muted"}>
+          {it.news.news_direction ?? "—"}
+        </span>
+        <span className={obs.cls} title={`观测:${it.obs_symbol} 基线→终点实际跨度`}>{obs.text}</span>
+        <button type="button" className="rp-title rp-title-btn" title="点开看理由/正文/原文"
+                onClick={() => setOpen((v) => !v)}>
+          {it.news.title}
+        </button>
+        <span className="rp-marks">
+          {it.driver_badge && (
+            <span className="s-badge strong"
+                  title={`人工确认为标注窗口 driver(${it.driver_badge.symbol})`}>
+              driver {it.driver_badge.change_pct != null
+                ? `${it.driver_badge.change_pct > 0 ? "+" : ""}${it.driver_badge.change_pct.toFixed(2)}%` : ""}
+            </span>
+          )}
+          {it.score_miss && (
+            <span className="s-badge mid"
+                  title="llm_importance 低于闸门线却被确认挂上——打分校准素材(spec §8.3,仅宏观线有此口径)">
+              评分失手
+            </span>
+          )}
+          {it.link.link_source === "auto" && (
+            <span className="muted" title={`模型挂接 conf=${it.link.confidence}`}>auto</span>
+          )}
+        </span>
+        <Dropdown label="改归属" align="right">
+          {activeOptions.map((o) => (
+            <MenuItem key={o.id} onClick={() => onReassign(it.link.id, o.id)}>
+              #{o.display_no} {o.name}
+            </MenuItem>
+          ))}
+          {activeOptions.length > 0 && <div className="rp-menu-sep" />}
+          <MenuItem onClick={() => {
+            const reason = window.prompt("摘回缓冲区的原因(可留空)", "手动摘回");
+            if (reason !== null) onDetach(it.link.id, reason);
+          }}>摘回缓冲区</MenuItem>
+        </Dropdown>
+      </div>
+      {open && (
+        <div className="rp-news-body">
+          {it.news.llm_importance_reason && <p className="reason">{it.news.llm_importance_reason}</p>}
+          {it.news.content && <p>{it.news.content}</p>}
+          {it.news.url && <a href={it.news.url} target="_blank" rel="noreferrer">原文链接</a>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventDetail({ eventId, onChanged, onDeleted, eventType }:
+                     { eventId: number; onChanged: () => void; onDeleted: () => void;
+                       eventType: "macro" | "crypto" }) {
   const qc = useQueryClient();
   const [days, setDays] = useState(0);
   const [minScore, setMinScore] = useState(0);
@@ -177,6 +246,12 @@ function EventDetail({ eventId, onChanged, eventType }:
     onSuccess: invalidate,
     onError: (err) => setActionError(apiErrorText(err, "回扫失败")),
   });
+  // 软删除:成功后先收起详情面板再刷新,免得对着已消失的事件继续拉时间轴 404
+  const del = useMutation({
+    mutationFn: () => api.researchEventDelete(eventId),
+    onSuccess: () => { onDeleted(); onChanged(); },
+    onError: (err) => setActionError(apiErrorText(err, "删除失败")),
+  });
 
   // 加载/报错也必须套在 .rp-detail 里:否则拿不到展开区的上边距,会直接贴住上面的卡片
   if (timeline.isLoading && !timeline.data)
@@ -215,6 +290,13 @@ function EventDetail({ eventId, onChanged, eventType }:
           ) : (
             <MenuItem onClick={() => patchEvent.mutate({ status: "active" })}>重开事件</MenuItem>
           )}
+          <MenuItem onClick={() => {
+            if (window.confirm(
+              `彻底删除「${event.name}」?\n\n事件将从界面消失(序号不复用),`
+              + `全部证据退回缓冲区(挂接标记为摘下、留痕);同名主题进 AI 梳理否决清单,`
+              + `模型不会再立。界面上无法恢复。`))
+              del.mutate();
+          }}>删除事件</MenuItem>
           <div className="rp-menu-sep" />
           {activeOptions.length === 0
             ? <div className="rp-menu-hint">没有其它进行中事件可合并</div>
@@ -252,55 +334,13 @@ function EventDetail({ eventId, onChanged, eventType }:
       </div>
 
       {items.length === 0 && <EmptyState title="没有符合筛选条件的证据" />}
-      {items.map((it: TimelineItem) => {
-        const obs = fmtObs(it.obs);
-        const score = fmtScore(it.news.llm_importance);
-        return (
-          <div key={it.link.id} className="rp-row rp-row-timeline">
-            <span className="rp-time">{fmtBjShort(it.news.timestamp_bj)}</span>
-            <span className="rp-source">{it.news.source}</span>
-            <span className={score.cls}>{score.text}</span>
-            <span className={it.news.news_direction === "利多" ? "up-text"
-                             : it.news.news_direction === "利空" ? "down-text" : "muted"}>
-              {it.news.news_direction ?? "—"}
-            </span>
-            <span className={obs.cls} title={`观测:${it.obs_symbol} 基线→终点实际跨度`}>{obs.text}</span>
-            <span className="rp-title" title={it.news.title}>{it.news.title}</span>
-            <span className="rp-marks">
-              {it.driver_badge && (
-                <span className="s-badge strong"
-                      title={`人工确认为标注窗口 driver(${it.driver_badge.symbol})`}>
-                  driver {it.driver_badge.change_pct != null
-                    ? `${it.driver_badge.change_pct > 0 ? "+" : ""}${it.driver_badge.change_pct.toFixed(2)}%` : ""}
-                </span>
-              )}
-              {it.score_miss && (
-                <span className="s-badge mid"
-                      title="llm_importance 低于闸门线却被确认挂上——打分校准素材(spec §8.3)">
-                  评分失手
-                </span>
-              )}
-              {it.link.link_source === "auto" && (
-                <span className="muted" title={`模型挂接 conf=${it.link.confidence}`}>auto</span>
-              )}
-            </span>
-            <Dropdown label="改归属" align="right">
-              {activeOptions.map((o) => (
-                <MenuItem key={o.id}
-                          onClick={() => patchLink.mutate({ id: it.link.id, body: { event_id: o.id } })}>
-                  #{o.display_no} {o.name}
-                </MenuItem>
-              ))}
-              {activeOptions.length > 0 && <div className="rp-menu-sep" />}
-              <MenuItem onClick={() => {
-                const reason = window.prompt("摘回缓冲区的原因(可留空)", "手动摘回");
-                if (reason !== null)
-                  patchLink.mutate({ id: it.link.id, body: { detached: true, detach_reason: reason } });
-              }}>摘回缓冲区</MenuItem>
-            </Dropdown>
-          </div>
-        );
-      })}
+      {items.map((it: TimelineItem) => (
+        <TimelineRow key={it.link.id} it={it} activeOptions={activeOptions}
+                     onReassign={(linkId, targetId) =>
+                       patchLink.mutate({ id: linkId, body: { event_id: targetId } })}
+                     onDetach={(linkId, reason) =>
+                       patchLink.mutate({ id: linkId, body: { detached: true, detach_reason: reason } })} />
+      ))}
     </div>
   );
 }
@@ -424,6 +464,7 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
               {" · 思考 "}{Math.round(sweepResult.duration_seconds)}s
               {" · 新立 "}{sweepResult.created.length} 个事件 · 补挂 {sweepResult.attached} 条
               {sweepResult.skipped_new_events > 0 && ` · 超额未立 ${sweepResult.skipped_new_events} 个`}
+              {sweepResult.vetoed > 0 && ` · 命中否决 ${sweepResult.vetoed} 个`}
             </span>
             <button type="button" className="link-button" onClick={() => setSweepResult(null)}>收起</button>
           </div>
@@ -476,7 +517,8 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
             ))}
           </div>
           {selected != null &&
-            <EventDetail eventId={selected} onChanged={refresh} eventType={eventType} />}
+            <EventDetail eventId={selected} onChanged={refresh}
+                         onDeleted={() => setSelected(null)} eventType={eventType} />}
           {closed.length > 0 && (
             <details className="rp-closed">
               <summary>已关闭({closed.length})</summary>

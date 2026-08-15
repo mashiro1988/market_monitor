@@ -53,6 +53,39 @@ def test_create_event_links_seed_and_backscans(session):
     assert old.event_linked_at is None            # 立案自动回扫 72h 清了旧证据游标
 
 
+def test_delete_event_tombstone_and_frees_links(session):
+    n1, n2 = _news(session, "a"), _news(session, "b")
+    e = event_pool.create_event(session, "AI立错的事件", news_ids=[n1.id, n2.id])
+    no = e.display_no
+    freed = event_pool.delete_event(session, e.id)
+    assert freed == 2
+    session.refresh(e)
+    assert e.status == "deleted"
+    links = session.query(ResearchEventLink).filter_by(event_id=e.id).all()
+    assert all(l.detached and l.detach_reason == "事件已删除" for l in links)
+    # 任何列表/搜索口径都不出现(证据因摘下而退回缓冲区)
+    assert all(r["id"] != e.id for r in event_pool.list_events(session))
+    assert all(r["id"] != e.id for r in event_pool.list_events(session, status="closed"))
+    # 墓碑保序号只增不补:下一个事件不顶替被删的号
+    e2 = event_pool.create_event(session, "新事件", news_ids=[_news(session, "c").id])
+    assert e2.display_no == no + 1
+    # 对墓碑的一切操作视同不存在;重复删除幂等返回 0
+    with pytest.raises(ValueError):
+        event_pool.close_event(session, e.id, reason="x")
+    with pytest.raises(ValueError):
+        event_pool.event_timeline(session, e.id)
+    assert event_pool.delete_event(session, e.id) == 0
+
+
+def test_score_miss_only_for_macro(session):
+    low_c = _news(session, "低分小币新闻", score=3)
+    ec = event_pool.create_event(session, "加密事件", news_ids=[low_c.id],
+                                 event_type="crypto")
+    item = event_pool.event_timeline(session, ec.id)["items"][0]
+    # 加密线不设分数闸(语义闸),"评分失手"口径不适用——3 分挂上不是失手是常态
+    assert item["score_miss"] is False
+
+
 def test_close_reopen(session):
     n = _news(session, "x")
     e = event_pool.create_event(session, "事件", news_ids=[n.id])

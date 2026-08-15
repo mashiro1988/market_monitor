@@ -189,5 +189,13 @@ class SweepResponse(BaseModel):
     created: list[SweepCreatedEvent] = Field(default_factory=list)
     attached: int = 0                        # 补挂到现有事件的证据条数
     skipped_new_events: int = 0              # 模型提案超上限被丢弃的个数(不静默)
+    vetoed: int = 0                          # 撞否决清单(用户删过的同名主题)被拦的个数
     duration_seconds: float = 0.0            # LLM 思考耗时
     dry_run: bool = False
+
+
+class DeleteEventResponse(BaseModel):
+    """删除=软删除(2026-08-13):墓碑保 display_no,证据摘下退回缓冲区。"""
+    id: int
+    deleted: bool = True
+    links_freed: int = 0                     # 退回缓冲区的证据条数

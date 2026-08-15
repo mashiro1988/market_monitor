@@ -113,6 +113,27 @@ def test_run_sweep_dry_run_writes_nothing(session, monkeypatch):
     assert session.query(ResearchEvent).count() == 0
 
 
+def test_run_sweep_vetoes_deleted_names(session, monkeypatch):
+    from services.event_pool import delete_event
+    dead = create_event(session, "垃圾主题", news_ids=[_news(session, "种子").id])
+    delete_event(session, dead.id)          # 种子被摘下退回缓冲区
+    a, b = _news(session, "一"), _news(session, "二")
+    canned = json.dumps({"new_events": [{"name": "垃圾主题", "keywords": ["词词"],
+                                         "news_ids": [a.id, b.id]}], "attach": []})
+    seen = {}
+
+    def spy(payload):
+        seen["payload"] = payload
+        return canned, 1.0
+
+    monkeypatch.setattr(pool_sweep, "_call_sweep", spy)
+    out = pool_sweep.run_sweep(session, event_type="macro")
+    # 撞否决清单:不再立同名事件,计数不静默;提示词里也带了否决清单
+    assert out["vetoed"] == 1 and out["created"] == []
+    assert "已否决主题" in seen["payload"] and "垃圾主题" in seen["payload"]
+    assert session.query(ResearchEvent).filter_by(status="deleted").count() == 1
+
+
 def test_run_sweep_no_news_skips_llm(session, monkeypatch):
     def boom(_):
         raise AssertionError("空输入不该调 LLM")

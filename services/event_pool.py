@@ -32,6 +32,9 @@ def _get_event(session: Session, event_id: int) -> ResearchEvent:
     e = session.query(ResearchEvent).filter_by(id=event_id).first()
     if e is None:
         raise ValueError(f"事件 #{event_id} 不存在")
+    if e.status == "deleted":
+        # 墓碑对一切操作(改名/关词/关闭/合并/挂接/时间轴)都视同不存在
+        raise ValueError(f"事件 #{event_id} 已删除")
     return e
 
 
@@ -120,6 +123,29 @@ def reopen_event(session: Session, event_id: int) -> ResearchEvent:
     session.commit()
     clear_link_cursor(session, config.EVENT_BACKSCAN_DEFAULT_HOURS)
     return e
+
+
+def delete_event(session: Session, event_id: int) -> int:
+    """删除(2026-08-13,AI 梳理配套):**软删除**——UI 全消失、账上留痕。
+    status="deleted" 墓碑保住 display_no 只增不补(硬删会让下一个新事件顶替被删的
+    最大序号);全部未摘下挂接标记摘下(detach_reason="事件已删除"),证据退回缓冲区,
+    且模型挂的链因 detached 计入纠错率——删除 AI 立错的事件正是审计要看到的动作。
+    同名主题进 sweep 否决清单,模型不再重立。返回释放的挂接条数;重复删除返回 0。"""
+    e = session.query(ResearchEvent).filter_by(id=event_id).first()
+    if e is None:
+        raise ValueError(f"事件 #{event_id} 不存在")
+    if e.status == "deleted":
+        return 0
+    freed = 0
+    for link in (session.query(ResearchEventLink)
+                 .filter_by(event_id=event_id, detached=False).all()):
+        link.detached = True
+        link.detach_reason = "事件已删除"
+        freed += 1
+    e.status = "deleted"
+    e.status_changed_at = utc_now_naive()
+    session.commit()
+    return freed
 
 
 def merge_event(session: Session, source_id: int, target_id: int) -> int:
@@ -248,6 +274,9 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
     query = session.query(ResearchEvent)
     if status:
         query = query.filter(ResearchEvent.status == status)
+    else:
+        # 不指定状态 = 进行中+已关闭;已删除的墓碑任何列表/搜索都不出现
+        query = query.filter(ResearchEvent.status != "deleted")
     if event_type:
         query = query.filter(ResearchEvent.event_type == event_type)
     if q:
@@ -323,7 +352,11 @@ def event_timeline(session: Session, event_id: int, now: datetime | None = None,
             "obs": obs,
             "obs_symbol": obs_symbol,
             "driver_badge": badge_map.get(int(n.id)),
-            "score_miss": (n.llm_importance is not None
+            # 评分失手=分数闸本该拦却被人确认挂上(打分校准素材,spec §8.3)。
+            # 只对宏观线有意义:加密线不设分数闸(语义闸,web3 二期A design §3),
+            # 小币新闻分数天然低,拿宏观 6 分线去量它满屏都是假警报(2026-08-13 修)。
+            "score_miss": ((e.event_type or "macro") == "macro"
+                           and n.llm_importance is not None
                            and n.llm_importance < config.EVENT_LINK_MIN_IMPORTANCE),
             "link": {"id": link.id, "link_source": link.link_source,
                      "auto_event_id": link.auto_event_id, "confidence": link.confidence,

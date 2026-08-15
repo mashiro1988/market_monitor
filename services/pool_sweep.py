@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 import config
 from models.news import NewsItem
-from models.research import ResearchEventLink
+from models.research import ResearchEvent, ResearchEventLink
 from services.deepseek_client import call_deepseek_chat
 from services.event_linking import (
     MARKET_EVENT_TYPE, VALID_CONFIDENCES, _active_events, _create_auto_link,
@@ -79,13 +79,17 @@ def _pool_lines(events) -> str:
                      for e in events) or "(池空)"
 
 
-def _build_payload(events, news_list) -> str:
+def _build_payload(events, news_list, vetoed_names: list[str] | None = None) -> str:
     items = [{"id": int(n.id),
               "t": n.timestamp.strftime("%m-%d %H:%M") if n.timestamp else "",
               "source": n.source,
               "title": (n.title or "")[:160],
               "content": (n.content or "")[:120]} for n in news_list]
-    return (f"【现有事件池】\n{_pool_lines(events)}\n\n"
+    veto = ""
+    if vetoed_names:
+        veto = ("\n【已否决主题】用户删除过这些事件,同一主题不要再立(相关快讯留在原地即可):\n"
+                + "\n".join(f"- {n}" for n in vetoed_names) + "\n")
+    return (f"【现有事件池】\n{_pool_lines(events)}\n{veto}\n"
             f"【未挂接快讯,共 {len(items)} 条】\n"
             f"{json.dumps({'news': items}, ensure_ascii=False)}")
 
@@ -180,13 +184,18 @@ def run_sweep(session: Session, event_type: str = "macro", days: int | None = No
     try:
         days = days or config.RESEARCH_SWEEP_DAYS
         events = _active_events(session, event_type)
+        # 否决清单:被删除的事件名 = 用户明确不要的主题,提示词告知 + 代码层强拦
+        vetoed = {(e.name or "").casefold(): e.name for e in
+                  session.query(ResearchEvent)
+                  .filter(ResearchEvent.status == "deleted",
+                          ResearchEvent.event_type == event_type).all()}
         news, truncated = _gather(session, event_type, days, config.RESEARCH_SWEEP_MAX_NEWS)
         base = {"event_type": event_type, "scanned": len(news), "truncated": truncated,
-                "created": [], "attached": 0, "skipped_new_events": 0,
+                "created": [], "attached": 0, "skipped_new_events": 0, "vetoed": 0,
                 "duration_seconds": 0.0, "dry_run": dry_run}
         if not news:
             return base
-        raw, duration = _call_sweep(_build_payload(events, news))
+        raw, duration = _call_sweep(_build_payload(events, news, sorted(vetoed.values())))
         base["duration_seconds"] = round(duration, 1)
         try:
             parsed = _parse_sweep(raw, {int(n.id) for n in news},
@@ -194,7 +203,8 @@ def run_sweep(session: Session, event_type: str = "macro", days: int | None = No
         except ValueError as exc:      # LLM 输出坏形状 = 上游故障,不是请求错误
             raise RuntimeError(str(exc)) from exc
 
-        # 模型把现有事件"重新发明"了 → 降级为向那个事件补挂(冗余变成有用证据)
+        # 模型把现有事件"重新发明"了 → 降级为向那个事件补挂(冗余变成有用证据);
+        # 撞否决清单(用户删过的同名主题)→ 整条丢弃,计入 vetoed(不静默)
         by_name = {e.name.casefold(): e for e in events}
         attaches = list(parsed["attach"])
         creates = []
@@ -203,6 +213,9 @@ def run_sweep(session: Session, event_type: str = "macro", days: int | None = No
             if hit is not None:
                 attaches.extend({"news_id": nid, "event_id": int(hit.id), "confidence": 0.65}
                                 for nid in ne["news_ids"])
+                continue
+            if ne["name"].casefold() in vetoed:
+                base["vetoed"] += 1
                 continue
             creates.append(ne)
         over = len(creates) - config.RESEARCH_SWEEP_MAX_NEW_EVENTS

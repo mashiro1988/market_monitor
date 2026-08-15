@@ -294,6 +294,12 @@ export type DeleteAnnotationResponse = {
   deleted: boolean;
 };
 
+export type DeleteEventResponse = {
+  id: number;
+  deleted: boolean;
+  links_freed: number;
+};
+
 export type DriverBadge = {
   symbol: string;
   change_pct: number | null;
@@ -693,6 +699,7 @@ export type SweepResponse = {
   created: SweepCreatedEvent[];
   attached: number;
   skipped_new_events: number;
+  vetoed: number;
   duration_seconds: number;
   dry_run: boolean;
 };

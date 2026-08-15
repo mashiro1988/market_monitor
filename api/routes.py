@@ -46,6 +46,7 @@ from schemas.predictions import (
 from schemas.research import (
     BackscanRequest,
     BackscanResponse,
+    DeleteEventResponse,
     LinkCreateRequest,
     LinkPatchRequest,
     LinkResponse,
@@ -552,6 +553,16 @@ def research_event_patch(event_id: int, request: ResearchEventPatchRequest,
     except ValueError as exc:
         raise ApiError("INVALID_EVENT_OP", str(exc), status_code=400) from exc
     return _event_item(db, event_id)
+
+
+@router.delete("/research/events/{event_id}", response_model=DeleteEventResponse)
+def research_event_delete(event_id: int, db: Session = Depends(get_db)) -> DeleteEventResponse:
+    """软删除(2026-08-13):UI 全消失、账上留痕;证据摘下退回缓冲区,纠错率照审。"""
+    try:
+        freed = event_pool.delete_event(db, event_id)
+    except ValueError as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    return DeleteEventResponse(id=event_id, deleted=True, links_freed=freed)
 
 
 @router.post("/research/events/suggest-keywords", response_model=SuggestKeywordsResponse)
