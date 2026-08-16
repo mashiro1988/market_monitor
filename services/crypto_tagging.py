@@ -75,6 +75,8 @@ def _call_crypto_tagger(user_content: str) -> str:
             {"role": "user", "content": user_content},
         ],
         "response_format": {"type": "json_object"},
+        # flash 默认开思考会吞 max_tokens;四件套只要固定 JSON,显式关(2026-08-15 统一补)
+        "thinking": {"type": "disabled"},
         "max_tokens": 4000,
         "temperature": 0,
     }

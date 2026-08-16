@@ -274,3 +274,24 @@ def test_suggest_keywords_raises_after_second_failure(session, monkeypatch):
     with pytest.raises(RuntimeError):
         event_linking.suggest_keywords(session, "e", [n.id])
     assert len(calls) == 2          # 只重试一次,不无限重打
+
+
+def test_flash_calls_disable_thinking(monkeypatch):
+    """2026-08-15 事故回归锁:flash 别名默认开思考,思考吃光 max_tokens 致 content
+    返空/JSON 截断(挂接间歇失败、关键词建议高频失败的根因)。挂接与建议只要固定
+    JSON,必须显式 thinking=disabled——这个开关掉了就是当天那场事故重演。"""
+    from services.deepseek_client import DeepSeekChatResult
+
+    captured = []
+
+    def fake(payload, **kwargs):
+        captured.append(payload)
+        return DeepSeekChatResult(content='{"items": [], "keywords": ["词一"]}',
+                                  reasoning_content="", duration_seconds=0.1)
+
+    monkeypatch.setattr(event_linking, "call_deepseek_chat", fake)
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key")
+    event_linking._call_linker("正文")
+    event_linking._call_keyword_suggester("正文")
+    assert len(captured) == 2
+    assert all(p.get("thinking") == {"type": "disabled"} for p in captured)

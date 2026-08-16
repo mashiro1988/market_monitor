@@ -189,6 +189,8 @@ class NewsScorer:
             "temperature": 0.0,
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
+            # flash 默认开思考会吞 max_tokens 致空返回;评分只要固定 JSON,显式关(2026-08-15)
+            "thinking": {"type": "disabled"},
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",

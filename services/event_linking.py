@@ -143,6 +143,10 @@ def _call_linker(user_content: str, system_prompt: str = LINK_SYSTEM_PROMPT) -> 
             {"role": "user", "content": user_content},
         ],
         "response_format": {"type": "json_object"},
+        # flash 别名默认开思考,思考会吃光 max_tokens 让 content 返空/截断(2026-08-15
+        # 实锤:同题不关思考 881 字推理+finish=length+content 空;关掉 25 token 全中)。
+        # 挂接只要固定 JSON,显式关——与打标/评分同一姿势(GLOSSARY 思考模式条)。
+        "thinking": {"type": "disabled"},
         "max_tokens": 2000,
         "temperature": 0,
     }
@@ -295,6 +299,8 @@ def _call_keyword_suggester(user_content: str) -> str:
             {"role": "user", "content": user_content},
         ],
         "response_format": {"type": "json_object"},
+        # 500 预算最紧,思考不关几乎必死(空 content)——用户 2026-08-15 报"失败过于频繁"的主因
+        "thinking": {"type": "disabled"},
         "max_tokens": 500,
         "temperature": 0,
     }

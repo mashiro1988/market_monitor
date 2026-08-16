@@ -53,6 +53,9 @@ def _call_deepseek_tagger(user_content: str) -> str:
             {"role": "user", "content": user_content},
         ],
         "response_format": {"type": "json_object"},
+        # flash 默认开思考,答案全靠预算剩余侥幸挤出;固定 JSON 任务显式关(省 5 倍 token,
+        # 2026-08-15 与挂接/建议一并补上,见 GLOSSARY 思考模式条)
+        "thinking": {"type": "disabled"},
         "max_tokens": 4000,
         "temperature": 0,
     }
