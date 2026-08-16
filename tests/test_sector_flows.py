@@ -324,6 +324,9 @@ def _wire_scanner(monkeypatch, *, spot_pivot, swap_pivot, symbols):
     monkeypatch.setattr(config, "all_whitelisted_cmc_categories", lambda: ["AI"])
     monkeypatch.setattr(config, "cmc_category_to_group", lambda name: "测试")
     monkeypatch.setattr(sector_scanner, "MIN_TOKENS_PER_SECTOR", 1)
+    # 本文件的样本币就叫 BTC/ETH，而生产配置会把它们剔出板块聚合（config.SECTOR_EXCLUDED_SYMBOLS），
+    # 板块会被剔空、测不到资金流本身。这里关掉剔除；剔除行为由 test_sector_exclusions.py 专测。
+    monkeypatch.setattr(config, "SECTOR_EXCLUDED_SYMBOLS", set())
     monkeypatch.setattr(
         sector_scanner.cmc_client, "load_category_to_symbols",
         lambda session: {"AI": symbols},

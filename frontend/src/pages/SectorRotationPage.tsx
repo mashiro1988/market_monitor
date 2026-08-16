@@ -112,12 +112,26 @@ export function SectorRotationPage() {
   }
 
   const snapshotBj = leaderboard.data?.snapshot_at?.timestamp_bj ?? "—";
+  // 口径说明由后端 config 下发（不在前端写死），改剔除名单页面文案自动跟着变
+  const exclusionNote = leaderboard.data?.exclusion_note ?? null;
 
   return (
     <section>
       <PageHeader
         title="板块轮动"
-        subtitle={`最新快照（北京时间）：${snapshotBj}　·　数据来自 BMAC 远程数据中心，CMC 板块映射 7 天 TTL`}
+        subtitle={
+          <>
+            最新快照（北京时间）：{snapshotBj}　·　数据来自 BMAC 远程数据中心，CMC 板块映射 7 天 TTL
+            {exclusionNote && (
+              <>
+                　·
+                <strong title="巨头的成交额是普通成分币的成百上千倍，混进板块求和会盖掉整个板块的资金流方向">
+                  本页全部数字{exclusionNote}
+                </strong>
+              </>
+            )}
+          </>
+        }
         actions={
           <Button onClick={handleRefresh} disabled={leaderboard.isFetching}>
             <RefreshCcw size={16} />刷新
@@ -158,7 +172,13 @@ export function SectorRotationPage() {
                   <th style={{ textAlign: "right" }}>7d</th>
                   <th style={{ textAlign: "right" }}>30d</th>
                   {FLOW_WINDOWS.map((w) => (
-                    <th key={w} style={{ textAlign: "right" }} title="净资金流入 = 主动买入 − 主动卖出；上行现货、下行永续">
+                    <th
+                      key={w}
+                      style={{ textAlign: "right" }}
+                      title={`净资金流入 = 主动买入 − 主动卖出；上行现货、下行永续${
+                        exclusionNote ? `。${exclusionNote}` : ""
+                      }`}
+                    >
                       资金 {WINDOW_LABELS[w]}
                     </th>
                   ))}
@@ -244,8 +264,21 @@ function RowGroup({
                   </thead>
                   <tbody>
                     {tokens.map((t) => (
-                      <tr key={`${t.binance_symbol}-${t.market}`}>
-                        <td><strong>{t.symbol}</strong></td>
+                      <tr
+                        key={`${t.binance_symbol}-${t.market}`}
+                        className={t.excluded ? "sector-token-excluded" : undefined}
+                      >
+                        <td>
+                          <strong>{t.symbol}</strong>
+                          {t.excluded && (
+                            <span
+                              className="tag-excluded"
+                              title="巨头的成交额是普通成分币的成百上千倍，混进求和会盖掉整个板块的资金流方向，所以不进上方汇总；这行只作参照"
+                            >
+                              不计入
+                            </span>
+                          )}
+                        </td>
                         <td><code>{t.binance_symbol}</code></td>
                         <td>{t.market}</td>
                         <td style={{ textAlign: "right" }} className={pctClass(t.ret_1h)}>{fmtPct(t.ret_1h)}</td>

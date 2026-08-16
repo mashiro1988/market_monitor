@@ -342,10 +342,15 @@ def compute_all_sector_returns(
     considered_cats = 0
     skipped_thin: list[str] = []
 
+    excluded = set(getattr(config, "SECTOR_EXCLUDED_SYMBOLS", ()))
+
     for category, cmc_symbols in sorted(cat_to_syms.items()):
         if category not in whitelist:
             continue
         considered_cats += 1
+        # 巨头剔除只在这一处做减法：涨跌均值/中位、资金流求和、token_count、
+        # flow_tokens 全都从这个集合派生，减一次就全干净。理由见 config.SECTOR_EXCLUDED_SYMBOLS。
+        cmc_symbols = cmc_symbols - excluded
         matched = cmc_symbols & sym_to_returns.keys()
         if len(matched) < MIN_TOKENS_PER_SECTOR:
             skipped_thin.append(f"{category}({len(matched)})")

@@ -635,6 +635,7 @@ export type SectorFlows = {
 export type SectorLeaderboardResponse = {
   snapshot_at: TimeFields | null;
   rows: SectorLeaderboardRow[];
+  exclusion_note: string | null;
 };
 
 export type SectorLeaderboardRow = {
@@ -656,6 +657,7 @@ export type SectorTokenRow = {
   symbol: string;
   binance_symbol: string;
   market: string;
+  excluded: boolean;
   ret_1h: number | null;
   ret_24h: number | null;
   ret_168h: number | null;

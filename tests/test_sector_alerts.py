@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import alerts.engine as engine_module
+import config
 from alerts.engine import AlertEngine
 from alerts.rules import AlertRule
 from database import Base
@@ -92,6 +93,8 @@ def test_sector_spike_alerts_latest_snapshot_once(monkeypatch):
         assert "Old Leaders" not in content
         assert "Mean Outlier" not in content
         assert "Too Thin" not in content
+        # 推送末行提醒口径：手机上看到这条时也知道数字里没有巨头
+        assert config.SECTOR_EXCLUSION_NOTE in content.splitlines()[-1]
 
         check = engine_module.get_session()
         try:

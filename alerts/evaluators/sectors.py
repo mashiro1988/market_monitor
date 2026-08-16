@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import config
 from alerts._session import get_alert_session
 from alerts.rules import AlertRule, AlertRuleType
 from chart_utils import format_beijing_time
@@ -79,6 +80,10 @@ class SectorAlertMixin:
             self._format_sector_line(row, mean_change, median_change, trigger_change, period, snapshot_at)
             for row, mean_change, median_change, trigger_change, _ in triggered
         )
+        # 末行钉住口径：手机上只看到推送、看不到页面副标题时也不会误读这些数字
+        note = getattr(config, "SECTOR_EXCLUSION_NOTE", "")
+        if note:
+            content = f"{content}\n> <font color=\"comment\">（{note}）</font>"
         marker_text = "\n".join(marker for _, _, _, _, marker in triggered)
         for channel_name in rule.channels:
             channel = self.channels.get(channel_name)

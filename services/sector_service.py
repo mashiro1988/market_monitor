@@ -107,8 +107,11 @@ def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
         .limit(1)
     ).scalar()
 
+    exclusion_note = getattr(config, "SECTOR_EXCLUSION_NOTE", None) or None
+
     if latest_snap is None:
-        return SectorLeaderboardResponse(snapshot_at=None, rows=[])
+        return SectorLeaderboardResponse(
+            snapshot_at=None, rows=[], exclusion_note=exclusion_note)
 
     rows = session.execute(
         select(SectorReturn).where(
@@ -128,6 +131,7 @@ def get_leaderboard(session: Session) -> SectorLeaderboardResponse:
 
     return SectorLeaderboardResponse(
         snapshot_at=timestamp_pair(latest_snap),
+        exclusion_note=exclusion_note,
         rows=[
             SectorLeaderboardRow(
                 category=r.category,
@@ -210,6 +214,7 @@ def get_sector_tokens(session: Session, category: str) -> SectorTokensResponse:
 
     rows: list[SectorTokenRow] = []
     seen_normalized: set[str] = set()
+    excluded_symbols = set(getattr(config, "SECTOR_EXCLUDED_SYMBOLS", ()))
     # spot 优先（先扫 spot，得到的 base sym 标记 seen，swap 里再有同名 sym 就跳过）
     for market_name in ("spot", "swap"):
         for col, rets in returns_by_market.get(market_name, {}).items():
@@ -226,13 +231,16 @@ def get_sector_tokens(session: Session, category: str) -> SectorTokensResponse:
                 ret_168h=rets.get("ret_168h"),
                 ret_720h=rets.get("ret_720h"),
                 flows=_token_flows(nsym),
+                excluded=nsym in excluded_symbols,
             ))
 
-    # 按 24h 降序，NaN 末尾
-    def _sort_key(r: SectorTokenRow) -> tuple[int, float]:
+    # 排序：先把巨头沉到最底（否则 BTC 涨得多会排在中间，容易被误读成板块成员），
+    # 组内再按 24h 降序、NaN 末尾。
+    def _sort_key(r: SectorTokenRow) -> tuple[int, int, float]:
+        bucket = 1 if r.excluded else 0
         if r.ret_24h is None:
-            return (1, 0.0)
-        return (0, -r.ret_24h)
+            return (bucket, 1, 0.0)
+        return (bucket, 0, -r.ret_24h)
 
     rows.sort(key=_sort_key)
 

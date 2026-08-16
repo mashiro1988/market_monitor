@@ -44,6 +44,9 @@ class SectorLeaderboardRow(BaseModel):
 class SectorLeaderboardResponse(BaseModel):
     snapshot_at: TimeFields | None = None  # 最新 sector_returns 的 snapshot_at
     rows: list[SectorLeaderboardRow]
+    # 口径说明（如「已剔除 BTC/ETH/WBTC/WBETH」），前端直接显示在页面副标题里。
+    # 由后端下发而不是前端写死：以后改 config 的剔除名单，页面文案自动跟着变，不会说谎。
+    exclusion_note: str | None = None
 
 
 class SectorTokenRow(BaseModel):
@@ -51,6 +54,9 @@ class SectorTokenRow(BaseModel):
     symbol: str               # 规范化后的 base symbol（CMC 命名），如 "ETH"
     binance_symbol: str       # BMAC pivot 列名，如 "ETHUSDT"
     market: str               # "spot" or "swap"
+    # True = 在 config.SECTOR_EXCLUDED_SYMBOLS 名单里，本行数字不进上方板块汇总。
+    # 仍然返回是为了让人能看到 BTC/ETH 当天表现作参照，前端会灰显并标「不计入」。
+    excluded: bool = False
     ret_1h: float | None = None
     ret_24h: float | None = None
     ret_168h: float | None = None

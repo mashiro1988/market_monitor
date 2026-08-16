@@ -588,6 +588,23 @@ CMC_CACHE_TTL_DAYS = int(os.getenv("CMC_CACHE_TTL_DAYS", "7"))
 # CMC 限速 ~30 调用/分钟，请求间隔 2.5s 保险
 CMC_REQUEST_INTERVAL_SECONDS = float(os.getenv("CMC_REQUEST_INTERVAL_SECONDS", "2.5"))
 
+# 板块轮动的「巨头剔除名单」：这些 symbol 不参与任何板块聚合数字
+# （涨跌均值/中位、资金流求和、成分币计数），明细表里仍列出但标「不计入」。
+#
+# 为什么必须剔（2026-08-16 本机快照实测）：
+#   资金流是**求和**口径而不是等权平均，BTC 一个币约 +60~70M 的 24h 现货净流入
+#   直接盖住整个板块 —— 白名单里 10 个含 BTC/ETH 的板块中 9 个方向反转（本该显示
+#   资金流出，页面显示大幅流入），且彼此数字几乎相同，完全没有板块区分度。
+#   涨跌是等权平均，受影响小（最多 0.3 个百分点），但同样剔除以保证全页同一口径。
+# WBTC/WBETH 的价格就是 BTC/ETH 本身，留着等于同一资产在板块里重复计一次。
+# 币安以后新上包装币（如 WETH、cbBTC）在这里加一行即可，算法侧不用动。
+# ↓ 要增删就改这一行（顺序即页面上展示的顺序）
+SECTOR_EXCLUDED_SYMBOL_LIST: tuple[str, ...] = ("BTC", "ETH", "WBTC", "WBETH")
+
+SECTOR_EXCLUDED_SYMBOLS: set[str] = set(SECTOR_EXCLUDED_SYMBOL_LIST)
+# 页面/告警上统一的剔除说明文案（只此一处，前端与企微推送共用同一句话）
+SECTOR_EXCLUSION_NOTE = "已剔除 " + "/".join(SECTOR_EXCLUDED_SYMBOL_LIST)
+
 # 板块白名单：大组名 → 该组下关心的 CMC category 名（精确匹配 CMC 的 category.name 字段）。
 # 起步版 ~50 个板块，按需增删。改完用 `python run.py refresh-sectors` 强制刷新本地缓存。
 # 详见 docs/specs/remote_data_integration.md 附录 A。

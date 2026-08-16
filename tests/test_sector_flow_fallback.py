@@ -180,6 +180,9 @@ def _wire(monkeypatch, *, spot_pivot, swap_pivot):
     monkeypatch.setattr(config, "all_whitelisted_cmc_categories", lambda: ["AI"])
     monkeypatch.setattr(config, "cmc_category_to_group", lambda name: "测试")
     monkeypatch.setattr(sector_scanner, "MIN_TOKENS_PER_SECTOR", 1)
+    # 同 test_sector_flows.py：样本币就叫 BTC/ETH，生产配置会把它们剔出板块聚合，
+    # 不关掉的话板块被剔空，测不到回退路径本身。剔除行为由 test_sector_exclusions.py 专测。
+    monkeypatch.setattr(config, "SECTOR_EXCLUDED_SYMBOLS", set())
     monkeypatch.setattr(sector_scanner.cmc_client, "load_category_to_symbols",
                         lambda session: {"AI": {"BTC", "ETH"}})
     monkeypatch.setattr("services.sector_flow_monitoring.alert_flow_gate_failures",

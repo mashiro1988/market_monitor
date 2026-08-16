@@ -1550,3 +1550,14 @@ code {
 .rp-row .rp-dropdown > .button {
   min-height: 0; padding: 0 7px; font-size: 12px; line-height: 15px; border-radius: 5px;
 }
+
+/* 板块轮动:剔除名单里的成分币(BTC/ETH/WBTC/WBETH)。它们仍列在明细表末尾作参照,但
+   数字不进上方板块汇总 —— 整行调灰 + 一个「不计入」标签,免得被误读成板块成员。
+   `.sector-token-excluded td` 特异性高于 .ret-up/.ret-down,涨跌的红绿也一并压掉。 */
+.sector-token-excluded td { color: var(--muted); opacity: 0.72; }
+.sector-token-excluded strong { font-weight: 500; }
+.tag-excluded {
+  display: inline-block; margin-left: 6px; padding: 0 5px;
+  font-size: 12px; font-weight: 500; color: var(--muted);
+  border: 1px dashed var(--line-soft); border-radius: 3px; white-space: nowrap;
+}
