@@ -88,10 +88,15 @@ DEEPSEEK_MAX_RETRIES = int(os.getenv("DEEPSEEK_MAX_RETRIES", "1"))
 
 # v4 pro 推理模型（自动标注用）。thinking 模式对应 reasoning_content，需要更长 read timeout。
 DEEPSEEK_REASONER_MODEL = os.getenv("DEEPSEEK_REASONER_MODEL", "deepseek-v4-pro")
-DEEPSEEK_REASONER_READ_TIMEOUT = float(os.getenv("DEEPSEEK_REASONER_READ_TIMEOUT", "240"))
+DEEPSEEK_REASONER_READ_TIMEOUT = float(os.getenv("DEEPSEEK_REASONER_READ_TIMEOUT", "420"))
 # 批量调用一次喂多个窗口，单次思考时间 = 单窗口 × 倍数；read timeout 也要相应放大。
 DEEPSEEK_REASONER_BATCH_READ_TIMEOUT = float(os.getenv("DEEPSEEK_REASONER_BATCH_READ_TIMEOUT", "600"))
 DEEPSEEK_REASONER_EFFORT = os.getenv("DEEPSEEK_REASONER_EFFORT", "max")  # "high" | "max"
+# 标注 max_tokens 护栏（同时覆盖 reasoning + content，只按实际用量计费）。
+# 2026-08-20 实锤：快照更新后 v4-pro 思考显著变长，7 月定的 8000/16000 被思考吃光
+# → content 空 → 502 反复重试白烧 token。提档并改环境变量可调；单窗超时 240→420 配套。
+DEEPSEEK_REASONER_MAX_TOKENS = int(os.getenv("DEEPSEEK_REASONER_MAX_TOKENS", "16000"))
+DEEPSEEK_REASONER_BATCH_MAX_TOKENS = int(os.getenv("DEEPSEEK_REASONER_BATCH_MAX_TOKENS", "24000"))
 
 # 事件池 AI 梳理(pool sweep,2026-08-13 design):按钮触发,reasoner 全池盘点。
 # 窗口/上限给足预算:800 条标题+摘要约 6-7 万 token 输入,v4-pro 上下文放得下;

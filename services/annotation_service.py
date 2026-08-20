@@ -1333,9 +1333,10 @@ def _call_deepseek_reasoner_messages(messages: list[dict]) -> tuple[str, str, fl
             "reasoning_effort": config.DEEPSEEK_REASONER_EFFORT,
         },
         "response_format": {"type": "json_object"},
-        # max_tokens 同时覆盖 reasoning_content + content；effort=max 时推理可能吃掉大半，
-        # 4000 偶发把 content 截成空（DeepSeek 返回空 content 报错），留足余量。
-        "max_tokens": 8000,
+        # max_tokens 同时覆盖 reasoning_content + content；effort=max 时推理可能吃掉大半。
+        # 2026-08-20：快照更新后思考变长，8000 已不够（真实窗口连续两发被吃光 content 空），
+        # 提档到 config（默认 16000，环境变量可调），护栏≠必然花费。
+        "max_tokens": config.DEEPSEEK_REASONER_MAX_TOKENS,
     }
     result = call_deepseek_chat(
         payload,
@@ -1345,6 +1346,9 @@ def _call_deepseek_reasoner_messages(messages: list[dict]) -> tuple[str, str, fl
     content = result.content
     reasoning = result.reasoning_content
     if not content:
+        # 标注失败此前只回给浏览器不落日志,服务器端无痕(2026-08-20 排查盲区),补上
+        logger.error("[AutoAnnotate] DeepSeek 空 content:思考 {} 字顶到 max_tokens={},耗时 {:.1f}s",
+                     len(reasoning), config.DEEPSEEK_REASONER_MAX_TOKENS, result.duration_seconds)
         raise RuntimeError(f"DeepSeek 返回空 content（reasoning 预览: {reasoning[:200]}）")
     return content, reasoning, result.duration_seconds
 
@@ -1883,8 +1887,10 @@ def _call_deepseek_reasoner_batch(user_content: str) -> tuple[str, str, float]:
             "reasoning_effort": config.DEEPSEEK_REASONER_EFFORT,
         },
         "response_format": {"type": "json_object"},
-        # max_tokens 同时覆盖 reasoning_content + content；批量场景里 thinking 容易吃掉
-        "max_tokens": 16000,
+        # max_tokens 同时覆盖 reasoning_content + content；批量场景里 thinking 容易吃掉。
+        # 2026-08-20 随单窗一并提档进 config（默认 24000；再大批量思考时长会顶到
+        # Nginx 600s 代理超时，先到 24k 为止，不够优先减每批窗口数）。
+        "max_tokens": config.DEEPSEEK_REASONER_BATCH_MAX_TOKENS,
     }
     result = call_deepseek_chat(
         payload,
@@ -1894,5 +1900,7 @@ def _call_deepseek_reasoner_batch(user_content: str) -> tuple[str, str, float]:
     content = result.content
     reasoning = result.reasoning_content
     if not content:
+        logger.error("[AutoAnnotate/batch] DeepSeek 空 content:思考 {} 字顶到 max_tokens={},耗时 {:.1f}s",
+                     len(reasoning), config.DEEPSEEK_REASONER_BATCH_MAX_TOKENS, result.duration_seconds)
         raise RuntimeError(f"DeepSeek 批量返回空 content（reasoning 预览: {reasoning[:200]}）")
     return content, reasoning, result.duration_seconds
