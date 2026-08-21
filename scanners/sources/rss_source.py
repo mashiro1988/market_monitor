@@ -21,11 +21,14 @@ except ImportError:
 class RSSSource(BaseSource):
     """通用 RSS 新闻源"""
 
-    def __init__(self, source_key: str, url: str, name: str, language: str = "en"):
+    def __init__(self, source_key: str, url: str, name: str, language: str = "en",
+                 market: str = "macro"):
         self.source_key = source_key
         self.url = url
         self.name = name
         self.language = language
+        # macro=宏观线 / crypto=加密线;决定落库后走哪套打分与事件池(web3 二期A 的总开关)
+        self.market = market
 
     def fetch(self) -> list[NewsRecord]:
         """解析 RSS 订阅并返回新闻记录"""
@@ -107,6 +110,7 @@ class RSSSource(BaseSource):
                     language=self.language,
                     categories=categories if categories else None,
                     published_at=published_at,
+                    market=self.market,
                 ))
             except Exception as exc:
                 skipped += 1
