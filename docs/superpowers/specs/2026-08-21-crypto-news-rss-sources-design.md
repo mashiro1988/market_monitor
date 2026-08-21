@@ -1,7 +1,7 @@
 # 加密新闻源重组(BlockBeats 断供替代)设计稿
 
-版本:v1.0(2026-08-21,与用户确认方案 B 后落盘)
-状态:设计已确认,待实施
+版本:v1.1(2026-08-21,与用户确认方案 B 后落盘;实施中修订 §3 前端条)
+状态:已实施(2026-08-21),实施计划 docs/superpowers/plans/2026-08-21-crypto-news-rss-sources.md
 上游:docs/superpowers/specs/2026-08-09-web3-news-crypto-event-pool-design.md §1(二期 A 数据接入层)
 
 ---
@@ -50,9 +50,11 @@ CryptoCompare/CryptoPanic 需注册 key,与本次断供同款 credit 依赖,不�
 
 - **打标/挂接/事件池零改动**:只认 `market="crypto"`,不认源名(二期 A "物理隔离"
   的红利)。DeepSeek 打标中英文都吃(币安公告本就是英文)。
-- **前端零改动**:来源筛选下拉走 `/crypto/news/sources`,从配置动态取 enabled 源。
-  副作用:BlockBeats 停用后从下拉消失,历史快讯在"全部"视图照常可见——接受,
-  不为它加特殊逻辑。
+- **前端零改动**:来源筛选下拉走 `/crypto/news/sources`,从配置动态取 enabled 源,
+  BlockBeats 停用后从下拉消失。**实施修订(v1.1)**:原稿以为"历史快讯在全部视图
+  照常可见"天然成立,实施时发现 get_crypto_news 默认视图按启用源过滤,停用源历史
+  会连带消失;已去掉该过滤(market=crypto 本就圈死范围),显式选源路径不变,
+  并加回归测试钉住"停采≠灭史"。
 - **宏观线零接触**:`NEWS_SOURCES` 字典一字不动,标注池白名单不受影响。
 
 ## 4. 风险与兜底
