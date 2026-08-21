@@ -109,3 +109,18 @@ def test_rss_crypto_market_and_atom_parse(monkeypatch):
     assert record.title == "某巨鲸增持 BTC"
     assert record.published_at is not None
     assert "链上监测" in (record.content or "")
+
+
+def test_create_crypto_rss_sources_only_rss_typed_enabled(monkeypatch):
+    """只认 type=rss 且 enabled 的加密源;专用采集器条目(无 type)与停用条目不归工厂。"""
+    monkeypatch.setattr(config, "CRYPTO_NEWS_SOURCES", {
+        "panews": {"enabled": True, "type": "rss", "url": "http://x/rss",
+                   "name": "PANews", "language": "zh"},
+        "coindesk": {"enabled": False, "type": "rss", "url": "http://y/rss",
+                     "name": "CoinDesk", "language": "en"},
+        "binance_ann": {"enabled": True, "name": "币安公告", "language": "en"},
+    }, raising=False)
+    sources = rss_source.create_crypto_rss_sources()
+    assert [s.source_key for s in sources] == ["panews"]
+    assert sources[0].market == "crypto"
+    assert sources[0].name == "PANews"

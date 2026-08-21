@@ -8,7 +8,7 @@ from models.news import NewsItem
 from services import market_calendar
 from scanners.base import BaseSource, NewsRecord, SourceHealthMixin
 from scanners.sources.jin10_source import Jin10Source
-from scanners.sources.rss_source import create_rss_sources
+from scanners.sources.rss_source import create_crypto_rss_sources, create_rss_sources
 from scanners.scorer import NewsScorer
 from chart_utils import format_beijing_time
 import config
@@ -42,6 +42,8 @@ class NewsScanner(SourceHealthMixin):
             if crypto_cfg.get("binance_ann", {}).get("enabled"):
                 from scanners.sources.binance_ann_source import BinanceAnnouncementSource
                 self.sources.append(BinanceAnnouncementSource())
+            # RSS 型加密源(PANews/吴说/CoinDesk,2026-08-21 断供重组):配置驱动,加源=加配置
+            self.sources.extend(create_crypto_rss_sources())
 
         self.scorer = NewsScorer()
         self._reset_source_statuses()

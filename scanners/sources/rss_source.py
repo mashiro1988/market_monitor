@@ -156,3 +156,26 @@ def create_rss_sources() -> list[RSSSource]:
             language=cfg.get("language", "en"),
         ))
     return sources
+
+
+def create_crypto_rss_sources() -> list[RSSSource]:
+    """CRYPTO_NEWS_SOURCES 里 type=rss 的加密源(2026-08-21 断供重组)。
+
+    BlockBeats/币安公告这类专用采集器条目没有 type 键,天然不归这里;
+    加密源一律 market="crypto",落库即走加密打标与加密事件池。
+    """
+    sources = []
+    for key, cfg in getattr(config, "CRYPTO_NEWS_SOURCES", {}).items():
+        if not cfg.get("enabled") or cfg.get("type") != "rss":
+            continue
+        url = cfg.get("url", "")
+        if not url:
+            continue
+        sources.append(RSSSource(
+            source_key=key,
+            url=url,
+            name=cfg.get("name", key),
+            language=cfg.get("language", "zh"),
+            market="crypto",
+        ))
+    return sources

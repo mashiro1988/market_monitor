@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import config
 import scanners.news_scanner as ns
 from database import Base
 from models.news import NewsItem
@@ -39,3 +40,20 @@ def test_save_records_persists_market(monkeypatch):
 
     rows = {r.title: r.market for r in session.query(NewsItem).all()}
     assert rows == {"币圈": "crypto", "宏观": "macro"}
+
+
+def test_scanner_registers_crypto_rss_and_skips_disabled_blockbeats(monkeypatch):
+    """扫描器注册段:rss 型加密源自动挂上;BlockBeats 停用后有 key 也不注册。"""
+    monkeypatch.setattr(config, "NEWS_SOURCES", {"jin10": {"enabled": False}}, raising=False)
+    monkeypatch.setattr(config, "CRYPTO_NEWS_ENABLED", True, raising=False)
+    monkeypatch.setattr(config, "BLOCKBEATS_API_KEY", "still-have-key", raising=False)
+    monkeypatch.setattr(config, "CRYPTO_NEWS_SOURCES", {
+        "blockbeats": {"enabled": False},
+        "panews": {"enabled": True, "type": "rss", "url": "http://x/rss",
+                   "name": "PANews", "language": "zh"},
+    }, raising=False)
+
+    scanner = NewsScanner()
+    keys = {getattr(s, "source_key", None) for s in scanner.sources}
+    assert "panews" in keys
+    assert all(type(s).__name__ != "BlockBeatsSource" for s in scanner.sources)
