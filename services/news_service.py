@@ -69,13 +69,6 @@ def to_news_schema(item: NewsItem) -> NewsItemSchema:
     )
 
 
-def _enabled_crypto_sources() -> list[str]:
-    """加密源白名单。与宏观分开取:CRYPTO_NEWS_SOURCES 刻意不并进 NEWS_SOURCES
-    (那个字典同时是标注候选新闻的源白名单,混进去就污染标注池)。"""
-    return [k for k, v in getattr(config, "CRYPTO_NEWS_SOURCES", {}).items()
-            if v.get("enabled")]
-
-
 def list_crypto_sources() -> list[NewsSourceMeta]:
     return [NewsSourceMeta(key=key, name=cfg.get("name") or key.upper(),
                            language=cfg.get("language", "zh"))
@@ -107,9 +100,12 @@ def get_crypto_news(
     min_llm_importance = max(0, min(int(min_llm_importance or 0), 10))
     cutoff = utc_now_naive() - timedelta(hours=hours_back)
 
+    # 默认视图不按"启用源"过滤:market=crypto 已圈死范围,再按启用源筛只会把
+    # 停用源(如 blockbeats 断供)的历史快讯连带藏掉——停采≠灭史(2026-08-21)。
     query = (session.query(NewsItem)
-             .filter(NewsItem.market == "crypto", NewsItem.timestamp >= cutoff)
-             .filter(NewsItem.source.in_(sources or _enabled_crypto_sources())))
+             .filter(NewsItem.market == "crypto", NewsItem.timestamp >= cutoff))
+    if sources:
+        query = query.filter(NewsItem.source.in_(sources))
     if affair_only:
         query = query.filter(NewsItem.is_crypto_affair.is_(True))
     if coin:

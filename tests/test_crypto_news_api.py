@@ -81,8 +81,19 @@ def test_search_matches_title(session):
 
 
 def test_crypto_sources_listed():
+    """下拉只列启用源:断供重组后新三源在列,停用的 blockbeats 不再出现。"""
     keys = {s.key for s in news_service.list_crypto_sources()}
-    assert "blockbeats" in keys and "binance_ann" in keys
+    assert {"panews", "wublock", "coindesk", "binance_ann"} <= keys
+    assert "blockbeats" not in keys
+
+
+def test_disabled_source_history_still_visible(session):
+    """停用源(blockbeats 断供)的历史快讯必须留在默认视图——停采≠灭史。
+    market=crypto 已圈死范围,默认视图不再按启用源过滤;显式选源仍生效。"""
+    _news(session, "BlockBeats 历史快讯", source="blockbeats")
+    assert [i.title for i in news_service.get_crypto_news(session).items] \
+        == ["BlockBeats 历史快讯"]
+    assert news_service.get_crypto_news(session, sources=["panews"]).items == []
 
 
 def test_unlinked_only_filters_attached_news(session):
