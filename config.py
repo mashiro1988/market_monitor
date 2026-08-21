@@ -410,7 +410,7 @@ CRYPTO_NEWS_SOURCES = {
     # 2026-08-09 服务器实探），现走 Pro API + api-key 请求头。取全量而非仅重要档：
     # 二期B 要归因的小币新闻基本都落在非重要档里，只取重要档等于掐断原料。
     "blockbeats": {
-        "enabled": True,
+        "enabled": False,  # 2026-08-21 credit 耗尽停用;续费改回 True 即恢复,代码全保留
         "language": "zh",
         "name": "BlockBeats",
         "api_url": "https://api-pro.theblockbeats.info/v1/newsflash",
@@ -426,6 +426,30 @@ CRYPTO_NEWS_SOURCES = {
         "name": "Binance公告",
         "api_url": "https://www.binance.com/bapi/apex/v1/public/apex/cms/article/list/query",
         "page_size": 20,
+    },
+    # 2026-08-21 断供重组(design: 2026-08-21-crypto-news-rss-sources-design.md):
+    # 三个免费官方订阅流走通用 RSS 采集器(type=rss 由 create_crypto_rss_sources 识别),
+    # 无 key 无 credit;url 一律配重定向后的终点地址,省每轮一次白跑。
+    "panews": {
+        "enabled": True,
+        "type": "rss",
+        "language": "zh",
+        "name": "PANews",
+        "url": "https://www.panewslab.com/rss.xml?lang=zh&type=NEWS",  # 快讯体裁,~148 条/天
+    },
+    "wublock": {
+        "enabled": True,
+        "type": "rss",
+        "language": "zh",
+        "name": "吴说区块链",
+        "url": "https://www.wublock123.com/feed",  # Atom 格式,feedparser 通吃;~69 条/天
+    },
+    "coindesk": {
+        "enabled": True,
+        "type": "rss",
+        "language": "en",
+        "name": "CoinDesk",
+        "url": "https://www.coindesk.com/arc/outboundfeeds/rss",  # 机构/监管英文首发;~28 条/天
     },
 }
 

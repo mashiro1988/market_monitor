@@ -30,3 +30,21 @@ def test_blockbeats_defaults():
 def test_binance_catalogs_are_id_label_pairs():
     for catalog_id, label in config.BINANCE_ANN_CATALOGS:
         assert isinstance(catalog_id, int) and isinstance(label, str) and label
+
+
+def test_crypto_rss_sources_present():
+    """PANews/吴说/CoinDesk(2026-08-21 断供重组)必须以 type=rss 挂在加密配置。"""
+    expect = {"panews": "zh", "wublock": "zh", "coindesk": "en"}
+    for key, lang in expect.items():
+        cfg = config.CRYPTO_NEWS_SOURCES[key]
+        assert cfg["enabled"] is True, key
+        assert cfg["type"] == "rss", key
+        assert cfg["url"].startswith("https://"), key
+        assert cfg["language"] == lang, key
+
+
+def test_blockbeats_disabled_but_config_kept():
+    """credit 耗尽停用;配置整体保留,续费改回 enabled 即恢复。"""
+    bb = config.CRYPTO_NEWS_SOURCES["blockbeats"]
+    assert bb["enabled"] is False
+    assert bb["api_url"].startswith("https://api-pro.theblockbeats.info")
