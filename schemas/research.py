@@ -20,6 +20,7 @@ class ResearchEventItem(BaseModel):
     today_new: int = 0
     yesterday_new: int = 0
     badge_count: int = 0
+    market_count: int = 0                    # 关联 Polymarket 市场数(2026-08-28,卡片小徽章)
     days_since_last: int | None = None
     last_evidence_at: str | None = None      # naive UTC isoformat(项目惯例,无 Z)
     last_evidence_bj: str | None = None      # 北京时间字符串,卡片直接显示(勿用上一行拼时间)
@@ -220,6 +221,57 @@ class SweepApplyResponse(BaseModel):
     event_type: str
     created: list[SweepCreatedEvent] = Field(default_factory=list)
     skipped_existing: list[str] = Field(default_factory=list)   # 同名活跃事件,跳过未立
+
+
+class MarketSweepRequest(BaseModel):
+    """找市场提案(spec 2026-08-28 §3):run 全程不落库,天然演练,无需 dry_run。"""
+    event_type: str = "macro"
+    event_id: int | None = None              # 传了=单事件按钮/找后继;不传=整线
+
+
+class MarketProposal(BaseModel):
+    event_id: int
+    event_name: str = ""
+    slug: str
+    title: str = ""
+    current_probability: float | None = None   # 单市场取 Yes;多子市场为空(spec §4)
+    market_count: int = 1
+    volume: float | None = None
+    end_date: str = ""
+    confidence: float | None = None
+    reason: str = ""
+
+
+class MarketSweepResponse(BaseModel):
+    event_type: str
+    scanned_events: int = 0
+    searched_terms: int = 0
+    candidates: int = 0
+    dropped_price_targets: int = 0           # 被剔的价格目标类(不静默)
+    proposals: list[MarketProposal] = Field(default_factory=list)
+    duration_seconds: float = 0.0
+
+
+class MarketSweepApplyRequest(BaseModel):
+    """采纳勾选提案(签字环节):前端把提案勾选子集原样传回,无状态。"""
+    event_type: str = "macro"
+    items: list[MarketProposal] = Field(default_factory=list)
+
+
+class MarketSweepApplyResponse(BaseModel):
+    event_type: str
+    added: list[str] = Field(default_factory=list)
+    revived: list[str] = Field(default_factory=list)
+    linked: int = 0
+    skipped: list[str] = Field(default_factory=list)
+
+
+class AttachMarketRequest(BaseModel):
+    tracked_id: int
+
+
+class DetachMarketRequest(BaseModel):
+    reason: str | None = None
 
 
 class DeleteEventResponse(BaseModel):

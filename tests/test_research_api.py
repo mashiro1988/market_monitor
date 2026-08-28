@@ -136,3 +136,46 @@ def test_buffer_revival_stats_endpoints(client):
     assert client.get("/api/research/revival").status_code == 200
     stats = client.get("/api/research/stats").json()
     assert "link_rate" in stats and "correction_rate" in stats
+
+
+def test_market_sweep_apply_and_event_markets_roundtrip(client, monkeypatch):
+    """市场提案 API 闭环(2026-08-28):提案(mock 管线)→ 采纳 → 事件市场卡 → 摘下。"""
+    from models.research import ResearchEvent
+    from services import market_sweep
+    s = client.test_sessionmaker()
+    event = ResearchEvent(name="俄乌停火", event_type="macro", status="active", display_no=9)
+    s.add(event); s.commit(); eid = event.id; s.close()
+    canned = {"event_type": "macro", "scanned_events": 1, "searched_terms": 1,
+              "candidates": 1, "dropped_price_targets": 0, "duration_seconds": 1.0,
+              "proposals": [{"event_id": eid, "event_name": "俄乌停火",
+                             "slug": "ceasefire-2026", "title": "Ceasefire in 2026?",
+                             "current_probability": 0.41, "market_count": 1,
+                             "volume": 500000.0, "end_date": "2026-12-31",
+                             "confidence": 0.9, "reason": "就是这件事"}]}
+    monkeypatch.setattr(market_sweep, "run_market_sweep", lambda *a, **k: canned)
+    r = client.post("/api/research/market-sweep", json={"event_type": "macro"})
+    assert r.status_code == 200 and r.json()["proposals"][0]["slug"] == "ceasefire-2026"
+
+    r = client.post("/api/research/market-sweep/apply",
+                    json={"event_type": "macro", "items": canned["proposals"]})
+    assert r.status_code == 200
+    assert r.json()["added"] == ["ceasefire-2026"] and r.json()["linked"] == 1
+
+    r = client.get(f"/api/research/events/{eid}/markets")
+    assert r.status_code == 200
+    item = r.json()["items"][0]
+    assert item["slug"] == "ceasefire-2026" and item["waiting_first_scan"] is True
+
+    r = client.post(f"/api/research/event-markets/{item['link_id']}/detach",
+                    json={"reason": "试摘"})
+    assert r.status_code == 200
+    assert client.get(f"/api/research/events/{eid}/markets").json()["items"] == []
+
+
+def test_predictions_search_proxy(client, monkeypatch):
+    from services import market_sweep
+    monkeypatch.setattr(market_sweep, "search_markets", lambda q: [{
+        "slug": "s", "title": "T?", "description": "", "volume": 1.0,
+        "end_date": "2026-01-01", "market_count": 1, "current_probability": 0.5}])
+    r = client.get("/api/predictions/search", params={"q": "fed"})
+    assert r.status_code == 200 and r.json()[0]["slug"] == "s"

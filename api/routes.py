@@ -36,6 +36,9 @@ from schemas.common import Page
 from schemas.market import MarketHistoryResponse, MarketLatestResponse, MarketSymbol, MarketTableRow
 from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta
 from schemas.predictions import (
+    EventMarketItem,
+    EventMarketsResponse,
+    MarketSearchResult,
     PredictionFamily,
     PredictionRow,
     PredictionsResponse,
@@ -64,11 +67,17 @@ from schemas.research import (
     SweepApplyResponse,
     SweepRequest,
     SweepResponse,
+    AttachMarketRequest,
+    DetachMarketRequest,
+    MarketSweepApplyRequest,
+    MarketSweepApplyResponse,
+    MarketSweepRequest,
+    MarketSweepResponse,
     TimelineResponse,
 )
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.tasks import TaskStatus
-from services import alerts_service, annotation_service, behavior_views, event_linking, event_pool, market_service, news_service, pool_sweep, prediction_service, sector_service, task_service
+from services import alerts_service, annotation_service, behavior_views, event_linking, event_markets, event_pool, market_service, market_sweep, news_service, pool_sweep, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
 router = APIRouter(prefix="/api")
@@ -232,18 +241,29 @@ def crypto_news_sources_list() -> list[NewsSourceMeta]:
 
 
 @router.get("/predictions", response_model=PredictionsResponse)
-def predictions(hours: int = 24, search: str | None = None, db: Session = Depends(get_db)) -> PredictionsResponse:
-    return prediction_service.get_predictions(db, hours=hours, search=search)
+def predictions(hours: int = 24, search: str | None = None, market: str | None = None,
+                db: Session = Depends(get_db)) -> PredictionsResponse:
+    return prediction_service.get_predictions(db, hours=hours, search=search, market=market)
 
 
 @router.get("/predictions/families", response_model=list[PredictionFamily])
-def prediction_families(hours: int = 24, search: str | None = None, db: Session = Depends(get_db)) -> list[PredictionFamily]:
-    return prediction_service.get_prediction_families(db, hours=hours, search=search)
+def prediction_families(hours: int = 24, search: str | None = None, market: str | None = None,
+                        db: Session = Depends(get_db)) -> list[PredictionFamily]:
+    return prediction_service.get_prediction_families(db, hours=hours, search=search, market=market)
+
+
+@router.get("/predictions/search", response_model=list[MarketSearchResult])
+def predictions_search(q: str, db: Session = Depends(get_db)) -> list[MarketSearchResult]:
+    """手动搜索通道(spec 2026-08-28 §3):Gamma 搜索代理,不剔价格类。"""
+    try:
+        return [MarketSearchResult(**c) for c in market_sweep.search_markets(q)]
+    except Exception as exc:
+        raise ApiError("SEARCH_FAILED", f"Polymarket 搜索失败: {exc}", status_code=502) from exc
 
 
 @router.get("/predictions/tracked", response_model=list[TrackedMarketSchema])
-def list_tracked(db: Session = Depends(get_db)) -> list[TrackedMarketSchema]:
-    return prediction_service.list_tracked_markets(db)
+def list_tracked(market: str | None = None, db: Session = Depends(get_db)) -> list[TrackedMarketSchema]:
+    return prediction_service.list_tracked_markets(db, market=market)
 
 
 @router.post("/predictions/tracked", response_model=TrackedMarketSchema)
@@ -688,3 +708,55 @@ def research_sweep_apply(request: SweepApplyRequest,
             events=[e.model_dump() for e in request.events]))
     except ValueError as exc:
         raise ApiError("SWEEP_APPLY_INVALID", str(exc), status_code=400) from exc
+
+
+@router.post("/research/market-sweep", response_model=MarketSweepResponse)
+def research_market_sweep(request: MarketSweepRequest, db: Session = Depends(get_db)) -> MarketSweepResponse:
+    """找市场提案(spec 2026-08-28 §3):AI 搜索词+Gamma+配对,提案不落库等人勾选。"""
+    try:
+        return MarketSweepResponse(**market_sweep.run_market_sweep(
+            db, event_type=request.event_type, event_id=request.event_id))
+    except market_sweep.MarketSweepBusy as exc:
+        raise ApiError("MARKET_SWEEP_BUSY", str(exc), status_code=409) from exc
+    except ValueError as exc:
+        raise ApiError("MARKET_SWEEP_INVALID", str(exc), status_code=400) from exc
+    except RuntimeError as exc:
+        raise ApiError("MARKET_SWEEP_FAILED", str(exc), status_code=502) from exc
+
+
+@router.post("/research/market-sweep/apply", response_model=MarketSweepApplyResponse)
+def research_market_sweep_apply(request: MarketSweepApplyRequest,
+                                db: Session = Depends(get_db)) -> MarketSweepApplyResponse:
+    """采纳勾选的市场提案(签字环节):只有这里会写跟踪清单与挂接。"""
+    try:
+        return MarketSweepApplyResponse(**market_sweep.apply_market_proposals(
+            db, request.event_type, [i.model_dump() for i in request.items]))
+    except ValueError as exc:
+        raise ApiError("MARKET_SWEEP_APPLY_INVALID", str(exc), status_code=400) from exc
+
+
+@router.get("/research/events/{event_id}/markets", response_model=EventMarketsResponse)
+def research_event_markets(event_id: int, db: Session = Depends(get_db)) -> EventMarketsResponse:
+    """事件详情市场卡(spec §5):关联跟踪项+旗下市场最新概率摘要+断流判定。"""
+    return EventMarketsResponse(items=[EventMarketItem(**it)
+                                       for it in event_markets.list_event_markets(db, event_id)])
+
+
+@router.post("/research/events/{event_id}/markets")
+def research_event_market_attach(event_id: int, payload: AttachMarketRequest,
+                                 db: Session = Depends(get_db)) -> dict:
+    """人工挂接跟踪项到事件(跟踪管理表归属操作;可撤销摘下)。"""
+    try:
+        link = event_markets.attach_market(db, event_id, payload.tracked_id)
+    except ValueError as exc:
+        raise ApiError("MARKET_ATTACH_INVALID", str(exc), status_code=400) from exc
+    return {"ok": True, "link_id": int(link.id)}
+
+
+@router.post("/research/event-markets/{link_id}/detach")
+def research_event_market_detach(link_id: int, payload: DetachMarketRequest,
+                                 db: Session = Depends(get_db)) -> dict:
+    """摘下留痕:事件断开、跟踪照旧、行不删。"""
+    if not event_markets.detach_market(db, link_id, payload.reason):
+        raise ApiError("MARKET_LINK_NOT_FOUND", "挂接不存在", status_code=404)
+    return {"ok": True}

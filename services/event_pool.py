@@ -283,6 +283,11 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
         like = f"%{q}%"
         query = query.filter((ResearchEvent.name.like(like)) |
                              (ResearchEvent.gate_keywords.like(like)))
+    # 关联市场计数(2026-08-28 事件池合并):一次分组统计,卡片小徽章用
+    from models.event_market import ResearchEventMarket
+    market_counts = dict(session.query(ResearchEventMarket.event_id, func.count())
+                         .filter(ResearchEventMarket.detached.is_(False))
+                         .group_by(ResearchEventMarket.event_id).all())
     out = []
     for e in query.all():
         rows = _event_links(session, e.id)
@@ -302,6 +307,7 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
             "yesterday_new": sum(1 for l, _ in rows
                                  if l.created_at and yday_start <= l.created_at < today_start),
             "badge_count": sum(1 for _, n in rows if int(n.id) in badge_map),
+            "market_count": int(market_counts.get(int(e.id), 0)),
             "last_evidence_at": last_ts,
             # 卡片显示用北京时间(ui-redesign §6.1):last_evidence_at 是 naive UTC,直接切会差 8 小时
             "last_evidence_bj": format_bj(last_ts),
