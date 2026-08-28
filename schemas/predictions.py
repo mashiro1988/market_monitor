@@ -47,6 +47,14 @@ class PredictionsResponse(BaseModel):
     latest_timestamp: TimeFields | None = None
 
 
+class TrackedEventBrief(BaseModel):
+    """跟踪项挂着哪些事件(跟踪管理表归属列,2026-08-28)。"""
+    link_id: int
+    event_id: int
+    display_no: int
+    name: str
+
+
 class TrackedMarketSchema(BaseModel):
     id: int
     kind: Literal["slug"]
@@ -54,6 +62,8 @@ class TrackedMarketSchema(BaseModel):
     display_name: str | None = None
     enabled: bool
     notes: str | None = None
+    market: str = "macro"
+    events: list[TrackedEventBrief] = []
 
 
 class TrackedMarketCreate(BaseModel):
@@ -61,6 +71,8 @@ class TrackedMarketCreate(BaseModel):
     identifier: str
     display_name: str | None = None
     notes: str | None = None
+    market: Literal["macro", "crypto"] = "macro"
+    event_id: int | None = None          # 传了=添加即挂接(link_source=human)
 
 
 class TrackedMarketUpdate(BaseModel):

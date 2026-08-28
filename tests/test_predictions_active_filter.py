@@ -166,3 +166,20 @@ def test_mixed_legacy_and_origin_rows_follow_origin_verdict(session):
     assert {m.market_id for m in res.markets} == {"kept", "anchor"}
     assert len(prediction_service.get_market_history(session, "kept", hours=24)) == 2
     assert prediction_service.get_market_history(session, "gone", hours=24) == []
+
+
+def test_load_prediction_rows_filters_by_line(session):
+    """market 线过滤(2026-08-28):加密页只看加密跟踪项的市场;旧无 origin 快照算宏观。"""
+    now = utc_now_naive()
+    session.add(TrackedMarket(kind="slug", identifier="m-slug", market="macro", enabled=True))
+    session.add(TrackedMarket(kind="slug", identifier="c-slug", market="crypto", enabled=True))
+    for market_id, origin in [("mk1", "slug:m-slug"), ("ck1", "slug:c-slug"), ("legacy", None)]:
+        session.add(PredictionMarket(timestamp=now, market_id=market_id, question="q",
+                                     outcome="Yes", probability=0.5, origin=origin))
+    session.commit()
+    all_ids = {r.market_id for r in prediction_service.load_prediction_rows(session, hours=24)}
+    macro_ids = {r.market_id for r in prediction_service.load_prediction_rows(session, hours=24, market="macro")}
+    crypto_ids = {r.market_id for r in prediction_service.load_prediction_rows(session, hours=24, market="crypto")}
+    assert all_ids == {"mk1", "ck1", "legacy"}
+    assert macro_ids == {"mk1", "legacy"}
+    assert crypto_ids == {"ck1"}
