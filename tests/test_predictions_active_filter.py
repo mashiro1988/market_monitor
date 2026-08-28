@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import config
 from database import Base
 from models.prediction import PredictionMarket
 from models.tracked_market import TrackedMarket
@@ -49,7 +50,9 @@ def _track(session, kind, identifier, dismissed=False, enabled=True):
     session.add(TrackedMarket(kind=kind, identifier=identifier, dismissed=dismissed, enabled=enabled))
 
 
-def test_get_predictions_excludes_markets_no_longer_scanned(session):
+def test_get_predictions_excludes_markets_no_longer_scanned(session, monkeypatch):
+    # 测的是宽限期语义,不是默认值大小:钉回 30 分钟,样本"2 小时前"才构成断流
+    monkeypatch.setattr(config, "PREDICTION_ACTIVE_GRACE_MINUTES", 30)
     now = utc_now_naive()
     for k in range(3):
         _snap(session, "live", "Will it rain tomorrow?", now - timedelta(minutes=5 * k))
@@ -62,7 +65,8 @@ def test_get_predictions_excludes_markets_no_longer_scanned(session):
     assert {m.market_id for m in res.markets} == {"live"}
 
 
-def test_history_of_stale_market_is_empty(session):
+def test_history_of_stale_market_is_empty(session, monkeypatch):
+    monkeypatch.setattr(config, "PREDICTION_ACTIVE_GRACE_MINUTES", 30)
     now = utc_now_naive()
     for k in range(3):
         _snap(session, "live", "Will it rain tomorrow?", now - timedelta(minutes=5 * k))
