@@ -78,3 +78,6 @@ Thumbs.db
 
 # 审计工作产物默认不入库（公开仓库；要公开哪份由所有者显式 git add -f）
 audit/
+
+# 头脑风暴视觉草图工作目录
+.superpowers/
