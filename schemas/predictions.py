@@ -24,6 +24,8 @@ class PredictionMarketSummary(BaseModel):
     volume: float | None = None
     outcomes: list[PredictionRow]
     has_shift: bool
+    # 来源跟踪项 "slug:<identifier>"(2026-08-28):前端据此把市场映射回跟踪项/挂接事件
+    origin: str | None = None
 
 
 class PredictionFamilySeries(BaseModel):
