@@ -7,6 +7,7 @@ import type {
   SweepResponse, TimelineItem,
 } from "../api/types";
 import { Button, PageHeader } from "../components/Controls";
+import { EventMarkets } from "../components/EventMarkets";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 
 // ---- 纯函数(测试覆盖,见 ResearchPage.test.tsx)----
@@ -342,6 +343,8 @@ function EventDetail({ eventId, onChanged, onDeleted, eventType }:
           }}>深回扫…</MenuItem>
         </Dropdown>
       </div>
+
+      <EventMarkets eventId={eventId} eventType={eventType} />
 
       {kwDraft !== null && (
         <div className="panel" style={{ margin: "8px 0" }}>
