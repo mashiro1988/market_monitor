@@ -136,6 +136,10 @@ export type AnnotationSymbol = {
   asset_class: string;
 };
 
+export type AttachMarketRequest = {
+  tracked_id: number;
+};
+
 export type AutoAnnotateBatchItem = {
   symbol: string;
   window_start_utc: string;
@@ -300,9 +304,31 @@ export type DeleteEventResponse = {
   links_freed: number;
 };
 
+export type DetachMarketRequest = {
+  reason: string | null;
+};
+
 export type DriverBadge = {
   symbol: string;
   change_pct: number | null;
+};
+
+export type EventMarketItem = {
+  link_id: number;
+  tracked_id: number;
+  slug: string;
+  display_name: string | null;
+  market: string;
+  enabled: boolean;
+  link_source: string;
+  confidence: number | null;
+  settled: boolean;
+  waiting_first_scan: boolean;
+  markets: PredictionMarketSummary[];
+};
+
+export type EventMarketsResponse = {
+  items: EventMarketItem[];
 };
 
 export type LinkBrief = {
@@ -388,6 +414,57 @@ export type MarketLatestItem = {
 export type MarketLatestResponse = {
   items: MarketLatestItem[];
   last_updated: TimeFields | null;
+};
+
+export type MarketProposal = {
+  event_id: number;
+  event_name: string;
+  slug: string;
+  title: string;
+  current_probability: number | null;
+  market_count: number;
+  volume: number | null;
+  end_date: string;
+  confidence: number | null;
+  reason: string;
+};
+
+export type MarketSearchResult = {
+  slug: string;
+  title: string;
+  description: string;
+  volume: number | null;
+  end_date: string;
+  market_count: number;
+  current_probability: number | null;
+};
+
+export type MarketSweepApplyRequest = {
+  event_type: string;
+  items: MarketProposal[];
+};
+
+export type MarketSweepApplyResponse = {
+  event_type: string;
+  added: string[];
+  revived: string[];
+  linked: number;
+  skipped: string[];
+};
+
+export type MarketSweepRequest = {
+  event_type: string;
+  event_id: number | null;
+};
+
+export type MarketSweepResponse = {
+  event_type: string;
+  scanned_events: number;
+  searched_terms: number;
+  candidates: number;
+  dropped_price_targets: number;
+  proposals: MarketProposal[];
+  duration_seconds: number;
 };
 
 export type MarketSymbol = {
@@ -486,6 +563,7 @@ export type PredictionMarketSummary = {
   volume: number | null;
   outcomes: PredictionRow[];
   has_shift: boolean;
+  origin: string | null;
 };
 
 export type PredictionRow = {
@@ -572,6 +650,7 @@ export type ResearchEventItem = {
   today_new: number;
   yesterday_new: number;
   badge_count: number;
+  market_count: number;
   days_since_last: number | null;
   last_evidence_at: string | null;
   last_evidence_bj: string | null;
@@ -776,11 +855,20 @@ export type TimelineResponse = {
   page_size: number;
 };
 
+export type TrackedEventBrief = {
+  link_id: number;
+  event_id: number;
+  display_no: number;
+  name: string;
+};
+
 export type TrackedMarketCreate = {
   kind: "slug";
   identifier: string;
   display_name?: string | null;
   notes?: string | null;
+  market?: "macro" | "crypto";
+  event_id?: number | null;
 };
 
 export type TrackedMarketSchema = {
@@ -790,6 +878,8 @@ export type TrackedMarketSchema = {
   display_name: string | null;
   enabled: boolean;
   notes: string | null;
+  market: string;
+  events: TrackedEventBrief[];
 };
 
 export type TrackedMarketUpdate = {
