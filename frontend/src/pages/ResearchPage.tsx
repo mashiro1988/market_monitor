@@ -8,6 +8,7 @@ import type {
 } from "../api/types";
 import { Button, PageHeader } from "../components/Controls";
 import { EventMarkets } from "../components/EventMarkets";
+import { MarketPricingTab } from "../components/MarketPricingTab";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 
 // ---- 纯函数(测试覆盖,见 ResearchPage.test.tsx)----
@@ -489,7 +490,7 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
 }) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<number | null>(null);
-  const [tab, setTab] = useState<"events" | "revival">("events");
+  const [tab, setTab] = useState<"events" | "markets" | "revival">("events");
   const [q, setQ] = useState("");
   const events = useQuery({
     queryKey: ["research-events", "all", q, eventType],
@@ -555,6 +556,7 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
           {sweep.isPending ? "梳理中…(约 1-5 分钟)" : "AI 梳理"}
         </Button>
         <Button kind={tab === "events" ? "primary" : "ghost"} onClick={() => setTab("events")}>事件</Button>
+        <Button kind={tab === "markets" ? "primary" : "ghost"} onClick={() => setTab("markets")}>市场定价</Button>
         <Button kind={tab === "revival" ? "primary" : "ghost"} onClick={() => setTab("revival")}>旧事重提</Button>
       </div>
 
@@ -631,6 +633,7 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
           </div>
         </div>
       )}
+      {tab === "markets" && <MarketPricingTab eventType={eventType} />}
       {tab === "revival" && <RevivalTab onChanged={refresh} eventType={eventType} />}
       {tab === "events" && (
         <div className="panel">
@@ -664,6 +667,7 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
                 </span>
                 <span className="rp-card-foot">
                   证据 {e.evidence_count} · 最新 {fmtBjShort(e.last_evidence_bj)}
+                  {(e.market_count ?? 0) > 0 && ` · 市场 ${e.market_count}`}
                 </span>
               </button>
             ))}
