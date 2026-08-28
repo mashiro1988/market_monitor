@@ -1,8 +1,9 @@
 """
 预测市场扫描器 - 跟踪 Polymarket 等预测市场的赔率变化
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from loguru import logger
+from sqlalchemy import func
 from database import get_session
 from models.prediction import PredictionMarket
 from scanners.base import PredictionRecord, SourceHealthMixin
@@ -74,3 +75,15 @@ class PredictionScanner(SourceHealthMixin):
             logger.error(f"[PredictionScanner] 保存失败: {e}")
         finally:
             session.close()
+
+
+def prediction_scan_due(session, now: datetime | None = None) -> bool:
+    """小时门控(spec 2026-08-28 §2):表内最新快照距 now ≥ SCAN_INTERVALS['prediction']
+    分钟才到点。基准取 DB 不取内存——重启不丢节拍;Gamma 全挂那轮没写快照,
+    下轮 5 分钟 scan_cycle 自动重试(自愈,优于独立小时 job)。"""
+    interval = max(1, int(config.SCAN_INTERVALS.get("prediction", 60)))
+    latest = session.query(func.max(PredictionMarket.timestamp)).scalar()
+    if latest is None:
+        return True
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    return now - latest >= timedelta(minutes=interval)
