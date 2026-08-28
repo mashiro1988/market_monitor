@@ -1,7 +1,7 @@
 # Polymarket × 事件池合并设计稿(预测市场并入研究模块)
 
-版本:v1.0(2026-08-28,四问拍板+五节逐节确认后落盘)
-状态:待实施,分支 feat/polymarket-event-pool
+版本:v1.1(2026-08-28,四问拍板+五节逐节确认后落盘;实施中收敛三处:dry_run 取消/窗口"全部"=1年/找后继入口并入单事件按钮)
+状态:已实施(2026-08-28),实施计划 docs/superpowers/plans/2026-08-28-polymarket-event-pool-merge.md,分支 feat/polymarket-event-pool
 上游:PENDING.md「预测市场 × 事件池联动」条目;docs/specs/news-research-phase1-event-pool.md(事件池一期);docs/specs/2026-08-13-pool-sweep-design.md(提案确认制交互范式)
 
 ---
