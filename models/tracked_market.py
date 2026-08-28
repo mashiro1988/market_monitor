@@ -14,6 +14,9 @@ class TrackedMarket(Base):
     id = Column(Integer, primary_key=True, index=True)
     kind = Column(String(16), nullable=False)
     identifier = Column(String(255), nullable=False)
+    # 线归属(spec 2026-08-28 §1):宏观/加密两池是独立页面,跟踪项要知道住哪个页面。
+    # 存量默认 macro(现存种子全为 Fed/通胀/地缘题材)。
+    market = Column(String(8), nullable=False, default="macro")
     display_name = Column(String(255), nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
     # 软删除墓碑：用户删除时置 True（行保留），让 seed 重启时不会把它当"缺失"补种回来。

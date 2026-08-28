@@ -111,11 +111,13 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
                 # 历史标注的窗口级三类从行为段 human_class 反向回填（幂等，见函数注释）
                 backfill_annotation_window_class(conn)
 
-        # tracked_markets：补软删除墓碑列（删除留行，避免 seed 重启把它补种回来）。
+        # tracked_markets：补软删除墓碑列 + 线归属列（2026-08-28 事件池合并：存量默认宏观）。
         if "tracked_markets" in table_names:
             existing = {col["name"] for col in inspector.get_columns("tracked_markets")}
             if "dismissed" not in existing:
                 conn.execute(text("ALTER TABLE tracked_markets ADD COLUMN dismissed BOOLEAN NOT NULL DEFAULT 0"))
+            if "market" not in existing:
+                conn.execute(text("ALTER TABLE tracked_markets ADD COLUMN market VARCHAR(8) NOT NULL DEFAULT 'macro'"))
 
         # prediction_markets：补来源跟踪项列（图表按跟踪项软删状态精确过滤；旧快照为 NULL，走断流启发式）。
         if "prediction_markets" in table_names:
