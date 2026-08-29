@@ -44,7 +44,7 @@ def _yes_probability(markets: list) -> float | None:
     return None
 
 
-def _candidate(event: dict, min_volume: float | None = None) -> dict | None:
+def _candidate(event: dict) -> dict | None:
     """public-search 事件 → 提案候选。剔已关闭/未活跃/低交易量;布尔字段可能是字符串,
     复用 PolymarketSource 的判定。"""
     if not isinstance(event, dict):
@@ -59,8 +59,7 @@ def _candidate(event: dict, min_volume: float | None = None) -> dict | None:
         volume = float(event.get("volume") or 0)
     except (TypeError, ValueError):
         volume = 0.0
-    floor = float(config.POLYMARKET.get("proposal_min_volume", 10_000)) if min_volume is None else min_volume
-    if volume < floor:
+    if volume < float(config.POLYMARKET.get("proposal_min_volume", 10_000)):
         return None
     markets = event.get("markets") if isinstance(event.get("markets"), list) else []
     return {
@@ -378,20 +377,3 @@ def apply_market_proposals(session: Session, event_type: str, items: list[dict])
                 event_type, len(added), len(revived), linked, len(skipped))
     return {"event_type": event_type, "added": added, "revived": revived,
             "linked": linked, "skipped": skipped}
-
-
-def search_markets(query: str) -> list[dict]:
-    """手动搜索通道(spec §3):Gamma 搜索代理,不剔价格类、不设交易量门槛(人是有意找的),
-    只剔已关闭/未活跃。"""
-    query = (query or "").strip()
-    if not query:
-        return []
-    client = PolymarketGammaClient(
-        config.POLYMARKET.get("gamma_url", "https://gamma-api.polymarket.com"),
-        config.proxies())
-    results = []
-    for event_payload in client.search_events(query, limit_per_type=10):
-        c = _candidate(event_payload, min_volume=0.0)
-        if c is not None:
-            results.append(c)
-    return results[:10]

@@ -170,12 +170,3 @@ def test_market_sweep_apply_and_event_markets_roundtrip(client, monkeypatch):
                     json={"reason": "试摘"})
     assert r.status_code == 200
     assert client.get(f"/api/research/events/{eid}/markets").json()["items"] == []
-
-
-def test_predictions_search_proxy(client, monkeypatch):
-    from services import market_sweep
-    monkeypatch.setattr(market_sweep, "search_markets", lambda q: [{
-        "slug": "s", "title": "T?", "description": "", "volume": 1.0,
-        "end_date": "2026-01-01", "market_count": 1, "current_probability": 0.5}])
-    r = client.get("/api/predictions/search", params={"q": "fed"})
-    assert r.status_code == 200 and r.json()[0]["slug"] == "s"

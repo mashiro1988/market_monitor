@@ -429,16 +429,6 @@ export type MarketProposal = {
   reason: string;
 };
 
-export type MarketSearchResult = {
-  slug: string;
-  title: string;
-  description: string;
-  volume: number | null;
-  end_date: string;
-  market_count: number;
-  current_probability: number | null;
-};
-
 export type MarketSweepApplyRequest = {
   event_type: string;
   items: MarketProposal[];

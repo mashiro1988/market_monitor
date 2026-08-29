@@ -16,7 +16,8 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 export function SelectControl({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: { label: string; value: string }[] }) {
   return (
     <label className="field">
-      <span>{label}</span>
+      {/* 空 label = 紧凑形态(嵌在 panel-head 等横排里,免得多出一行标签把行高撑歪) */}
+      {label ? <span>{label}</span> : null}
       <select value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => (
           <option key={option.value} value={option.value}>{option.label}</option>

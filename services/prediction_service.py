@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import config
@@ -262,12 +263,44 @@ def get_predictions(session: Session, hours: int = 24, search: str | None = None
     return PredictionsResponse(markets=markets, latest_timestamp=timestamp_pair(latest_ts) if latest_ts else None)
 
 
-def get_market_history(session: Session, market_id: str, hours: int = 24,
-                       market: str | None = None) -> list[PredictionRow]:
-    rows = [
-        row for row in load_prediction_rows(session, hours, market=market)
-        if row.market_id == market_id
-    ]
+def get_market_history(session: Session, market_id: str, hours: int = 24) -> list[PredictionRow]:
+    """单市场历史:按 market_id 走索引取数(2026-08-29 查询下推——旧实现复用
+    load_prediction_rows 整窗全捞再挑一个市场,30 天×5min 存量下每张图表都是几十万行
+    全表扫,单核服务器上事件详情曲线会转半天)。可见性判定与 load_prediction_rows
+    同规则、范围缩到单市场:有 origin → 按跟踪项软删精确判(tag 等非 slug 不算活);
+    无 origin(旧数据)→ 断流启发式,基准取窗口内全表最新快照。"""
+    hours = max(1, min(int(hours or 24), 24 * 366))
+    cutoff = utc_now_naive() - timedelta(hours=hours)
+    rows = (
+        session.query(PredictionMarket)
+        .filter(
+            PredictionMarket.market_id == market_id,
+            PredictionMarket.timestamp >= cutoff,
+        )
+        .order_by(PredictionMarket.timestamp.asc())
+        .all()
+    )
+    if not rows:
+        return []
+    origins = {row.origin for row in rows if row.origin}
+    if origins:
+        active_keys = {
+            f"{t.kind}:{t.identifier}"
+            for t in session.query(TrackedMarket.kind, TrackedMarket.identifier)
+            .filter(TrackedMarket.dismissed.is_(False), TrackedMarket.kind == "slug")
+            .all()
+        }
+        if not (origins & active_keys):
+            return []
+    else:
+        latest_ts = (
+            session.query(func.max(PredictionMarket.timestamp))
+            .filter(PredictionMarket.timestamp >= cutoff)
+            .scalar()
+        )
+        grace = timedelta(minutes=max(1, int(config.PREDICTION_ACTIVE_GRACE_MINUTES)))
+        if latest_ts is not None and rows[-1].timestamp < latest_ts - grace:
+            return []
     return [_row_schema(row) for row in rows]
 
 

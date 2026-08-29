@@ -140,6 +140,8 @@ a {
 
 .toolbar {
   margin-bottom: 16px;
+  /* 带标签的控件(.field 标签在上)比按钮高:底对齐让按钮贴住输入行,居中会浮在半空 */
+  align-items: flex-end;
 }
 
 .panel,

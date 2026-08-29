@@ -5,10 +5,7 @@ import { MarketPricingTab } from "./MarketPricingTab";
 
 vi.mock("../api/client", () => ({
   api: {
-    predictions: vi.fn().mockResolvedValue({ markets: [], latest_timestamp: null }),
-    predictionFamilies: vi.fn().mockResolvedValue([]),
     predictionTracked: vi.fn().mockResolvedValue([]),
-    predictionSearch: vi.fn().mockResolvedValue([]),
     predictionHistory: vi.fn().mockResolvedValue([]),
     researchEvents: vi.fn().mockResolvedValue({ items: [] }),
     researchMarketSweep: vi.fn(),
@@ -29,10 +26,12 @@ function wrap(ui: React.ReactElement) {
 }
 
 describe("MarketPricingTab", () => {
-  it("渲染提案按钮、常设观测与空态", async () => {
+  it("精简后只剩提案按钮与跟踪管理(2026-08-29 用户反馈:常设观测/手动搜索退役)", async () => {
     wrap(<MarketPricingTab eventType="macro" />);
     expect(screen.getByText("找市场提案")).toBeTruthy();
-    expect(screen.getByText("常设观测")).toBeTruthy();
-    expect(await screen.findByText("本线暂无常设市场")).toBeTruthy();
+    expect(await screen.findByText("跟踪管理")).toBeTruthy();
+    expect(screen.queryByText("常设观测")).toBeNull();
+    expect(screen.queryByText(/手动搜索/)).toBeNull();
+    expect(screen.queryByText(/显示名/)).toBeNull();
   });
 });

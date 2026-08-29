@@ -26,9 +26,7 @@ import type {
   Page,
   SectorLeaderboardResponse,
   SectorTokensResponse,
-  PredictionFamily,
   PredictionRow,
-  PredictionsResponse,
   PriceRule,
   PriceWindow,
   TaskStatus,
@@ -129,14 +127,10 @@ export const api = {
     page_size?: number;
   }) => request<NewsResponse>(`/crypto/news${buildQuery(params)}`),
   cryptoNewsSources: () => request<NewsSourceMeta[]>("/crypto/news/sources"),
-  predictions: (params: { hours?: number; search?: string; market?: string }) =>
-    request<PredictionsResponse>(`/predictions${buildQuery(params)}`),
-  predictionFamilies: (params: { hours?: number; search?: string; market?: string }) =>
-    request<PredictionFamily[]>(`/predictions/families${buildQuery(params)}`),
+  // /predictions 与 /predictions/families 两个聚合读接口保留在后端但前端不再消费
+  // (2026-08-29 常设观测区退役,用户哲学=先有事件才有概率观测;曲线只走事件详情)
   predictionHistory: (marketId: string, hours: number) =>
     request<PredictionRow[]>(`/predictions/${encodeURIComponent(marketId)}/history${buildQuery({ hours })}`),
-  predictionSearch: (q: string) =>
-    request<import("./types").MarketSearchResult[]>(`/predictions/search${buildQuery({ q })}`),
   predictionTracked: (market?: string) =>
     request<TrackedMarket[]>(`/predictions/tracked${buildQuery({ market })}`),
   createPredictionTracked: (payload: TrackedMarketCreatePayload) =>

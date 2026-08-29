@@ -30,7 +30,6 @@ export function TrackedMarketsPanel({ eventType }: { eventType: "macro" | "crypt
   });
 
   const [identifier, setIdentifier] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
@@ -45,14 +44,12 @@ export function TrackedMarketsPanel({ eventType }: { eventType: "macro" | "crypt
       api.createPredictionTracked({
         kind: "slug",
         identifier: resolvedId,
-        display_name: displayName.trim() || null,
         market: eventType
       }),
     onSuccess: (row) => {
       setSuccessMsg(`已添加 ${row.kind}: ${row.identifier}`);
       setErrorMsg("");
       setIdentifier("");
-      setDisplayName("");
       invalidate();
     },
     onError: (err) => {
@@ -121,12 +118,6 @@ export function TrackedMarketsPanel({ eventType }: { eventType: "macro" | "crypt
             setSuccessMsg("");
           }}
           placeholder="fed-decision-in-june-825"
-        />
-        <TextInput
-          label="显示名（可选）"
-          value={displayName}
-          onChange={setDisplayName}
-          placeholder="2026 年 6 月 FOMC"
         />
         <Button onClick={submit} disabled={create.isPending}>
           {create.isPending ? "添加中..." : "添加"}

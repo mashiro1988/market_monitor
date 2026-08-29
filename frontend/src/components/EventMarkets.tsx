@@ -77,7 +77,7 @@ export function EventMarkets({ eventId, eventType }: {
     <div className="panel">
       <div className="panel-head">
         <h2>市场定价</h2>
-        <SelectControl label="窗口" value={hours} onChange={setHours}
+        <SelectControl label="" value={hours} onChange={setHours}
                        options={predictionWindowOptions} />
         <Button kind="secondary" disabled={sweep.isPending} onClick={() => sweep.mutate()}>
           {sweep.isPending ? "找市场中…" : "找市场提案"}

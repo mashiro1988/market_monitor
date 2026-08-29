@@ -81,17 +81,6 @@ class TrackedMarketUpdate(BaseModel):
     notes: str | None = None
 
 
-class MarketSearchResult(BaseModel):
-    """手动搜索通道的 Gamma 候选(不剔价格类,spec §3)。"""
-    slug: str
-    title: str = ""
-    description: str = ""
-    volume: float | None = None
-    end_date: str = ""
-    market_count: int = 1
-    current_probability: float | None = None
-
-
 class EventMarketItem(BaseModel):
     """事件详情市场卡(spec §5):跟踪项 + 旗下市场最新摘要 + 断流语义徽章素材。"""
     link_id: int

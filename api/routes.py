@@ -38,7 +38,6 @@ from schemas.news import NewsItemSchema, NewsResponse, NewsSourceMeta
 from schemas.predictions import (
     EventMarketItem,
     EventMarketsResponse,
-    MarketSearchResult,
     PredictionFamily,
     PredictionRow,
     PredictionsResponse,
@@ -250,15 +249,6 @@ def predictions(hours: int = 24, search: str | None = None, market: str | None =
 def prediction_families(hours: int = 24, search: str | None = None, market: str | None = None,
                         db: Session = Depends(get_db)) -> list[PredictionFamily]:
     return prediction_service.get_prediction_families(db, hours=hours, search=search, market=market)
-
-
-@router.get("/predictions/search", response_model=list[MarketSearchResult])
-def predictions_search(q: str, db: Session = Depends(get_db)) -> list[MarketSearchResult]:
-    """手动搜索通道(spec 2026-08-28 §3):Gamma 搜索代理,不剔价格类。"""
-    try:
-        return [MarketSearchResult(**c) for c in market_sweep.search_markets(q)]
-    except Exception as exc:
-        raise ApiError("SEARCH_FAILED", f"Polymarket 搜索失败: {exc}", status_code=502) from exc
 
 
 @router.get("/predictions/tracked", response_model=list[TrackedMarketSchema])
