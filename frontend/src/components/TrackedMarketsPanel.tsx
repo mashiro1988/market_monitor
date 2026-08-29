@@ -16,11 +16,17 @@ function looksLikeQuestion(input: string): boolean {
   return /\s/.test(input) || input.includes("?") || input.includes("？");
 }
 
-export function TrackedMarketsPanel() {
+/** 跟踪管理(2026-08-28 迁入池页市场定价页签):按线过滤,加「归属事件」列——
+ *  挂接/摘下直接在表里操作,人工通道 link_source=human。 */
+export function TrackedMarketsPanel({ eventType }: { eventType: "macro" | "crypto" }) {
   const queryClient = useQueryClient();
   const list = useQuery({
-    queryKey: ["prediction-tracked"],
-    queryFn: () => api.predictionTracked()
+    queryKey: ["prediction-tracked", eventType],
+    queryFn: () => api.predictionTracked(eventType)
+  });
+  const activeEvents = useQuery({
+    queryKey: ["research-events", "active", eventType],
+    queryFn: () => api.researchEvents({ status: "active", event_type: eventType })
   });
 
   const [identifier, setIdentifier] = useState("");
@@ -28,19 +34,26 @@ export function TrackedMarketsPanel() {
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["prediction-tracked"] });
+    void queryClient.invalidateQueries({ queryKey: ["event-markets"] });
+    void queryClient.invalidateQueries({ queryKey: ["research-events"] });
+  };
+
   const create = useMutation({
     mutationFn: (resolvedId: string) =>
       api.createPredictionTracked({
         kind: "slug",
         identifier: resolvedId,
-        display_name: displayName.trim() || null
+        display_name: displayName.trim() || null,
+        market: eventType
       }),
     onSuccess: (row) => {
       setSuccessMsg(`已添加 ${row.kind}: ${row.identifier}`);
       setErrorMsg("");
       setIdentifier("");
       setDisplayName("");
-      queryClient.invalidateQueries({ queryKey: ["prediction-tracked"] });
+      invalidate();
     },
     onError: (err) => {
       setSuccessMsg("");
@@ -73,8 +86,23 @@ export function TrackedMarketsPanel() {
 
   const remove = useMutation({
     mutationFn: (row: TrackedMarket) => api.deletePredictionTracked(row.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["prediction-tracked"] })
+    onSuccess: invalidate
   });
+
+  const attach = useMutation({
+    mutationFn: ({ eventId, trackedId }: { eventId: number; trackedId: number }) =>
+      api.researchEventMarketAttach(eventId, trackedId),
+    onSuccess: () => { setErrorMsg(""); invalidate(); },
+    onError: () => setErrorMsg("挂接失败")
+  });
+
+  const detach = useMutation({
+    mutationFn: (linkId: number) => api.researchEventMarketDetach(linkId),
+    onSuccess: () => { setErrorMsg(""); invalidate(); },
+    onError: () => setErrorMsg("摘下失败")
+  });
+
+  const eventOptions = activeEvents.data?.items ?? [];
 
   return (
     <details className="panel tracked-panel">
@@ -119,9 +147,9 @@ export function TrackedMarketsPanel() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>类型</th>
                 <th>Identifier</th>
                 <th>显示名</th>
+                <th>归属事件</th>
                 <th>启用</th>
                 <th>操作</th>
               </tr>
@@ -129,9 +157,33 @@ export function TrackedMarketsPanel() {
             <tbody>
               {(list.data ?? []).map((row) => (
                 <tr key={row.id}>
-                  <td>{row.kind}</td>
                   <td><code>{row.identifier}</code></td>
                   <td>{row.display_name || "—"}</td>
+                  <td>
+                    <span style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                      {(row.events ?? []).map((e) => (
+                        <span key={e.link_id} className="s-badge mid" title={e.name}>
+                          #{e.display_no} {e.name}
+                          <button type="button" className="link-button" title="摘下(留痕)"
+                                  disabled={detach.isPending}
+                                  onClick={() => detach.mutate(e.link_id)}>×</button>
+                        </span>
+                      ))}
+                      <select value="" title="挂接到事件"
+                              disabled={attach.isPending || !eventOptions.length}
+                              onChange={(ev) => {
+                                const eid = Number(ev.target.value);
+                                if (eid) attach.mutate({ eventId: eid, trackedId: row.id });
+                              }}>
+                        <option value="">挂接→</option>
+                        {eventOptions
+                          .filter((e) => !(row.events ?? []).some((l) => l.event_id === e.id))
+                          .map((e) => (
+                            <option key={e.id} value={e.id}>#{e.display_no} {e.name}</option>
+                          ))}
+                      </select>
+                    </span>
+                  </td>
                   <td>
                     <input
                       type="checkbox"

@@ -133,7 +133,7 @@ LOG_COMPRESSION = os.getenv("LOG_COMPRESSION", "zip")
 SCAN_INTERVALS = {
     "price": 5,
     "news": 5,
-    "prediction": 5,
+    "prediction": 60,   # 2026-08-28 起小时级:降频+永久保留替代"5min+30天滚动删除"
 }
 # 游标同步"至少回看"地板（小时，两源共用）：平时每轮固定回看 24h，晚到 ≤24h 的 bar 自动进库
 # （原 gap_repair 的覆盖搬进主路径）；停机更久时窗口按库内游标自动拉长（见 sync_window_start）。
@@ -163,7 +163,10 @@ PRICE_SOURCE_ALERT_COOLDOWN_MINUTES = int(os.getenv("PRICE_SOURCE_ALERT_COOLDOWN
 # 预测市场图表的「活跃」宽限期（分钟）：最后一笔快照落后于表内最新快照超过该值的市场，
 # 视为已停止跟踪（软删除后快照断流），整体从 /predictions 与 families 图表消失。
 # 基准取表内最新快照时间而非墙钟，调度器宕机时不会误杀全部市场。
-PREDICTION_ACTIVE_GRACE_MINUTES = int(os.getenv("PREDICTION_ACTIVE_GRACE_MINUTES", "30"))
+PREDICTION_ACTIVE_GRACE_MINUTES = int(os.getenv(
+    "PREDICTION_ACTIVE_GRACE_MINUTES",
+    str(SCAN_INTERVALS["prediction"] * 2 + 30),   # 小时扫描下=150:单次抓取失败不掉图
+))
 
 # 「跨资产走势」净值基准：取窗口起始时刻之前最后一笔收盘作基准，向前回看上限（天）。
 MARKET_HISTORY_BASELINE_LOOKBACK_DAYS = int(os.getenv("MARKET_HISTORY_BASELINE_LOOKBACK_DAYS", "7"))
@@ -466,6 +469,9 @@ POLYMARKET = {
     "enabled": True,
     "api_url": "https://clob.polymarket.com",
     "gamma_url": "https://gamma-api.polymarket.com",
+    # AI 提案管线的垃圾市场门槛(USD):public-search 候选低于此交易量直接不要。
+    # 手动搜索通道不受此限(人是有意找的)。
+    "proposal_min_volume": 10_000,
     # 手动指定的 market/event slug（优先跟踪；event slug 会展开为其 markets；无效 slug 静默忽略）
     # market 验证: https://gamma-api.polymarket.com/markets?slug=<slug>
     # event 验证: https://gamma-api.polymarket.com/events/slug/<slug>
@@ -745,6 +751,6 @@ DATA_RETENTION = {
     # (历史:2026-07-09 曾拍 30→90 给共振分 S 校准留基线,该需求被永久保留自然覆盖。)
     "price_snapshots_days": None,   # 永久
     "news_items_days": None,        # 永久
-    "prediction_markets_days": 30,  # 预测市场快照保留天数
+    "prediction_markets_days": None,  # 2026-08-28 起永久(小时级快照,年增量约 30 万行)
     "alert_logs_days": 90,          # 告警日志保留天数
 }

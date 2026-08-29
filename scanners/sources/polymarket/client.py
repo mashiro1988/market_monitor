@@ -61,6 +61,17 @@ class PolymarketGammaClient:
             return [market]
         return self.get_event_markets_by_slug(slug)
 
+    def search_events(self, query: str, limit_per_type: int = 5) -> list[dict]:
+        """public-search:按英文关键词搜事件(spec 2026-08-28 §0 实测)。
+        返回事件 dict 列表(含嵌套 markets);非 200 或坏形状返回空列表,网络异常上抛。"""
+        url = f"{self.gamma_url}/public-search"
+        response = self.request_with_retry(url, {"q": query, "limit_per_type": limit_per_type})
+        if response and response.status_code == 200:
+            data = response.json()
+            events = data.get("events", []) if isinstance(data, dict) else []
+            return events if isinstance(events, list) else []
+        return []
+
     def health_check(self) -> bool:
         try:
             url = f"{self.gamma_url}/markets"

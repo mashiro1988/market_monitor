@@ -206,8 +206,9 @@ def run_scan_once():
         create_tables(run_migrations=False, seed_defaults=False)
 
         from alerts.engine import AlertEngine
+        from scanners.base import SourceFetchStatus
         from scanners.news_scanner import NewsScanner
-        from scanners.prediction_scanner import PredictionScanner
+        from scanners.prediction_scanner import PredictionScanner, prediction_scan_due
         from scanners.price_scanner import PriceScanner
 
         alert_engine = AlertEngine()
@@ -231,9 +232,22 @@ def run_scan_once():
         _tag_crypto_news()
         _link_new_news()
 
-        logger.info("[Scan] 开始预测市场扫描...")
         pred_scanner = PredictionScanner()
-        pred_records = pred_scanner.scan()
+        gate_session = get_session()
+        try:
+            pred_due = prediction_scan_due(gate_session)
+        finally:
+            gate_session.close()
+        if pred_due:
+            logger.info("[Scan] 开始预测市场扫描...")
+            pred_records = pred_scanner.scan()
+        else:
+            # 未到间隔:跳过但在源健康面板留"主动跳过"痕迹,不算采集异常也不算空手
+            logger.info("[Scan] 预测市场未到 {} 分钟间隔,本轮跳过",
+                        config.SCAN_INTERVALS.get("prediction", 60))
+            pred_records = []
+            pred_scanner.source_statuses = [SourceFetchStatus(
+                source="polymarket", ok=True, record_count=0, empty=False, stage="skipped")]
 
         source_statuses = {
             "price": _source_status_payload(price_scanner),
@@ -264,8 +278,8 @@ def _source_status_payload(scanner) -> list[dict]:
 def _log_source_statuses(source_statuses: dict[str, list[dict]]) -> None:
     for group, statuses in source_statuses.items():
         failed = [s for s in statuses if not s["ok"]]
-        # stage=closed 是"全品种休市主动跳过"，不是 0 行异常，不进告警噪音
-        empty = [s for s in statuses if s["ok"] and s["empty"] and s.get("stage") != "closed"]
+        # stage=closed 是"全品种休市主动跳过"、skipped 是"未到扫描间隔"，都不是 0 行异常，不进告警噪音
+        empty = [s for s in statuses if s["ok"] and s["empty"] and s.get("stage") not in ("closed", "skipped")]
         if failed:
             names = ", ".join(f"{s['source']} ({s['error']})" for s in failed)
             logger.warning("[ScanSource] {} failed: {}", group, names)

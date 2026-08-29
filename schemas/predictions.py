@@ -24,6 +24,8 @@ class PredictionMarketSummary(BaseModel):
     volume: float | None = None
     outcomes: list[PredictionRow]
     has_shift: bool
+    # 来源跟踪项 "slug:<identifier>"(2026-08-28):前端据此把市场映射回跟踪项/挂接事件
+    origin: str | None = None
 
 
 class PredictionFamilySeries(BaseModel):
@@ -45,6 +47,14 @@ class PredictionsResponse(BaseModel):
     latest_timestamp: TimeFields | None = None
 
 
+class TrackedEventBrief(BaseModel):
+    """跟踪项挂着哪些事件(跟踪管理表归属列,2026-08-28)。"""
+    link_id: int
+    event_id: int
+    display_no: int
+    name: str
+
+
 class TrackedMarketSchema(BaseModel):
     id: int
     kind: Literal["slug"]
@@ -52,6 +62,8 @@ class TrackedMarketSchema(BaseModel):
     display_name: str | None = None
     enabled: bool
     notes: str | None = None
+    market: str = "macro"
+    events: list[TrackedEventBrief] = []
 
 
 class TrackedMarketCreate(BaseModel):
@@ -59,9 +71,41 @@ class TrackedMarketCreate(BaseModel):
     identifier: str
     display_name: str | None = None
     notes: str | None = None
+    market: Literal["macro", "crypto"] = "macro"
+    event_id: int | None = None          # 传了=添加即挂接(link_source=human)
 
 
 class TrackedMarketUpdate(BaseModel):
     enabled: bool | None = None
     display_name: str | None = None
     notes: str | None = None
+
+
+class MarketSearchResult(BaseModel):
+    """手动搜索通道的 Gamma 候选(不剔价格类,spec §3)。"""
+    slug: str
+    title: str = ""
+    description: str = ""
+    volume: float | None = None
+    end_date: str = ""
+    market_count: int = 1
+    current_probability: float | None = None
+
+
+class EventMarketItem(BaseModel):
+    """事件详情市场卡(spec §5):跟踪项 + 旗下市场最新摘要 + 断流语义徽章素材。"""
+    link_id: int
+    tracked_id: int
+    slug: str
+    display_name: str | None = None
+    market: str = "macro"
+    enabled: bool = True
+    link_source: str = "human"
+    confidence: float | None = None
+    settled: bool = False
+    waiting_first_scan: bool = False
+    markets: list[PredictionMarketSummary] = []
+
+
+class EventMarketsResponse(BaseModel):
+    items: list[EventMarketItem] = []

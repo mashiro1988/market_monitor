@@ -129,13 +129,16 @@ export const api = {
     page_size?: number;
   }) => request<NewsResponse>(`/crypto/news${buildQuery(params)}`),
   cryptoNewsSources: () => request<NewsSourceMeta[]>("/crypto/news/sources"),
-  predictions: (params: { hours?: number; search?: string }) =>
+  predictions: (params: { hours?: number; search?: string; market?: string }) =>
     request<PredictionsResponse>(`/predictions${buildQuery(params)}`),
-  predictionFamilies: (params: { hours?: number; search?: string }) =>
+  predictionFamilies: (params: { hours?: number; search?: string; market?: string }) =>
     request<PredictionFamily[]>(`/predictions/families${buildQuery(params)}`),
   predictionHistory: (marketId: string, hours: number) =>
     request<PredictionRow[]>(`/predictions/${encodeURIComponent(marketId)}/history${buildQuery({ hours })}`),
-  predictionTracked: () => request<TrackedMarket[]>("/predictions/tracked"),
+  predictionSearch: (q: string) =>
+    request<import("./types").MarketSearchResult[]>(`/predictions/search${buildQuery({ q })}`),
+  predictionTracked: (market?: string) =>
+    request<TrackedMarket[]>(`/predictions/tracked${buildQuery({ market })}`),
   createPredictionTracked: (payload: TrackedMarketCreatePayload) =>
     request<TrackedMarket>("/predictions/tracked", {
       method: "POST",
@@ -230,5 +233,28 @@ export const api = {
     request<import("./types").SweepApplyResponse>("/research/sweep/apply", {
       method: "POST",
       body: JSON.stringify({ event_type: eventType, events })
+    }),
+  // 找市场提案(2026-08-28):AI 搜索词+Gamma+配对,提案不落库;eventId 传了=单事件/找后继
+  researchMarketSweep: (eventType: "macro" | "crypto", eventId?: number) =>
+    request<import("./types").MarketSweepResponse>("/research/market-sweep", {
+      method: "POST",
+      body: JSON.stringify({ event_type: eventType, ...(eventId ? { event_id: eventId } : {}) })
+    }),
+  researchMarketSweepApply: (eventType: "macro" | "crypto", items: import("./types").MarketProposal[]) =>
+    request<import("./types").MarketSweepApplyResponse>("/research/market-sweep/apply", {
+      method: "POST",
+      body: JSON.stringify({ event_type: eventType, items })
+    }),
+  researchEventMarkets: (eventId: number) =>
+    request<import("./types").EventMarketsResponse>(`/research/events/${eventId}/markets`),
+  researchEventMarketAttach: (eventId: number, trackedId: number) =>
+    request<{ ok: boolean; link_id: number }>(`/research/events/${eventId}/markets`, {
+      method: "POST",
+      body: JSON.stringify({ tracked_id: trackedId })
+    }),
+  researchEventMarketDetach: (linkId: number, reason?: string) =>
+    request<{ ok: boolean }>(`/research/event-markets/${linkId}/detach`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason ?? null })
     })
 };

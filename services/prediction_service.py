@@ -15,6 +15,7 @@ from schemas.predictions import (
     PredictionMarketSummary,
     PredictionRow,
     PredictionsResponse,
+    TrackedEventBrief,
     TrackedMarketCreate,
     TrackedMarketSchema,
     TrackedMarketUpdate,
@@ -39,8 +40,8 @@ def _row_schema(row: PredictionMarket) -> PredictionRow:
     )
 
 
-def load_prediction_rows(session: Session, hours: int = 24) -> list[PredictionMarket]:
-    hours = max(1, min(int(hours or 24), 24 * 30))
+def load_prediction_rows(session: Session, hours: int = 24, market: str | None = None) -> list[PredictionMarket]:
+    hours = max(1, min(int(hours or 24), 24 * 366))
     cutoff = utc_now_naive() - timedelta(hours=hours)
     rows = (
         session.query(PredictionMarket)
@@ -55,15 +56,18 @@ def load_prediction_rows(session: Session, hours: int = 24) -> list[PredictionMa
     #    删除跟踪立即清图；市场结算/接口抖动导致的断流不误伤。
     # 2) 旧快照（origin 为 NULL，无法关联跟踪项）→ 断流启发式兜底：最后一笔快照落后
     #    表内最新快照超过宽限期视为已停跟踪。基准取表内最新时间而非墙钟，调度器宕机不误杀。
-    active_keys = {
-        f"{t.kind}:{t.identifier}"
-        for t in session.query(TrackedMarket.kind, TrackedMarket.identifier)
+    tracked = (
+        session.query(TrackedMarket.kind, TrackedMarket.identifier, TrackedMarket.market)
         .filter(
             TrackedMarket.dismissed.is_(False),
             TrackedMarket.kind == "slug",
         )
         .all()
-    }
+    )
+    active_keys = {f"{t.kind}:{t.identifier}" for t in tracked}
+    # 线过滤(2026-08-28):market 传入时只留该线跟踪项的市场;旧无 origin 快照算宏观
+    line_keys = ({f"{t.kind}:{t.identifier}" for t in tracked if (t.market or "macro") == market}
+                 if market else None)
     origins_by_market: dict[str, set[str]] = defaultdict(set)
     latest_by_market: dict[str, datetime] = {}
     for row in rows:
@@ -78,7 +82,11 @@ def load_prediction_rows(session: Session, hours: int = 24) -> list[PredictionMa
     def _visible(market_id: str) -> bool:
         origins = origins_by_market.get(market_id)
         if origins:
-            return bool(origins & active_keys)
+            if not (origins & active_keys):
+                return False
+            return line_keys is None or bool(origins & line_keys)
+        if line_keys is not None and market != "macro":
+            return False
         return latest_by_market[market_id] >= latest_ts - grace
 
     visible = {market_id for market_id in latest_by_market if _visible(market_id)}
@@ -185,8 +193,9 @@ def classify_market_family(question: str) -> dict | None:
     return None
 
 
-def get_prediction_families(session: Session, hours: int = 24, search: str | None = None) -> list[PredictionFamily]:
-    rows = load_prediction_rows(session, hours)
+def get_prediction_families(session: Session, hours: int = 24, search: str | None = None,
+                            market: str | None = None) -> list[PredictionFamily]:
+    rows = load_prediction_rows(session, hours, market=market)
     groups: dict[str, dict] = {}
     for row in rows:
         if str(row.outcome).lower() != "yes":
@@ -221,8 +230,9 @@ def get_prediction_families(session: Session, hours: int = 24, search: str | Non
     return sorted(result, key=lambda item: item.name)
 
 
-def get_predictions(session: Session, hours: int = 24, search: str | None = None) -> PredictionsResponse:
-    rows = load_prediction_rows(session, hours)
+def get_predictions(session: Session, hours: int = 24, search: str | None = None,
+                    market: str | None = None) -> PredictionsResponse:
+    rows = load_prediction_rows(session, hours, market=market)
     latest = latest_predictions(rows)
     by_market: dict[str, list[PredictionMarket]] = defaultdict(list)
     for row in latest:
@@ -242,6 +252,7 @@ def get_predictions(session: Session, hours: int = 24, search: str | None = None
                 market_id=market_id,
                 question=ordered[0].question,
                 volume=ordered[0].volume,
+                origin=ordered[0].origin,
                 outcomes=[_row_schema(row) for row in ordered],
                 has_shift=has_shift,
             )
@@ -251,15 +262,16 @@ def get_predictions(session: Session, hours: int = 24, search: str | None = None
     return PredictionsResponse(markets=markets, latest_timestamp=timestamp_pair(latest_ts) if latest_ts else None)
 
 
-def get_market_history(session: Session, market_id: str, hours: int = 24) -> list[PredictionRow]:
+def get_market_history(session: Session, market_id: str, hours: int = 24,
+                       market: str | None = None) -> list[PredictionRow]:
     rows = [
-        row for row in load_prediction_rows(session, hours)
+        row for row in load_prediction_rows(session, hours, market=market)
         if row.market_id == market_id
     ]
     return [_row_schema(row) for row in rows]
 
 
-def _tracked_to_schema(row: TrackedMarket) -> TrackedMarketSchema:
+def _tracked_to_schema(row: TrackedMarket, events: list[dict] | None = None) -> TrackedMarketSchema:
     return TrackedMarketSchema(
         id=row.id,
         kind=row.kind,
@@ -267,20 +279,22 @@ def _tracked_to_schema(row: TrackedMarket) -> TrackedMarketSchema:
         display_name=row.display_name,
         enabled=row.enabled,
         notes=row.notes,
+        market=row.market or "macro",
+        events=[TrackedEventBrief(**e) for e in (events or [])],
     )
 
 
-def list_tracked_markets(session: Session) -> list[TrackedMarketSchema]:
-    rows = (
-        session.query(TrackedMarket)
-        .filter(
-            TrackedMarket.dismissed.is_(False),
-            TrackedMarket.kind == "slug",
-        )
-        .order_by(TrackedMarket.kind, TrackedMarket.identifier)
-        .all()
+def list_tracked_markets(session: Session, market: str | None = None) -> list[TrackedMarketSchema]:
+    query = session.query(TrackedMarket).filter(
+        TrackedMarket.dismissed.is_(False),
+        TrackedMarket.kind == "slug",
     )
-    return [_tracked_to_schema(r) for r in rows]
+    if market:
+        query = query.filter(TrackedMarket.market == market)
+    rows = query.order_by(TrackedMarket.kind, TrackedMarket.identifier).all()
+    from services import event_markets
+    briefs = event_markets.links_for_tracked(session, [int(r.id) for r in rows])
+    return [_tracked_to_schema(r, briefs.get(int(r.id))) for r in rows]
 
 
 def create_tracked_market(session: Session, payload: TrackedMarketCreate) -> TrackedMarketSchema:
@@ -293,33 +307,39 @@ def create_tracked_market(session: Session, payload: TrackedMarketCreate) -> Tra
         .filter(TrackedMarket.kind == payload.kind, TrackedMarket.identifier == identifier)
         .first()
     )
-    if exists:
-        if exists.dismissed:
-            # 之前被软删的同名项 → 复活而不是报重复。
-            exists.dismissed = False
-            exists.enabled = True
-            new_name = (payload.display_name or "").strip()
-            if new_name:
-                exists.display_name = new_name
-            new_notes = (payload.notes or "").strip()
-            if new_notes:
-                exists.notes = new_notes
-            session.commit()
-            session.refresh(exists)
-            return _tracked_to_schema(exists)
+    if exists is not None and not exists.dismissed:
         raise ValueError("duplicate")
 
-    row = TrackedMarket(
-        kind=payload.kind,
-        identifier=identifier,
-        display_name=(payload.display_name or "").strip() or None,
-        notes=(payload.notes or "").strip() or None,
-        enabled=True,
-    )
-    session.add(row)
+    if exists is not None:
+        # 之前被软删的同名项 → 复活而不是报重复;线归属按本次添加意图覆盖。
+        exists.dismissed = False
+        exists.enabled = True
+        exists.market = payload.market
+        new_name = (payload.display_name or "").strip()
+        if new_name:
+            exists.display_name = new_name
+        new_notes = (payload.notes or "").strip()
+        if new_notes:
+            exists.notes = new_notes
+        row = exists
+    else:
+        row = TrackedMarket(
+            kind=payload.kind,
+            identifier=identifier,
+            market=payload.market,
+            display_name=(payload.display_name or "").strip() or None,
+            notes=(payload.notes or "").strip() or None,
+            enabled=True,
+        )
+        session.add(row)
     session.commit()
     session.refresh(row)
-    return _tracked_to_schema(row)
+    # 添加即挂接(spec §4):人工通道,link_source=human;事件非法抛 ValueError → 路由译 400
+    from services import event_markets
+    if payload.event_id:
+        event_markets.attach_market(session, int(payload.event_id), int(row.id), source="human")
+    briefs = event_markets.links_for_tracked(session, [int(row.id)])
+    return _tracked_to_schema(row, briefs.get(int(row.id)))
 
 
 def update_tracked_market(session: Session, tracked_id: int, payload: TrackedMarketUpdate) -> TrackedMarketSchema | None:

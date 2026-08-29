@@ -484,3 +484,45 @@ def test_fresh_price_bar_alerts(monkeypatch):
                     price=29026.5, timestamp=fresh_ts)
     ])
     assert sent, "新鲜 bar 应正常告警"
+
+
+def test_prediction_shift_reads_hourly_baseline(monkeypatch):
+    """小时扫描(2026-08-28)下 window_minutes=15 的回溯自然取到上一小时快照:
+    阈值 5pp 不动,语义从"15 分钟跳变"变为"逐小时跳变"。评估代码零改动,本用例钉住兼容行为。"""
+    from models.prediction import PredictionMarket
+    from services.time_utils import utc_now_naive
+
+    engine_db = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine_db)
+    Session = sessionmaker(bind=engine_db)
+    seed = Session()
+    now = utc_now_naive()
+    seed.add(PredictionMarket(timestamp=now - timedelta(minutes=60), market_id="m1",
+                              question="q?", outcome="Yes", probability=0.50))
+    seed.add(PredictionMarket(timestamp=now, market_id="m1", question="q?",
+                              outcome="Yes", probability=0.57, prev_probability=0.50))
+    seed.commit()
+    seed.close()
+
+    engine = AlertEngine.__new__(AlertEngine)
+    engine.rules = [
+        AlertRule(
+            name="prediction_shift",
+            rule_type="prediction_shift",
+            params={"threshold_pct": 5.0, "window_minutes": 15},
+            channels=["wechat_work"],
+            cooldown_minutes=0,
+            enabled=True,
+        )
+    ]
+    monkeypatch.setattr(engine_module, "get_session", lambda: Session())
+    monkeypatch.setattr(engine, "_is_in_cooldown", lambda *a: False)
+    sent = []
+    monkeypatch.setattr(engine, "_dispatch", lambda rule, title, content: sent.append((title, content)))
+
+    engine.evaluate_predictions([
+        PredictionRecord(market_id="m1", question="q?", outcome="Yes", probability=0.57)
+    ])
+
+    assert len(sent) == 1
+    assert "7.0" in sent[0][1]        # 逐小时基准 0.50 → 0.57 = 7.0pp

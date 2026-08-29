@@ -152,5 +152,5 @@ def test_config_default_retention_is_permanent_for_news_and_prices():
     import config
     assert config.DATA_RETENTION["news_items_days"] is None
     assert config.DATA_RETENTION["price_snapshots_days"] is None
-    assert config.DATA_RETENTION["prediction_markets_days"] == 30    # 不动
+    assert config.DATA_RETENTION["prediction_markets_days"] is None  # 2026-08-28 起永久
     assert config.DATA_RETENTION["alert_logs_days"] == 90            # 不动

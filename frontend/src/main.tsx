@@ -9,7 +9,6 @@ import { BehaviorPage } from "./pages/BehaviorPage";
 import { CryptoNewsPage } from "./pages/CryptoNewsPage";
 import { MarketPage } from "./pages/MarketPage";
 import { NewsPage } from "./pages/NewsPage";
-import { PredictionsPage } from "./pages/PredictionsPage";
 import { CryptoResearchPage, ResearchPage } from "./pages/ResearchPage";
 import { SectorRotationPage } from "./pages/SectorRotationPage";
 import "./styles.css";
@@ -33,7 +32,6 @@ const router = createBrowserRouter([
       { path: "sectors", element: <SectorRotationPage /> },
       { path: "news", element: <NewsPage /> },
       { path: "crypto-news", element: <CryptoNewsPage /> },
-      { path: "predictions", element: <PredictionsPage /> },
       { path: "alerts", element: <AlertsPage /> },
       { path: "annotations", element: <AnnotationsPage /> },
       { path: "behavior", element: <BehaviorPage /> },

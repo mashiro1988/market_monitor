@@ -103,3 +103,17 @@ def test_create_reactivates_dismissed(session):
     assert again.identifier == "foo"
     listed = prediction_service.list_tracked_markets(session)
     assert len(listed) == 1 and listed[0].identifier == "foo"
+
+
+def test_tracked_schema_carries_line_and_event_briefs(session):
+    """列表带线归属与挂接事件简报;create 支持 market 与顺手挂接 event_id(2026-08-28)。"""
+    from models.research import ResearchEvent
+    event = ResearchEvent(name="测试事件", event_type="crypto", status="active", display_no=1)
+    session.add(event); session.commit()
+    created = prediction_service.create_tracked_market(session, TrackedMarketCreate(
+        kind="slug", identifier="crypto-slug", market="crypto", event_id=event.id))
+    assert created.market == "crypto"
+    rows = prediction_service.list_tracked_markets(session, market="crypto")
+    assert [r.identifier for r in rows] == ["crypto-slug"]
+    assert rows[0].events[0].name == "测试事件"
+    assert prediction_service.list_tracked_markets(session, market="macro") == []
