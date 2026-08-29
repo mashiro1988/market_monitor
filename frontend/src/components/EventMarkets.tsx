@@ -97,7 +97,7 @@ export function EventMarkets({ eventId, eventType }: {
       )}
       {!items.length && !sweepResult && (
         <div className="muted">
-          尚未关联市场——点「找市场提案」让 AI 去 Polymarket 找,或去市场定价页签手动搜索。
+          尚未关联市场——点「找市场提案」让 AI 去 Polymarket 找;手动路径:去市场定价页签贴 slug 添加,再用「挂接→」选本事件。
         </div>
       )}
       {items.map((item) => (

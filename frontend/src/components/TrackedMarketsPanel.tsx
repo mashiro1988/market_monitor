@@ -102,7 +102,7 @@ export function TrackedMarketsPanel({ eventType }: { eventType: "macro" | "crypt
   const eventOptions = activeEvents.data?.items ?? [];
 
   return (
-    <details className="panel tracked-panel">
+    <details className="panel tracked-panel" open>
       <summary>
         <h2>跟踪管理</h2>
         <span className="muted-text">{list.data ? `共 ${list.data.length} 条` : ""}</span>

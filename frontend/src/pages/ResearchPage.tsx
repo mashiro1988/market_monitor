@@ -8,7 +8,7 @@ import type {
 } from "../api/types";
 import { Button, PageHeader } from "../components/Controls";
 import { EventMarkets } from "../components/EventMarkets";
-import { MarketPricingTab } from "../components/MarketPricingTab";
+import { TrackedMarketsPanel } from "../components/TrackedMarketsPanel";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
 
 // ---- 纯函数(测试覆盖,见 ResearchPage.test.tsx)----
@@ -633,7 +633,9 @@ function EventPoolPage({ eventType, title, newsHref, newsLabel }: {
           </div>
         </div>
       )}
-      {tab === "markets" && <MarketPricingTab eventType={eventType} />}
+      {/* 市场定价页签=纯跟踪管理(2026-08-29 二轮反馈:找市场提案只留事件详情那一个,
+          提案对着具体事件发起才符合"先有事件才有概率观测") */}
+      {tab === "markets" && <TrackedMarketsPanel eventType={eventType} />}
       {tab === "revival" && <RevivalTab onChanged={refresh} eventType={eventType} />}
       {tab === "events" && (
         <div className="panel">

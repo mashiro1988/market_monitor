@@ -1118,6 +1118,18 @@ code {
   background: transparent;
 }
 
+/* 跟踪管理表(2026-08-29 用户反馈):归属列的下拉把行撑高,默认 vertical-align: top
+   会让勾选框/删除全贴行顶、与表头错位——改垂直居中;启用/操作两列内容短,水平也居中 */
+.tracked-panel .data-table th,
+.tracked-panel .data-table td {
+  vertical-align: middle;
+}
+
+.tracked-panel .data-table th:nth-last-child(-n + 2),
+.tracked-panel .data-table td:nth-last-child(-n + 2) {
+  text-align: center;
+}
+
 .tracked-panel > summary {
   display: flex;
   align-items: center;
