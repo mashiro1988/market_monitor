@@ -79,3 +79,177 @@ def open_positions(db, symbol: str) -> list[StrategyPosition]:
         .order_by(StrategyPosition.entry_at.asc())
         .all()
     )
+
+
+# ---------- 每日检查状态机（设计稿 §5） ----------
+
+def _last_status_kind(db, position_id: int) -> str | None:
+    """该批次最近一次 daily_ok/stop_breach 事件的 kind，用于"未破→破"转换检测。"""
+    row = (
+        db.query(StrategyEvent.kind)
+        .filter(StrategyEvent.position_id == position_id,
+                StrategyEvent.kind.in_(["daily_ok", "stop_breach"]))
+        .order_by(StrategyEvent.id.desc())
+        .first()
+    )
+    return row[0] if row else None
+
+
+def _has_event(db, position_id: int, kind: str) -> bool:
+    return (
+        db.query(StrategyEvent.id)
+        .filter(StrategyEvent.position_id == position_id, StrategyEvent.kind == kind)
+        .first()
+        is not None
+    )
+
+
+def _emit(db, *, symbol: str, kind: str, message: str, payload: dict,
+          position_id: int | None = None, push: bool = False, channel=None) -> StrategyEvent:
+    """写事件；push=True 时经企业微信发出并镜像一条 AlertLog（告警页可见）。"""
+    delivered = False
+    if push:
+        channel = channel or WeChatWorkChannel()
+        title = f"【持仓策略】{message.splitlines()[0]}"
+        delivered = bool(channel.send(title, message))
+        log = AlertLog(timestamp=_utc_now(), rule_name=RULE_NAME,
+                       message=f"{title}\n{message}"[:8000],
+                       channel="wechat_work", delivered=delivered)
+        db.add(log)
+    event = StrategyEvent(symbol=symbol, position_id=position_id, kind=kind,
+                          message=message, payload_json=json.dumps(payload, ensure_ascii=False),
+                          pushed=delivered)
+    db.add(event)
+    db.commit()
+    return event
+
+
+def _batch_state_for(pos: StrategyPosition, candles, v_used: float, settings) -> eng.BatchState:
+    return eng.batch_state(
+        entry_price=pos.entry_price, entry_at=pos.entry_at, quantity=pos.quantity,
+        candles=candles, v_used=v_used, x_soft=settings.x_soft, x_hard=settings.x_hard,
+    )
+
+
+def run_daily_check(*, db=None, symbol: str = DEFAULT_SYMBOL, channel=None) -> list[str]:
+    """每日 UTC 收盘后的核心检查。返回本次产生的事件 kind 列表（含未推送）。
+
+    执行顺序遵循清晨 housekeeping 的时间语义：先更新波动率闩锁（vol_update），
+    再逐批判定防线（stop_breach/daily_ok/b2_unlocked），末尾算减仓建议与重入场观察。
+    """
+    own = db is None
+    db = db or SessionLocal()
+    produced: list[str] = []
+    try:
+        settings = get_settings(db)
+        candles = fetch_daily_candles(symbol)
+        if not candles:
+            logger.warning(f"[strategy] {symbol} 无已确认日K，跳过本轮")
+            return produced
+
+        closes = [c.close for c in candles]
+        vols = eng.ewma_vol_series(closes, alpha=settings.ewma_alpha)
+        if not vols:
+            return produced
+        vol_latest = vols[-1]
+
+        state = db.get(StrategySymbolState, symbol)
+        if state is None:
+            state = StrategySymbolState(symbol=symbol)
+            db.add(state)
+        prev_used = state.v_used
+        new_used = eng.walk_latch([vol_latest], threshold=settings.vol_update_threshold,
+                                  seed=prev_used)[-1]
+        vol_changed = prev_used is not None and new_used != prev_used
+        state.v_used = new_used
+        state.v_used_at = _utc_now()
+        db.commit()
+
+        if vol_changed:
+            _emit(db, symbol=symbol, kind="vol_update",
+                  payload={"prev": prev_used, "new": new_used},
+                  message=f"波动率闩锁更新：{prev_used:.2%} → {new_used:.2%}")
+            produced.append("vol_update")
+
+        budget_usd = settings.capital * settings.risk_budget_pct
+        positions = open_positions(db, symbol)
+        total_occupy = 0.0
+        breach_soft_level: float | None = None
+
+        for pos in positions:
+            st = _batch_state_for(pos, candles, new_used, settings)
+            total_occupy += st.occupy_usd
+            payload = {"soft": st.soft_stop, "hard": st.hard_stop, "close": st.last_close,
+                       "anchor": st.anchor_high, "v_used": new_used}
+
+            if st.breached:
+                if _last_status_kind(db, pos.id) != "stop_breach":
+                    _emit(db, symbol=symbol, position_id=pos.id, kind="stop_breach", push=True,
+                          channel=channel, payload=payload,
+                          message=(f"{pos.batch_label} 日收盘 {st.last_close:.4f} 跌破软止损 "
+                                   f"{st.soft_stop:.4f}，按框架应清仓；已进入重入场观察（30 天）"))
+                    produced.append("stop_breach")
+                    breach_soft_level = st.soft_stop    # 仅新发生的破线上膛/刷新观察（最新覆盖，§2.6）；
+                                                        # 持续破线不重置时钟，否则过期判定永远轮不上
+            else:
+                _emit(db, symbol=symbol, position_id=pos.id, kind="daily_ok", payload=payload,
+                      message=(f"{pos.batch_label} 收盘 {st.last_close:.4f} ≥ 软止损 "
+                               f"{st.soft_stop:.4f}（余量 {st.distance_pct:+.1%}），持有"))
+                produced.append("daily_ok")
+
+            if st.locked and not _has_event(db, pos.id, "b2_unlocked"):
+                _emit(db, symbol=symbol, position_id=pos.id, kind="b2_unlocked", push=True,
+                      channel=channel, payload=payload,
+                      message=(f"{pos.batch_label} 软止损 {st.soft_stop:.4f} 已抬过成本 "
+                               f"{pos.entry_price:.4f}：锁盈，额度释放，可开始找微观确认事件"))
+                produced.append("b2_unlocked")
+
+        if breach_soft_level is not None:
+            state.reentry_level = breach_soft_level
+            state.reentry_breached_at = _utc_now()
+            db.commit()
+        still_breached_holding = breach_soft_level is None and any(
+            _last_status_kind(db, p.id) == "stop_breach" for p in positions
+        )
+
+        if vol_changed and total_occupy > budget_usd and positions:
+            unlocked = [
+                (p, _batch_state_for(p, candles, new_used, settings)) for p in positions
+            ]
+            target_qty = sum(
+                budget_usd / (p.entry_price - st.soft_stop)
+                for p, st in unlocked if p.entry_price > st.soft_stop
+            )
+            _emit(db, symbol=symbol, kind="reduce_suggest", push=True, channel=channel,
+                  payload={"total_occupy": total_occupy, "budget": budget_usd,
+                           "target_qty": target_qty},
+                  message=(f"波动率变更后占用 ${total_occupy:,.0f} 超预算 ${budget_usd:,.0f}，"
+                           f"贴预算目标持仓约 {target_qty:,.0f} 枚"))
+            produced.append("reduce_suggest")
+
+        # 重入场观察（独立于持仓存在，用户平仓后仍继续盯；先判过期再判站回，设计稿 §2.6）
+        if state.reentry_level is not None and breach_soft_level is None:
+            last_close = closes[-1]
+            aged_days = (_utc_now() - (state.reentry_breached_at or _utc_now())).days
+            if aged_days > REENTRY_WINDOW_DAYS:
+                _emit(db, symbol=symbol, kind="reentry_expired",
+                      payload={"level": state.reentry_level},
+                      message=f"重入场观察满 {REENTRY_WINDOW_DAYS} 天未站回，观察结束")
+                produced.append("reentry_expired")
+                state.reentry_level = None
+                state.reentry_breached_at = None
+                db.commit()
+            elif last_close > state.reentry_level and not still_breached_holding:
+                _emit(db, symbol=symbol, kind="reentry_ready", push=True, channel=channel,
+                      payload={"level": state.reentry_level, "close": last_close},
+                      message=(f"价格收盘 {last_close:.4f} 站回原止损线 {state.reentry_level:.4f} 上方，"
+                               f"可按计算器评估重入场（全新批次、新预算、新止损）"))
+                produced.append("reentry_ready")
+                state.reentry_level = None
+                state.reentry_breached_at = None
+                db.commit()
+
+        return produced
+    finally:
+        if own:
+            db.close()
