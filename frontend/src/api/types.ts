@@ -748,6 +748,154 @@ export type SectorTokensResponse = {
   tokens: SectorTokenRow[];
 };
 
+export type StrategyBatchReadout = {
+  id: number;
+  batch_label: string;
+  entry_at: string;
+  entry_price: number;
+  quantity: number;
+  forecast: number;
+  note: string | null;
+  anchor_high: number;
+  soft_stop: number;
+  hard_stop: number;
+  breached: boolean;
+  locked: boolean;
+  occupy_usd: number;
+  distance_pct: number;
+  pnl_usd: number;
+};
+
+export type StrategyChart = {
+  days: StrategyChartDay[];
+  soft_line: number | null[];
+  hard_current: number | null;
+  cost_lines: StrategyCostLine[];
+  anchor_point: StrategyChartPoint | null;
+  entry_markers: StrategyEntryMarker[];
+};
+
+export type StrategyChartDay = {
+  date: string;
+  close: number;
+};
+
+export type StrategyChartPoint = {
+  date: string;
+  value: number;
+};
+
+export type StrategyCostLine = {
+  label: string;
+  value: number;
+};
+
+export type StrategyEntryMarker = {
+  date: string;
+  label: string;
+  value: number;
+};
+
+export type StrategyEventSchema = {
+  id: number;
+  created_at: string;
+  symbol: string;
+  position_id: number | null;
+  kind: string;
+  message: string;
+  pushed: boolean;
+};
+
+export type StrategyOverview = {
+  symbol: string;
+  generated_at: string;
+  data_stale: boolean;
+  live_price: number | null;
+  live_price_at: string | null;
+  vol_latest: number | null;
+  v_used: number | null;
+  verdict: string;
+  budget_usd: number;
+  total_occupy_usd: number;
+  settings: StrategySettingsSchema;
+  reentry: StrategyReentry | null;
+  batches: StrategyBatchReadout[];
+  chart: StrategyChart;
+};
+
+export type StrategyPositionCreate = {
+  symbol?: string;
+  batch_label: string;
+  entry_at: string;
+  entry_price: number;
+  quantity: number;
+  forecast?: number;
+  note?: string | null;
+};
+
+export type StrategyPositionSchema = {
+  id: number;
+  symbol: string;
+  batch_label: string;
+  entry_at: string;
+  entry_price: number;
+  quantity: number;
+  forecast: number;
+  status: string;
+  closed_at: string | null;
+  close_price: number | null;
+  note: string | null;
+};
+
+export type StrategyPositionUpdate = {
+  batch_label?: string | null;
+  entry_at?: string | null;
+  entry_price?: number | null;
+  quantity?: number | null;
+  forecast?: number | null;
+  status?: string | null;
+  closed_at?: string | null;
+  close_price?: number | null;
+  note?: string | null;
+};
+
+export type StrategyReentry = {
+  level: number;
+  breached_at: string | null;
+};
+
+export type StrategyRunCheckResult = {
+  ok: boolean;
+  events: string[];
+};
+
+export type StrategySettingsSchema = {
+  capital: number;
+  risk_budget_pct: number;
+  x_soft: number;
+  x_hard: number;
+  ewma_alpha: number;
+  vol_update_threshold: number;
+};
+
+export type StrategySimulateRequest = {
+  price: number;
+  forecast?: number;
+  vol?: number | null;
+  budget_pct?: number | null;
+  symbol?: string;
+};
+
+export type StrategySimulateResult = {
+  stop_price: number;
+  stop_distance: number;
+  quantity: number;
+  notional_usd: number;
+  vol: number;
+  budget_usd: number;
+  leverage: number | null;
+};
+
 export type SuggestKeywordsRequest = {
   name: string;
   news_ids?: number[];

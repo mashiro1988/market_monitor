@@ -50,6 +50,7 @@ CRON_SCHEDULES: dict[str, dict] = {
     "behavior_daily_summary": {"hour": 0, "minute": 5},               # 汇总刚结束的北京日
     "research_daily_brief": {"hour": 8, "minute": 10},                # 紧跟早间新闻推送
     "cmc_refresh": {"day_of_week": "mon", "hour": 2, "minute": 17},   # 周一凌晨（维持原有行为）
+    "strategy_daily_check": {"hour": 8, "minute": 5},                 # UTC 日K确认后的持仓策略检查
 }
 
 
@@ -195,6 +196,16 @@ def _start_background_scheduler() -> BackgroundScheduler:
         except Exception as exc:
             logger.exception("[FastAPI Scheduler] cmc_refresh failed: {}", exc)
 
+    def strategy_daily_check() -> None:
+        """北京 08:05 持仓策略每日检查(2026-08-28 设计稿 §5):UTC 日K确认后算防线、推动作提示。"""
+        try:
+            from services.strategy_service import run_daily_check
+
+            produced = run_daily_check()
+            logger.info(f"[FastAPI Scheduler] strategy_daily_check events={produced}")
+        except Exception as exc:
+            logger.exception("[FastAPI Scheduler] strategy_daily_check failed: {}", exc)
+
     def research_daily_brief() -> None:
         """北京 08:10 事件池日报(news-research-phase1 spec §10):纯查库拼文本,零 LLM。"""
         try:
@@ -280,6 +291,14 @@ def _start_background_scheduler() -> BackgroundScheduler:
         research_daily_brief,
         _cron_trigger("research_daily_brief"),
         id="research_daily_brief",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        strategy_daily_check,
+        _cron_trigger("strategy_daily_check"),
+        id="strategy_daily_check",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

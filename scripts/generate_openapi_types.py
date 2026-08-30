@@ -44,6 +44,10 @@ REQUEST_COMPONENTS = {
     "SuggestKeywordsRequest",
     "LinkPatchRequest",
     "BackscanRequest",
+    # 持仓策略(2026-08-29):建仓/部分改批次/模拟都是请求体
+    "StrategyPositionCreate",
+    "StrategyPositionUpdate",
+    "StrategySimulateRequest",
 }
 
 

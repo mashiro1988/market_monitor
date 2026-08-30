@@ -78,3 +78,90 @@ class StrategyEventSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------- overview / simulate 响应模型（供 OpenAPI 类型生成器吐前端类型） ----------
+
+class StrategyChartDay(BaseModel):
+    date: str
+    close: float
+
+
+class StrategyCostLine(BaseModel):
+    label: str
+    value: float
+
+
+class StrategyChartPoint(BaseModel):
+    date: str
+    value: float
+
+
+class StrategyEntryMarker(BaseModel):
+    date: str
+    label: str
+    value: float
+
+
+class StrategyChart(BaseModel):
+    days: list[StrategyChartDay]
+    soft_line: list[float | None]
+    hard_current: float | None
+    cost_lines: list[StrategyCostLine]
+    anchor_point: StrategyChartPoint | None
+    entry_markers: list[StrategyEntryMarker]
+
+
+class StrategyBatchReadout(BaseModel):
+    id: int
+    batch_label: str
+    entry_at: str
+    entry_price: float
+    quantity: float
+    forecast: int
+    note: str | None
+    anchor_high: float
+    soft_stop: float
+    hard_stop: float
+    breached: bool
+    locked: bool
+    occupy_usd: float
+    distance_pct: float
+    pnl_usd: float
+
+
+class StrategyReentry(BaseModel):
+    level: float
+    breached_at: str | None
+
+
+class StrategyOverview(BaseModel):
+    symbol: str
+    generated_at: str
+    data_stale: bool
+    live_price: float | None
+    live_price_at: str | None
+    vol_latest: float | None
+    v_used: float | None
+    verdict: str                      # hold / breach / no_position / no_data
+    budget_usd: float
+    total_occupy_usd: float
+    settings: StrategySettingsSchema
+    reentry: StrategyReentry | None
+    batches: list[StrategyBatchReadout]
+    chart: StrategyChart
+
+
+class StrategySimulateResult(BaseModel):
+    stop_price: float
+    stop_distance: float
+    quantity: float
+    notional_usd: float
+    vol: float
+    budget_usd: float
+    leverage: float | None
+
+
+class StrategyRunCheckResult(BaseModel):
+    ok: bool
+    events: list[str]

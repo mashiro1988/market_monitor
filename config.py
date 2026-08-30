@@ -341,6 +341,8 @@ PRICE_SOURCES = {
     "crypto": {
         "BTC": "BTCUSDT",
         "ETH": "ETHUSDT",
+        # 持仓策略标的（2026-08-29）：横幅现价走此 5m 管道，策略日线另拉 OKX 1Dutc
+        "VIRTUAL": "VIRTUALUSDT",
     },
     # OKX 商品/指数代理永续：作为独立行情入库，不再改写对应期货曲线。
     # key 是页面显示名，value 同时是 OKX instId 与数据库原始 symbol。

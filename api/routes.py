@@ -78,11 +78,14 @@ from models.strategy import StrategyEvent, StrategyPosition
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
 from schemas.strategy import (
     StrategyEventSchema,
+    StrategyOverview,
     StrategyPositionCreate,
     StrategyPositionSchema,
     StrategyPositionUpdate,
+    StrategyRunCheckResult,
     StrategySettingsSchema,
     StrategySimulateRequest,
+    StrategySimulateResult,
 )
 from schemas.tasks import TaskStatus
 from services import strategy_service
@@ -764,10 +767,10 @@ def research_event_market_detach(link_id: int, payload: DetachMarketRequest,
 
 # ---------- 持仓策略（docs/superpowers/specs/2026-08-28-position-strategy-design.md） ----------
 
-@router.get("/strategy/overview")
+@router.get("/strategy/overview", response_model=StrategyOverview)
 def strategy_overview(symbol: str = strategy_service.DEFAULT_SYMBOL,
-                      db: Session = Depends(get_db)) -> dict:
-    return strategy_service.get_overview(db, symbol=symbol)
+                      db: Session = Depends(get_db)) -> StrategyOverview:
+    return StrategyOverview.model_validate(strategy_service.get_overview(db, symbol=symbol))
 
 
 @router.get("/strategy/events", response_model=list[StrategyEventSchema])
@@ -831,15 +834,17 @@ def strategy_settings_put(payload: StrategySettingsSchema,
     return payload
 
 
-@router.post("/strategy/simulate")
-def strategy_simulate(payload: StrategySimulateRequest, db: Session = Depends(get_db)) -> dict:
-    return strategy_service.simulate(db, price=payload.price, forecast=payload.forecast,
-                                     vol=payload.vol, budget_pct=payload.budget_pct,
-                                     symbol=payload.symbol)
+@router.post("/strategy/simulate", response_model=StrategySimulateResult)
+def strategy_simulate(payload: StrategySimulateRequest,
+                      db: Session = Depends(get_db)) -> StrategySimulateResult:
+    return StrategySimulateResult.model_validate(
+        strategy_service.simulate(db, price=payload.price, forecast=payload.forecast,
+                                  vol=payload.vol, budget_pct=payload.budget_pct,
+                                  symbol=payload.symbol))
 
 
-@router.post("/strategy/run-check")
-def strategy_run_check(symbol: str = strategy_service.DEFAULT_SYMBOL) -> dict:
+@router.post("/strategy/run-check", response_model=StrategyRunCheckResult)
+def strategy_run_check(symbol: str = strategy_service.DEFAULT_SYMBOL) -> StrategyRunCheckResult:
     """手动触发一次每日检查（验收/补跑用），语义与定时任务完全一致。"""
     produced = strategy_service.run_daily_check(symbol=symbol)
-    return {"ok": True, "events": produced}
+    return StrategyRunCheckResult(ok=True, events=produced)

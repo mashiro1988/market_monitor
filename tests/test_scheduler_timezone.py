@@ -22,6 +22,7 @@ def _fields(trigger) -> dict[str, str]:
     ("research_daily_brief", {"hour": "8", "minute": "10"}),              # 北京 08:10 紧跟早间新闻推送
     ("data_retention", {"hour": "3", "minute": "17"}),                    # 北京 03:17（维持原有行为）
     ("cmc_refresh", {"day_of_week": "mon", "hour": "2", "minute": "17"}),  # 北京周一 02:17（维持原有行为）
+    ("strategy_daily_check", {"hour": "8", "minute": "5"}),               # 北京 08:05 = UTC 00:05,日K确认后
 ])
 def test_cron_jobs_bind_beijing_timezone_explicitly(job_id, expected):
     from api.app import _cron_trigger
