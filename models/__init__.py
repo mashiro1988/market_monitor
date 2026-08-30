@@ -11,6 +11,7 @@ from models.behavior import BehaviorSegment, BehaviorDailySummary
 from models.research import ResearchEvent, ResearchEventLink
 from models.event_market import ResearchEventMarket
 from models.crypto import NewsCoin
+from models.strategy import StrategyEvent, StrategyPosition, StrategySettings, StrategySymbolState
 
 
 def create_all_tables(engine):
