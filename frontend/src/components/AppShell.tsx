@@ -1,8 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, Bell, Boxes, Coins, FolderSearch, Grid, LineChart, Newspaper, PenSquare } from "lucide-react";
+import { Activity, Bell, Boxes, Coins, Crosshair, FolderSearch, Grid, LineChart, Newspaper, PenSquare } from "lucide-react";
 
 const navItems = [
   { to: "/market", label: "市场概览", icon: LineChart },
+  { to: "/strategy", label: "持仓策略", icon: Crosshair },
   { to: "/sectors", label: "板块轮动", icon: Grid },
   { to: "/news", label: "新闻快讯", icon: Newspaper },
   { to: "/crypto-news", label: "加密快讯", icon: Coins },

@@ -11,6 +11,7 @@ import { MarketPage } from "./pages/MarketPage";
 import { NewsPage } from "./pages/NewsPage";
 import { CryptoResearchPage, ResearchPage } from "./pages/ResearchPage";
 import { SectorRotationPage } from "./pages/SectorRotationPage";
+import { StrategyPage } from "./pages/StrategyPage";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -29,6 +30,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/market" replace /> },
       { path: "market", element: <MarketPage /> },
+      { path: "strategy", element: <StrategyPage /> },
       { path: "sectors", element: <SectorRotationPage /> },
       { path: "news", element: <NewsPage /> },
       { path: "crypto-news", element: <CryptoNewsPage /> },

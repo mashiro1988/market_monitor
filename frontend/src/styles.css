@@ -1582,3 +1582,36 @@ code {
   font-size: 12px; font-weight: 500; color: var(--muted);
   border: 1px dashed var(--line-soft); border-radius: 3px; white-space: nowrap;
 }
+
+/* ---------- 持仓策略页 ---------- */
+.strategy-banner { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 18px; border-radius: 10px; margin-bottom: 14px; }
+.strategy-banner strong { font-size: 17px; display: block; }
+.banner-ok { background: rgba(5, 95, 70, 0.55); }
+.banner-danger { background: rgba(127, 29, 29, 0.6); }
+.banner-muted { background: rgba(51, 65, 85, 0.6); }
+.banner-sub { display: block; font-size: 12.5px; color: #a7f3d0; opacity: 0.9; margin-top: 2px; }
+.banner-danger .banner-sub { color: #fecaca; }
+.banner-muted .banner-sub { color: #cbd5e1; }
+.banner-kpis { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: #cbd5e1; text-align: right; }
+.kpi-danger { color: #f87171; font-weight: 600; }
+.strategy-grid { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 12px; margin-top: 14px; }
+.strategy-grid .panel, .settings-panel { background: #111a2b; border: 1px solid #1e293b; border-radius: 10px; padding: 12px 14px; }
+.event-feed { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.event-feed li { font-size: 12.5px; display: flex; flex-direction: column; gap: 2px; border-left: 3px solid #334155; padding-left: 8px; }
+.event-feed .event-kind { color: #94a3b8; }
+.event-stop_breach { border-left-color: #ef4444; }
+.event-reduce_suggest, .event-vol_update { border-left-color: #f59e0b; }
+.event-b2_unlocked, .event-reentry_ready { border-left-color: #22c55e; }
+.event-msg { color: #e2e8f0; white-space: pre-wrap; }
+.event-time { color: #64748b; font-size: 11px; }
+.calc-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.calc-form label { display: flex; flex-direction: column; font-size: 12px; color: #94a3b8; gap: 3px; }
+.calc-form input, .batch-add input { background: #0b1322; border: 1px solid #263142; color: #e2e8f0; border-radius: 6px; padding: 6px 8px; width: 110px; }
+.calc-result { margin: 10px 0 0; padding-left: 18px; font-size: 13px; color: #e2e8f0; }
+.batch-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.form-error { color: #f87171; font-size: 12.5px; }
+.settings-panel { margin-top: 14px; }
+.strategy-batches .batch-actions button { margin-right: 6px; }
+.pnl-pos { color: #34d399; }
+.pnl-neg { color: #f87171; }
+@media (max-width: 1100px) { .strategy-grid { grid-template-columns: 1fr; } }
