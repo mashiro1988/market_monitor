@@ -39,7 +39,14 @@
 - 锁盈判定：`soft > 入场价` ⇒ 该批占用归零、「B2 额度释放」。
 - 贴预算目标数量（减仓提示用）：`target_qty = budget_$ / (入场价 − soft)`（仅未锁盈时有意义）。
 
-### 2.6 建仓计算器（模拟，不落库）
+### 2.6 重入场观察（洗出保费的回程票，2026-08-29 增补）
+- 动机：止损触发后若行情 V 型收回，执行者会因「上不了车」的恐惧而不敢执行止损。解法不是模糊止损，而是给「回来」立规则。
+- 某批次触发 `stop_breach` 时，该币种进入观察态：记录 `reentry_level = 触发时的 soft`、`reentry_breached_at`；同币种再次触发以最新一次覆盖（多批次防线合流，正常只有一个水位）。
+- 观察态下每日检查：最新确认收盘 > `reentry_level` ⇒ 发 `reentry_ready` 事件并推送，提示可按计算器评估**全新批次**（新预算、新 4×ATR 止损，与旧仓完全独立）；发出即清除观察态（一次性）。
+- 观察态最长 30 天，超时静默过期（仅入提示流，不推送）。
+- 系统只提醒；是否重入场、微观确认事件判断仍归人（与 §7 边界一致）。
+
+### 2.7 建仓计算器（模拟，不落库）
 输入：价格 P（默认实时价）、预测值 F（默认 +10）、预算 %（默认 settings）、波动率 v（默认 `v_used`，可手改）。
 输出：止损距离 `d = P × X_soft × v`、止损价 `P − d`、应买数量 `budget_$ × (F/10) / d`、名义金额、对本金杠杆倍数。
 
@@ -47,8 +54,8 @@
 
 - `strategy_positions`：`id`、`symbol`（OKX instId）、`batch_label`（B1/B2…）、`entry_at`（UTC datetime）、`entry_price`、`quantity`、`forecast`（int）、`status`（open/closed）、`closed_at`、`close_price`、`note`、`created_at/updated_at`。
 - `strategy_settings`（单行）：`capital`、`risk_budget_pct`、`x_soft`（4）、`x_hard`（6）、`ewma_alpha`（0.054）、`vol_update_threshold`（0.25）、`updated_at`。
-- `strategy_symbol_state`：`symbol` PK、`v_used`、`v_used_at`、`updated_at`。
-- `strategy_events`：`id`、`created_at`、`symbol`、`position_id`（可空）、`kind`（`stop_breach`/`vol_update`/`reduce_suggest`/`b2_unlocked`/`daily_ok`）、`message`、`payload_json`、`pushed`（bool）。事件既是页面「动作提示流」的数据，也是转换检测（同一状态不重复推送）的依据。
+- `strategy_symbol_state`：`symbol` PK、`v_used`、`v_used_at`、`reentry_level`（可空）、`reentry_breached_at`（可空）、`updated_at`。
+- `strategy_events`：`id`、`created_at`、`symbol`、`position_id`（可空）、`kind`（`stop_breach`/`vol_update`/`reduce_suggest`/`b2_unlocked`/`reentry_ready`/`reentry_expired`/`daily_ok`）、`message`、`payload_json`、`pushed`（bool）。事件既是页面「动作提示流」的数据，也是转换检测（同一状态不重复推送）的依据。
 - 种子数据（首次部署后由用户在页面录入，或迁移脚本内置）：B1 = VIRTUAL-USDT-SWAP，entry_at 2026-08-26 23:33 UTC（北京 08-27 07:33），entry 0.7430，qty 23,590，forecast +10；settings capital 13,915 / budget 15%。
 
 ## 4. 服务与接口
@@ -71,9 +78,11 @@
 
 | kind | 触发 | 推送 |
 |---|---|---|
-| `stop_breach` | 最新确认收盘 < 该批 soft（由未破→破的转换） | ✅ 红：跌破软止损，按框架应清仓（附收盘/防线/批次） |
+| `stop_breach` | 最新确认收盘 < 该批 soft（由未破→破的转换） | ✅ 红：跌破软止损，按框架应清仓（附收盘/防线/批次）；同时进入重入场观察（§2.6） |
 | `vol_update` + `reduce_suggest` | 25% 守则更新 `v_used` 且总占用 > `budget_$` | ✅ 黄：波动率变更，附目标数量与应减数量 |
 | `b2_unlocked` | 某批 soft 首次抬过其入场价 | ✅ 绿：该批锁盈、额度释放，可开始找微观确认事件 |
+| `reentry_ready` | 观察态中最新确认收盘 > `reentry_level` | ✅ 绿：价格收盘站回原止损线，可按计算器评估重入场（全新批次） |
+| `reentry_expired` | 观察态满 30 天未站回 | 仅入页面提示流，不推送 |
 | `daily_ok` | 收盘 ≥ soft | 仅入页面提示流，不推送 |
 
 - 超预算但无波动率变更：页面横幅常驻黄色徽标，不推送（用户知情即可，避免每天挨骂）。
@@ -83,7 +92,7 @@
 
 已与用户在视觉草图上定稿（`.superpowers/brainstorm/185-1787902123/content/layout-v2.html`）：
 
-1. **决策横幅**：今日动作（持有/清仓提示/减仓提示，颜色区分）+ 昨收 vs 软止损与余量% + 风险占用/预算 + 在用波动率 + B2 状态。
+1. **决策横幅**：今日动作（持有/清仓提示/减仓提示，颜色区分）+ 昨收 vs 软止损与余量% + 风险占用/预算 + 在用波动率 + B2 状态；处于重入场观察态时显示「等待收盘站回 {reentry_level}（第 n/30 天）」。
 2. **大图**（recharts，扩展现有 `Charts.tsx` 而非引新库；软止损用 `type="stepAfter"` 阶梯线）：日收盘价线、软止损阶梯线、①硬防线以下 `ReferenceArea` 红区、②锚（最高收盘）金点、③成本 `ReferenceLine` 虚线、批次入场标记。选定元素 ①②③，5 分钟细线与盈亏着色明确不做。
 3. **底部三块**：批次表（增删改、平仓录入）、动作提示流（`strategy_events` 倒序）、建仓计算器。
 4. 所有参数就地可编辑；`timestamp_utc` 处理遵守项目既有约定（naive UTC 需补 Z）。
@@ -98,7 +107,8 @@
 2. 改任一参数（本金/预算/乘数/批次字段）后刷新，全部读数即时重算。
 3. 用测试夹具蜡烛模拟一根跌破软止损的日收盘，`strategy_daily_check` 产生 `stop_breach` 事件并推送企业微信（测试环境走 console 通道断言）。
 4. OKX 接口断链时页面显示「数据滞后」而非空白或报错。
-5. 引擎单测覆盖：H 锚定（含入场时刻在当根 K 未收盘时不计入、入场价保底）、EWMA 数值、25% 闩锁转换、锁盈/占用、计算器输出、事件转换去重。后端 pytest 与前端 vitest 全量通过。
+5. 重入场观察闭环：夹具模拟「跌破 → 数日后收盘站回」触发 `reentry_ready` 恰好一次并清除观察态；模拟 30 天未站回走 `reentry_expired` 且不推送。
+6. 引擎单测覆盖：H 锚定（含入场时刻在当根 K 未收盘时不计入、入场价保底）、EWMA 数值、25% 闩锁转换、锁盈/占用、重入场状态机、计算器输出、事件转换去重。后端 pytest 与前端 vitest 全量通过。
 
 ## 9. 部署与文档同步
 
