@@ -160,6 +160,13 @@ a {
   margin-bottom: 12px;
 }
 
+/* 紧凑头行(2026-08-30 用户反馈):标题/控件聚拢左侧,不再两端对齐铺满整行——
+   元素少时 space-between 会把「市场定价 / 30天 / 找市场提案」拉到看不出关联。 */
+.panel-head.compact {
+  justify-content: flex-start;
+  gap: 14px;
+}
+
 .panel-head h2,
 .band h2 {
   font-size: 16px;

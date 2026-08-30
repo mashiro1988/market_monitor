@@ -90,7 +90,7 @@ export function EventMarkets({ eventId, eventType }: {
 
   return (
     <div className="panel">
-      <div className="panel-head">
+      <div className="panel-head compact">
         <h2>市场定价</h2>
         <SelectControl label="" value={hours} onChange={setHours}
                        options={predictionWindowOptions} />
