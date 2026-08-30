@@ -20,19 +20,19 @@ export function StrategyChart({ overview, height = 380 }: { overview: StrategyOv
   if (!chart.days.length) {
     return <EmptyState title="暂无日K数据（数据滞后或标的无历史）" />;
   }
+  // 入场标记并进主数据行：分类 X 轴上给 Scatter 独立 data 会劫持轴域（只剩标记那一天）
+  const entryByDate = new Map(chart.entry_markers.map((m) => [m.date, m.value]));
   const rows = chart.days.map((d, i) => ({
     date: d.date,
     close: d.close,
-    soft: chart.soft_line[i] ?? null
+    soft: chart.soft_line[i] ?? null,
+    entry: entryByDate.get(d.date) ?? null
   }));
   const values = rows.flatMap((r) => [r.close, r.soft ?? r.close]);
   if (chart.hard_current != null) values.push(chart.hard_current);
   chart.cost_lines.forEach((c) => values.push(c.value));
   const yMin = Math.min(...values) * 0.96;
   const yMax = Math.max(...values) * 1.03;
-  const entryRows = chart.entry_markers
-    .map((m) => ({ date: m.date, entry: m.value, label: m.label }))
-    .filter((m) => rows.some((r) => r.date === m.date));
 
   return (
     <div className="chart-shell" style={{ height }}>
@@ -51,7 +51,7 @@ export function StrategyChart({ overview, height = 380 }: { overview: StrategyOv
             contentStyle={{ background: "#0f172a", border: "1px solid #263142", color: "#e2e8f0" }}
             formatter={(value, name) => [
               typeof value === "number" ? value.toFixed(4) : String(value),
-              name === "close" ? "日收盘" : name === "soft" ? "软止损" : String(name)
+              name === "close" ? "日收盘" : name === "soft" ? "软止损" : name === "entry" ? "入场" : String(name)
             ]}
           />
           {chart.hard_current != null ? (
@@ -84,7 +84,7 @@ export function StrategyChart({ overview, height = 380 }: { overview: StrategyOv
           ))}
           <Line dataKey="soft" type="stepAfter" stroke="#f59e0b" strokeWidth={2.4} strokeDasharray="7 4" dot={false} connectNulls name="soft" />
           <Line dataKey="close" type="monotone" stroke="#5eead4" strokeWidth={2.4} dot={false} name="close" />
-          <Scatter data={entryRows} dataKey="entry" fill="#22d3ee" shape="triangle" name="入场" />
+          <Scatter dataKey="entry" fill="#22d3ee" shape="triangle" name="入场" />
           {chart.anchor_point ? (
             <ReferenceDot
               x={chart.anchor_point.date}
