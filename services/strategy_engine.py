@@ -53,3 +53,54 @@ def walk_latch(vols: list[float], threshold: float, seed: float | None = None) -
             current = v
         used.append(current)
     return used
+
+
+@dataclass(frozen=True)
+class BatchState:
+    """单批次在"最新确认收盘"时点的全部读数。"""
+    anchor_high: float
+    soft_stop: float
+    hard_stop: float
+    last_close: float
+    breached: bool          # 最新确认收盘 < soft
+    locked: bool            # soft > 入场价（锁盈，B2 额度释放）
+    occupy_usd: float       # quantity * max(0, entry - soft)
+    distance_pct: float     # (last_close - soft) / soft
+
+
+def anchor_high(*, entry_price: float, entry_at: datetime, candles: list[DailyCandle]) -> float:
+    """锚 H = max(入场价, 入场后已收盘日 K 的收盘价)。设计稿 §2.4。"""
+    closes = [c.close for c in candles if c.close_time > entry_at]
+    return max([entry_price, *closes])
+
+
+def batch_state(
+    *, entry_price: float, entry_at: datetime, quantity: float,
+    candles: list[DailyCandle], v_used: float, x_soft: int, x_hard: int,
+) -> BatchState:
+    h = anchor_high(entry_price=entry_price, entry_at=entry_at, candles=candles)
+    soft = h * (1 - x_soft * v_used)
+    hard = h * (1 - x_hard * v_used)
+    last_close = candles[-1].close
+    return BatchState(
+        anchor_high=h,
+        soft_stop=soft,
+        hard_stop=hard,
+        last_close=last_close,
+        breached=last_close < soft,
+        locked=soft > entry_price,
+        occupy_usd=quantity * max(0.0, entry_price - soft),
+        distance_pct=(last_close - soft) / soft,
+    )
+
+
+def simulate_entry(*, price: float, forecast: int, budget_usd: float, vol: float, x_soft: int) -> dict:
+    """建仓计算器（设计稿 §2.7）：给定价格/信心/预算/波动率，输出止损与数量。"""
+    stop_distance = price * x_soft * vol
+    quantity = budget_usd * (forecast / 10.0) / stop_distance
+    return {
+        "stop_price": price - stop_distance,
+        "stop_distance": stop_distance,
+        "quantity": quantity,
+        "notional_usd": quantity * price,
+    }

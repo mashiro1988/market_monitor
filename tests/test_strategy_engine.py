@@ -7,7 +7,10 @@ import pytest
 
 from services.strategy_engine import (
     DailyCandle,
+    anchor_high,
+    batch_state,
     ewma_vol_series,
+    simulate_entry,
     walk_latch,
 )
 
@@ -48,3 +51,48 @@ def test_walk_latch_zero_vol_updates_without_crash():
     # 长横盘冷启动会把在用值锁在 0（波动率恰好为 0）；下一个正波动必须直接采用而不是除零。
     assert walk_latch([0.03], threshold=0.25, seed=0.0) == [pytest.approx(0.03)]
     assert walk_latch([0.0, 0.03], threshold=0.25) == [pytest.approx(0.0), pytest.approx(0.03)]
+
+
+def test_anchor_high_floors_at_entry_price_and_respects_entry_time():
+    candles = _mk_candles([0.70, 0.7518, 0.7323], start=datetime(2026, 8, 25))
+    # 8-26 23:33 入场：8-25 的 K（收盘时刻 8-26 00:00 < 入场）不算，
+    # 8-26 的 K（收盘时刻 8-27 00:00 > 入场）算 => H = max(0.743, 0.7518, 0.7323)
+    h = anchor_high(entry_price=0.743, entry_at=datetime(2026, 8, 26, 23, 33), candles=candles)
+    assert h == pytest.approx(0.7518)
+    # 入场价保底：所有入场后收盘都低于成本时 H = 入场价
+    h2 = anchor_high(entry_price=0.80, entry_at=datetime(2026, 8, 26, 23, 33), candles=candles)
+    assert h2 == pytest.approx(0.80)
+
+
+def test_batch_state_lines_occupancy_and_flags():
+    candles = _mk_candles([0.70, 0.7518, 0.7323], start=datetime(2026, 8, 25))
+    st = batch_state(
+        entry_price=0.743, entry_at=datetime(2026, 8, 26, 23, 33), quantity=23590,
+        candles=candles, v_used=0.0494, x_soft=4, x_hard=6,
+    )
+    # soft = 0.7518*(1-4*0.0494)；hard = 0.7518*(1-6*0.0494)
+    assert st.soft_stop == pytest.approx(0.7518 * (1 - 4 * 0.0494))
+    assert st.hard_stop == pytest.approx(0.7518 * (1 - 6 * 0.0494))
+    assert st.breached is False           # 昨收 0.7323 > soft
+    assert st.locked is False             # soft < 成本 0.743
+    assert st.occupy_usd == pytest.approx(23590 * (0.743 - st.soft_stop))
+
+
+def test_batch_state_breach_and_lock():
+    # 大涨后 soft 抬过成本 => locked、占用归零；再暴跌收盘 < soft => breached
+    up = _mk_candles([0.70, 1.00, 0.79], start=datetime(2026, 8, 25))
+    st = batch_state(entry_price=0.70, entry_at=datetime(2026, 8, 25, 1, 0), quantity=1000,
+                     candles=up, v_used=0.05, x_soft=4, x_hard=6)
+    # H=1.00, soft=0.80；昨收 0.79 < 0.80 => breached；soft(0.80) > 成本(0.70) => locked
+    assert st.locked is True and st.breached is True
+    assert st.occupy_usd == 0.0
+
+
+def test_simulate_entry_matches_framework_example():
+    # 设计稿 §7 沙盘：本金19000*25%=4750 预算、价0.70、vol 5%、X=4、forecast=15
+    sim = simulate_entry(price=0.70, forecast=15, budget_usd=4750.0, vol=0.05, x_soft=4)
+    assert sim["stop_price"] == pytest.approx(0.56)
+    assert sim["stop_distance"] == pytest.approx(0.14)
+    # 数量 = 预算*(F/10)/距离 = 4750*1.5/0.14；名义 = 数量*价
+    assert sim["quantity"] == pytest.approx(4750 * 1.5 / 0.14)
+    assert sim["notional_usd"] == pytest.approx(sim["quantity"] * 0.70)
