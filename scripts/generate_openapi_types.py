@@ -126,7 +126,11 @@ def _schema_to_ts(schema: dict[str, Any], *, force_required: bool = False) -> st
     if schema_type == "boolean":
         return "boolean"
     if schema_type == "array":
-        return f"{_schema_to_ts(schema.get('items', {}), force_required=force_required)}[]"
+        item_ts = _schema_to_ts(schema.get("items", {}), force_required=force_required)
+        # 联合类型的数组项必须加括号：`number | null[]` 语义是"数字或空数组"，错的
+        if "|" in item_ts:
+            item_ts = f"({item_ts})"
+        return f"{item_ts}[]"
     if schema_type == "object" or "properties" in schema:
         return _object_to_ts(schema, force_required=force_required)
 

@@ -768,7 +768,7 @@ export type StrategyBatchReadout = {
 
 export type StrategyChart = {
   days: StrategyChartDay[];
-  soft_line: number | null[];
+  soft_line: (number | null)[];
   hard_current: number | null;
   cost_lines: StrategyCostLine[];
   anchor_point: StrategyChartPoint | null;
