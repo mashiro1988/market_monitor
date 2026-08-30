@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from bisect import bisect_left
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
@@ -41,15 +42,22 @@ TARGET_PRICE_SYMBOLS = ["BTC/USDT", "NQ=F"]
 REFERENCE_SEGMENT_MINUTES = 60
 
 def _nearest_snapshot_any(rows: list[PriceSnapshot], target: datetime, tolerance_minutes: int) -> PriceSnapshot | None:
-    """rows 里与 target 时间差最小且 ≤ 容差者（不限前后，区别于 _nearest_snapshot）。"""
+    """rows 里与 target 时间差最小且 ≤ 容差者（不限前后，区别于 _nearest_snapshot）。
+    **前置条件：rows 按 timestamp 升序**（所有调用方的查询都带 order_by asc）。
+    2026-08-30 性能修复：二分定位插入点后只比较左右两邻居。此前线性扫描全量快照，
+    标注页全量回溯下单次页面加载累计 7,500 万次比较、独占 100 秒+（cProfile 实测 97%）。
+    语义与旧实现逐条对齐（tests/test_nearest_snapshot_bisect.py 钉死）：等距平手取更早行、
+    恰好等于容差算命中。"""
+    if not rows:
+        return None
+    i = bisect_left(rows, target, key=lambda r: r.timestamp)
     best = None
     best_delta = None
-    for row in rows:
-        delta = abs((row.timestamp - target).total_seconds())
-        if delta > tolerance_minutes * 60:
-            continue
-        if best_delta is None or delta < best_delta:
-            best, best_delta = row, delta
+    for j in (i - 1, i):                      # 先看左邻居 → 平手时更早行胜出（与旧实现一致）
+        if 0 <= j < len(rows):
+            delta = abs((rows[j].timestamp - target).total_seconds())
+            if delta <= tolerance_minutes * 60 and (best_delta is None or delta < best_delta):
+                best, best_delta = rows[j], delta
     return best
 
 
@@ -88,18 +96,22 @@ def _reference_rows_cutoff(window_start: datetime, tolerance_minutes: int) -> da
     return window_start - timedelta(minutes=REFERENCE_SEGMENT_MINUTES + tolerance_minutes + 5)
 
 
-def _load_reference_rows(session: Session, cutoff: datetime) -> dict[str, list[PriceSnapshot]]:
-    """一次性把所有「宏观同期对标」资产（config.ANNOTATION_REFERENCE_ASSETS）的快照捞出，按 symbol 分组。"""
+def _load_reference_rows(session: Session, cutoff: datetime) -> dict[str, list]:
+    """一次性把所有「宏观同期对标」资产（config.ANNOTATION_REFERENCE_ASSETS）的快照捞出，按 symbol 分组。
+    2026-08-30 性能修复：只取 (symbol, timestamp, price) 三列的轻量行，不水合完整 ORM 对象——
+    全量回溯一次要捞 7 万行，完整对象每行有固定水合开销、且热循环里每次属性读取都过 ORM 托管层。
+    下游（_nearest_snapshot_any / _reference_change_for_window / _reference_endpoints）只用
+    .timestamp / .price 两个字段，轻量行按名访问兼容。"""
     symbols = [entry[0] for entry in config.ANNOTATION_REFERENCE_ASSETS]
     if not symbols:
         return {}
     rows = (
-        session.query(PriceSnapshot)
+        session.query(PriceSnapshot.symbol, PriceSnapshot.timestamp, PriceSnapshot.price)
         .filter(PriceSnapshot.symbol.in_(symbols), PriceSnapshot.timestamp >= cutoff)
         .order_by(PriceSnapshot.timestamp.asc())
         .all()
     )
-    by_symbol: dict[str, list[PriceSnapshot]] = {sym: [] for sym in symbols}
+    by_symbol: dict[str, list] = {sym: [] for sym in symbols}
     for row in rows:
         by_symbol.setdefault(row.symbol, []).append(row)
     return by_symbol
@@ -708,19 +720,22 @@ def _behavior_segment_events(session: Session, symbol: str, display_cutoff: date
     return kept
 
 
-def load_price_windows(
+def _window_cores(
     session: Session,
     symbol: str,
     hours: int,
     threshold_pct: float | None = None,
     window_minutes: int | None = None,
-) -> list[PriceWindowSchema]:
-    """单 15min 开收净标注窗口（news-impact-engine Phase 2）：开收净触发 + 同向相邻合并、
-    变向/5min 断档收口。窗口 compute-on-read 不落库。显式传 threshold/window 走单档调试路径。
-    hours<=0 = 全量：回溯到该品种最早的 0.5 档+行为段（标注页唯一窗口源）。"""
+) -> tuple[list[dict], datetime | None]:
+    """load_price_windows 的骨架（2026-08-30 性能拆分）：段→窗口端点价→标注匹配→排序截断，
+    **不算宏观对标 references**（那是整个函数最贵的一步）。返回 (cores, ref_cutoff)：
+    cores = 窗口 dict（按 end 倒序、截断 200），references 由 load_price_windows 二段补挂；
+    list_annotations 的 needs_review / S 随行只需要骨架，直接用 cores、不再付对标计算的账。
+    段路径不再整段捞快照（全量回溯 = 1.3 万行 ORM 水合）——端点价按窗口起止时间精准 IN 查询
+    （与旧 price_at 字典的精确相等语义一致），品种元信息单取最新一行。"""
     scales = _scales_for(symbol, threshold_pct, window_minutes)
     if not scales:
-        return []
+        return [], None
     scale = scales[0]                                  # 单档（Phase 2）
     max_wm = int(scale["window_minutes"])
     eff_hours = _effective_hours(hours)
@@ -736,25 +751,44 @@ def load_price_windows(
             .scalar()
         )
         if first_start is None:
-            return []
+            return [], None
         display_cutoff = max(first_start, config.ANNOTATION_BACKLOG_FLOOR_UTC)
     else:
         # 调试路径（显式 threshold/window）没有行为段锚点，全量兜底 30 天。
         display_cutoff = utc_now_naive() - timedelta(hours=24 * 30)
     cutoff = display_cutoff - timedelta(minutes=max_wm + 10)
-    rows = (
-        session.query(PriceSnapshot)
-        .filter(PriceSnapshot.symbol == symbol, PriceSnapshot.timestamp >= cutoff)
-        .order_by(PriceSnapshot.timestamp.asc())
-        .all()
-    )
     tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
-    ref_rows = _load_reference_rows(
-        session,
-        cutoff - timedelta(minutes=REFERENCE_SEGMENT_MINUTES + tolerance_minutes + 5),
-    )
-    merge_gap = timedelta(minutes=max(1, int(getattr(config, "ANNOTATION_EVENT_MERGE_GAP_MINUTES", 60))))
-    price_at = {row.timestamp: row.price for row in rows}
+    ref_cutoff = cutoff - timedelta(minutes=REFERENCE_SEGMENT_MINUTES + tolerance_minutes + 5)
+
+    # Phase 2（2026-07-09 拍板）：标注页唯一窗口源 = behavior_segments（0.5 档以上，0.3 只作簇拥上下文）。
+    # 显式传 threshold/window 的调试路径仍走原始扫描（回放/校验用，需要全量快照）。
+    if threshold_pct is None and window_minutes is None:
+        meta = (
+            session.query(PriceSnapshot.asset_class, PriceSnapshot.name)
+            .filter(PriceSnapshot.symbol == symbol, PriceSnapshot.timestamp >= cutoff)
+            .order_by(PriceSnapshot.timestamp.desc())
+            .first()
+        )
+        if meta is None:                               # 范围内无快照：与旧逻辑（rows 为空）一致 → 无窗口
+            return [], ref_cutoff
+        merged = _behavior_segment_events(session, symbol, display_cutoff, scale,
+                                          meta.asset_class, meta.name)
+        endpoint_ts = sorted({m["start"] for m in merged} | {m["end"] for m in merged})
+        price_at = dict(
+            session.query(PriceSnapshot.timestamp, PriceSnapshot.price)
+            .filter(PriceSnapshot.symbol == symbol, PriceSnapshot.timestamp.in_(endpoint_ts))
+            .all()
+        ) if endpoint_ts else {}
+    else:
+        merge_gap = timedelta(minutes=max(1, int(getattr(config, "ANNOTATION_EVENT_MERGE_GAP_MINUTES", 60))))
+        rows = (
+            session.query(PriceSnapshot)
+            .filter(PriceSnapshot.symbol == symbol, PriceSnapshot.timestamp >= cutoff)
+            .order_by(PriceSnapshot.timestamp.asc())
+            .all()
+        )
+        price_at = {row.timestamp: row.price for row in rows}
+        merged = _scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap)
 
     # 一次性把这个 symbol 在显示窗口里的已有标注全部捞出来，按 (window_start, window_end) 建查找表。
     annotation_rows = (
@@ -788,61 +822,82 @@ def load_price_windows(
                 best_id, best_ratio = row.id, ratio
         return best_id if best_ratio >= 0.5 else None
 
-    # Phase 2（2026-07-09 拍板）：标注页唯一窗口源 = behavior_segments（0.5 档以上，0.3 只作簇拥上下文）。
-    # 显式传 threshold/window 的调试路径仍走原始扫描（回放/校验用）。
-    if threshold_pct is None and window_minutes is None and rows:
-        merged = _behavior_segment_events(session, symbol, display_cutoff, scale,
-                                          rows[-1].asset_class, rows[-1].name)
-    else:
-        merged = _scale_events(rows, display_cutoff, tolerance_minutes, scale, merge_gap)
-
     # A策略①（2026-06-28 简化）：**只冻结「最新且仍在生长边缘」的那一个窗口**——它后面还没有更晚的
     # 窗口/价格来确认它走完，可能随新 bar 继续合并。更早的窗口后面都已有更晚窗口 → 已走完 → 可标。
     # 例外：最新窗口若已很久没动（收盘/静默，超过 live 余量）也判走完、可标。已标窗口被 backfill 改动
     # 由 needs_review 兜底，不靠冻结。
     latest_end = max((m["end"] for m in merged), default=None)
     live_edge_cutoff = utc_now_naive() - timedelta(minutes=int(getattr(config, "ANNOTATION_SETTLE_MARGIN_MINUTES", 30)))
-    windows: list[tuple[datetime, PriceWindowSchema]] = []
+    cores: list[dict] = []
     for m in merged:
         p_start = price_at.get(m["start"])
         p_end = price_at.get(m["end"])
         if not p_start or not p_end:
             continue
-        net_pct = (p_end - p_start) / abs(p_start) * 100
-        windows.append((m["end"], PriceWindowSchema(
+        cores.append({
+            **m,
+            "p_start": p_start,
+            "p_end": p_end,
+            "net_pct": (p_end - p_start) / abs(p_start) * 100,
+            "annotation_id": _match_annotation(m["start"], m["end"]),
+            "annotatable": (not (m["end"] == latest_end and m["end"] > live_edge_cutoff)) and m.get("settled", True),
+        })
+
+    # 最新事件在前；截断 200（截断提前到挂 references 之前——被截掉的窗口不再白算对标）。
+    cores.sort(key=lambda c: c["end"], reverse=True)
+    return cores[:200], ref_cutoff
+
+
+def load_price_windows(
+    session: Session,
+    symbol: str,
+    hours: int,
+    threshold_pct: float | None = None,
+    window_minutes: int | None = None,
+) -> list[PriceWindowSchema]:
+    """单 15min 开收净标注窗口（news-impact-engine Phase 2）：开收净触发 + 同向相邻合并、
+    变向/5min 断档收口。窗口 compute-on-read 不落库。显式传 threshold/window 走单档调试路径。
+    hours<=0 = 全量：回溯到该品种最早的 0.5 档+行为段（标注页唯一窗口源）。
+    2026-08-30 性能拆分：骨架在 _window_cores（needs_review 消费方共用），本函数只负责
+    加载对标快照并逐窗口挂 references。"""
+    cores, ref_cutoff = _window_cores(session, symbol, hours, threshold_pct, window_minutes)
+    if not cores:
+        return []
+    tolerance_minutes = max(config.SCAN_INTERVALS["price"] * 2, 1)
+    ref_rows = _load_reference_rows(session, ref_cutoff)
+    return [
+        PriceWindowSchema(
             symbol=symbol,
-            asset_class=m["asset_class"],
-            name=m["name"],
-            window_start=timestamp_pair(m["start"]),
-            window_end=timestamp_pair(m["end"]),
-            configured_window_minutes=m["wm"],
-            actual_window_minutes=round((m["end"] - m["start"]).total_seconds() / 60, 1),
-            price_start=p_start,
-            price_end=p_end,
-            change_pct=net_pct,
-            segment_count=m["segments"],
-            annotation_id=_match_annotation(m["start"], m["end"]),
-            annotatable=(not (m["end"] == latest_end and m["end"] > live_edge_cutoff)) and m.get("settled", True),
+            asset_class=c["asset_class"],
+            name=c["name"],
+            window_start=timestamp_pair(c["start"]),
+            window_end=timestamp_pair(c["end"]),
+            configured_window_minutes=c["wm"],
+            actual_window_minutes=round((c["end"] - c["start"]).total_seconds() / 60, 1),
+            price_start=c["p_start"],
+            price_end=c["p_end"],
+            change_pct=c["net_pct"],
+            segment_count=c["segments"],
+            annotation_id=c["annotation_id"],
+            annotatable=c["annotatable"],
             is_primary=True,
-            tier_idx=m.get("tier_idx"),
-            tier_max=m.get("tier_max"),
-            s_scores=m.get("s_scores", {}),
-            machine_class=m.get("machine_class"),
-            human_class=m.get("human_class"),
-            cluster03_count=m.get("cluster03_count", 0),
-            context_pre_minutes=m["pre"],
+            tier_idx=c.get("tier_idx"),
+            tier_max=c.get("tier_max"),
+            s_scores=c.get("s_scores", {}),
+            machine_class=c.get("machine_class"),
+            human_class=c.get("human_class"),
+            cluster03_count=c.get("cluster03_count", 0),
+            context_pre_minutes=c["pre"],
             references=_reference_changes_for_window(
                 ref_rows,
-                m["start"],
-                m["end"],
+                c["start"],
+                c["end"],
                 tolerance_minutes,
                 symbol,
             ),
-        )))
-
-    # 最新事件在前；截断 200。
-    windows.sort(key=lambda t: t[0], reverse=True)
-    return [w for _, w in windows][:200]
+        )
+        for c in cores
+    ]
 
 
 def load_context_news(session: Session, context_start: datetime, context_end: datetime) -> ContextNewsResponse:
@@ -1172,13 +1227,15 @@ def list_annotations(
     era_anchor_by_symbol: dict[str, datetime | None] = {}
 
     def _sym_window_index(sym: str) -> tuple[set[int], dict[int, dict]]:
-        """当前窗口的 annotation_id 集合 + annotation_id → s_scores（列表行随行带 S，与工作台同数）。"""
+        """当前窗口的 annotation_id 集合 + annotation_id → s_scores（列表行随行带 S，与工作台同数）。
+        2026-08-30 性能修复：只要骨架（_window_cores）——此前调完整 load_price_windows，
+        把全量对标计算（页面最贵的一步）在列表接口里原样重跑了一遍，每次开页/翻页多付 60 秒。"""
         if sym not in cur_ids_by_symbol:
-            wins = load_price_windows(session, sym, hours)
-            cur_ids_by_symbol[sym] = {w.annotation_id for w in wins if w.annotation_id is not None}
+            cores, _ = _window_cores(session, sym, hours)
+            cur_ids_by_symbol[sym] = {c["annotation_id"] for c in cores if c["annotation_id"] is not None}
             s_scores_by_ann_by_symbol[sym] = {
-                w.annotation_id: w.s_scores for w in wins
-                if w.annotation_id is not None and w.s_scores
+                c["annotation_id"]: c["s_scores"] for c in cores
+                if c["annotation_id"] is not None and c.get("s_scores")
             }
         return cur_ids_by_symbol[sym], s_scores_by_ann_by_symbol[sym]
 
