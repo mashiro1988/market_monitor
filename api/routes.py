@@ -74,8 +74,18 @@ from schemas.research import (
     MarketSweepResponse,
     TimelineResponse,
 )
+from models.strategy import StrategyEvent, StrategyPosition
 from schemas.sectors import SectorLeaderboardResponse, SectorTokensResponse
+from schemas.strategy import (
+    StrategyEventSchema,
+    StrategyPositionCreate,
+    StrategyPositionSchema,
+    StrategyPositionUpdate,
+    StrategySettingsSchema,
+    StrategySimulateRequest,
+)
 from schemas.tasks import TaskStatus
+from services import strategy_service
 from services import alerts_service, annotation_service, behavior_views, event_linking, event_markets, event_pool, market_service, market_sweep, news_service, pool_sweep, prediction_service, sector_service, task_service
 from services.time_utils import parse_datetime, timestamp_pair, utc_now_naive
 
@@ -750,3 +760,86 @@ def research_event_market_detach(link_id: int, payload: DetachMarketRequest,
     if not event_markets.detach_market(db, link_id, payload.reason):
         raise ApiError("MARKET_LINK_NOT_FOUND", "挂接不存在", status_code=404)
     return {"ok": True}
+
+
+# ---------- 持仓策略（docs/superpowers/specs/2026-08-28-position-strategy-design.md） ----------
+
+@router.get("/strategy/overview")
+def strategy_overview(symbol: str = strategy_service.DEFAULT_SYMBOL,
+                      db: Session = Depends(get_db)) -> dict:
+    return strategy_service.get_overview(db, symbol=symbol)
+
+
+@router.get("/strategy/events", response_model=list[StrategyEventSchema])
+def strategy_events(symbol: str = strategy_service.DEFAULT_SYMBOL, limit: int = 50,
+                    db: Session = Depends(get_db)) -> list[StrategyEventSchema]:
+    rows = (db.query(StrategyEvent).filter(StrategyEvent.symbol == symbol)
+            .order_by(StrategyEvent.id.desc()).limit(min(limit, 200)).all())
+    return rows
+
+
+@router.get("/strategy/positions", response_model=list[StrategyPositionSchema])
+def strategy_positions(db: Session = Depends(get_db)) -> list[StrategyPositionSchema]:
+    return db.query(StrategyPosition).order_by(StrategyPosition.entry_at.asc()).all()
+
+
+@router.post("/strategy/positions", response_model=StrategyPositionSchema)
+def strategy_position_create(payload: StrategyPositionCreate,
+                             db: Session = Depends(get_db)) -> StrategyPositionSchema:
+    row = StrategyPosition(**payload.model_dump())
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.patch("/strategy/positions/{position_id}", response_model=StrategyPositionSchema)
+def strategy_position_update(position_id: int, payload: StrategyPositionUpdate,
+                             db: Session = Depends(get_db)) -> StrategyPositionSchema:
+    row = db.get(StrategyPosition, position_id)
+    if row is None:
+        raise ApiError("STRATEGY_POSITION_NOT_FOUND", "批次不存在", status_code=404)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, key, value)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/strategy/positions/{position_id}")
+def strategy_position_delete(position_id: int, db: Session = Depends(get_db)) -> dict:
+    row = db.get(StrategyPosition, position_id)
+    if row is None:
+        raise ApiError("STRATEGY_POSITION_NOT_FOUND", "批次不存在", status_code=404)
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/strategy/settings", response_model=StrategySettingsSchema)
+def strategy_settings_get(db: Session = Depends(get_db)) -> StrategySettingsSchema:
+    return strategy_service.get_settings(db)
+
+
+@router.put("/strategy/settings", response_model=StrategySettingsSchema)
+def strategy_settings_put(payload: StrategySettingsSchema,
+                          db: Session = Depends(get_db)) -> StrategySettingsSchema:
+    row = strategy_service.get_settings(db)
+    for key, value in payload.model_dump().items():
+        setattr(row, key, value)
+    db.commit()
+    return payload
+
+
+@router.post("/strategy/simulate")
+def strategy_simulate(payload: StrategySimulateRequest, db: Session = Depends(get_db)) -> dict:
+    return strategy_service.simulate(db, price=payload.price, forecast=payload.forecast,
+                                     vol=payload.vol, budget_pct=payload.budget_pct,
+                                     symbol=payload.symbol)
+
+
+@router.post("/strategy/run-check")
+def strategy_run_check(symbol: str = strategy_service.DEFAULT_SYMBOL) -> dict:
+    """手动触发一次每日检查（验收/补跑用），语义与定时任务完全一致。"""
+    produced = strategy_service.run_daily_check(symbol=symbol)
+    return {"ok": True, "events": produced}
