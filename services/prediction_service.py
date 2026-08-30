@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 import config
 from models.prediction import PredictionMarket
-from models.tracked_market import TrackedMarket
+from models.tracked_market import TrackedMarket, market_filter_list
 from schemas.predictions import (
     PredictionFamily,
     PredictionFamilySeries,
@@ -314,6 +315,7 @@ def _tracked_to_schema(row: TrackedMarket, events: list[dict] | None = None) -> 
         notes=row.notes,
         market=row.market or "macro",
         events=[TrackedEventBrief(**e) for e in (events or [])],
+        market_filter=market_filter_list(row.market_filter),
     )
 
 
@@ -385,6 +387,10 @@ def update_tracked_market(session: Session, tracked_id: int, payload: TrackedMar
         row.display_name = payload.display_name.strip() or None
     if payload.notes is not None:
         row.notes = payload.notes.strip() or None
+    if payload.market_filter is not None:
+        # 档位筛选(2026-08-30):空列表=清除(全保留),非空=只保留这些子市场
+        cleaned = [str(x).strip() for x in payload.market_filter if str(x).strip()]
+        row.market_filter = json.dumps(cleaned) if cleaned else None
     session.commit()
     session.refresh(row)
     return _tracked_to_schema(row)

@@ -8,7 +8,8 @@ vi.mock("../api/client", () => ({
     researchEventMarkets: vi.fn().mockResolvedValue({
       items: [{ link_id: 1, tracked_id: 2, slug: "ceasefire-2026", display_name: null,
                 market: "macro", enabled: true, link_source: "auto", confidence: 0.9,
-                settled: false, waiting_first_scan: true, markets: [] }]
+                settled: false, waiting_first_scan: true, markets: [],
+                market_filter: null, all_markets: [] }]
     }),
     predictionHistory: vi.fn().mockResolvedValue([]),
     researchMarketSweep: vi.fn(),

@@ -84,6 +84,8 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
             if run_migrations and "ix_news_source_id" in {idx["name"] for idx in inspector.get_indexes("news_items")}:
                 conn.execute(text("DROP INDEX IF EXISTS ix_news_source_id"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_source_id ON news_items (source, source_id)"))
+            # 回扫队列计数（时间轴每次都数,2026-08-30 性能:10 万行无索引数 NULL 游标）
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_relink ON news_items (market, event_linked_at)"))
             # 研究事件池游标列(补列 + 存量一次性盖章;不能走上面的补列 dict——那条路径不盖章)
             migrate_news_event_cursor(conn)
 
@@ -111,19 +113,24 @@ def _ensure_sqlite_schema(*, run_migrations: bool = True):
                 # 历史标注的窗口级三类从行为段 human_class 反向回填（幂等，见函数注释）
                 backfill_annotation_window_class(conn)
 
-        # tracked_markets：补软删除墓碑列 + 线归属列（2026-08-28 事件池合并：存量默认宏观）。
+        # tracked_markets：补软删除墓碑列 + 线归属列（2026-08-28 事件池合并：存量默认宏观）
+        # + 档位筛选列（2026-08-30：分桶类 event slug 只保留部分子市场）。
         if "tracked_markets" in table_names:
             existing = {col["name"] for col in inspector.get_columns("tracked_markets")}
             if "dismissed" not in existing:
                 conn.execute(text("ALTER TABLE tracked_markets ADD COLUMN dismissed BOOLEAN NOT NULL DEFAULT 0"))
             if "market" not in existing:
                 conn.execute(text("ALTER TABLE tracked_markets ADD COLUMN market VARCHAR(8) NOT NULL DEFAULT 'macro'"))
+            if "market_filter" not in existing:
+                conn.execute(text("ALTER TABLE tracked_markets ADD COLUMN market_filter TEXT"))
 
         # prediction_markets：补来源跟踪项列（图表按跟踪项软删状态精确过滤；旧快照为 NULL，走断流启发式）。
         if "prediction_markets" in table_names:
             existing = {col["name"] for col in inspector.get_columns("prediction_markets")}
             if "origin" not in existing:
                 conn.execute(text("ALTER TABLE prediction_markets ADD COLUMN origin VARCHAR(120)"))
+            # 事件市场卡按 origin 取数（2026-08-30 性能：无索引=36 万行全表扫，实测 0.68s/次）
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prediction_origin_ts ON prediction_markets (origin, timestamp)"))
 
         # sector_returns：补中位数列。均值代表强度，中位数代表板块广度。
         # 2026-08-07 追加 18 个资金流列（net/qv × 四窗口 × 两市场 + 两个覆盖币数）。

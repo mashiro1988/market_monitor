@@ -225,18 +225,22 @@ def detach_link(session: Session, link_id: int, reason: str | None) -> ResearchE
 # ---- 读取层(spec §8-§10):全部读时派生,不落库 ----
 
 def _driver_badge_map(session: Session) -> dict[int, dict]:
-    """确认层徽章(spec §8.2):news_id → {symbol, change_pct}(标注 news_roles 反查 driver)。"""
+    """确认层徽章(spec §8.2):news_id → {symbol, change_pct}(标注 news_roles 反查 driver)。
+    只取三列(2026-08-30 性能):整行会连 auto_reasoning 等大文本一起搬,列表页与
+    时间轴每次渲染都要建这张映射,搬全表大文本是白花的。"""
     out: dict[int, dict] = {}
-    rows = (session.query(NewsPriceAnnotation)
+    rows = (session.query(NewsPriceAnnotation.news_roles,
+                          NewsPriceAnnotation.symbol,
+                          NewsPriceAnnotation.change_pct)
             .filter(NewsPriceAnnotation.news_roles.isnot(None)).all())
-    for a in rows:
+    for news_roles, symbol, change_pct in rows:
         try:
-            roles = json.loads(a.news_roles or "{}")
+            roles = json.loads(news_roles or "{}")
         except json.JSONDecodeError:
             continue
         for nid, role in (roles or {}).items():
             if role == "driver":
-                out[int(nid)] = {"symbol": a.symbol, "change_pct": a.change_pct}
+                out[int(nid)] = {"symbol": symbol, "change_pct": change_pct}
     return out
 
 
@@ -288,10 +292,43 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
     market_counts = dict(session.query(ResearchEventMarket.event_id, func.count())
                          .filter(ResearchEventMarket.detached.is_(False))
                          .group_by(ResearchEventMarket.event_id).all())
+    events = query.all()
+    event_ids = [int(e.id) for e in events]
+    # 计数全走分组聚合(2026-08-30 性能):旧实现逐事件把挂接连新闻整行捞回来数——
+    # 7000+ 挂接 × 每次渲染,列表页实测 0.57s;聚合后不搬任何新闻正文。
+    link_alive = (ResearchEventLink.event_id.in_(event_ids),
+                  ResearchEventLink.detached.is_(False))
+    agg = {int(eid): (int(cnt), last) for eid, cnt, last in
+           session.query(ResearchEventLink.event_id, func.count(), func.max(NewsItem.timestamp))
+           .join(NewsItem, NewsItem.id == ResearchEventLink.news_id)
+           .filter(*link_alive)
+           .group_by(ResearchEventLink.event_id).all()} if event_ids else {}
+
+    def _count_created_between(start, end) -> dict[int, int]:
+        if not event_ids:
+            return {}
+        return {int(eid): int(cnt) for eid, cnt in
+                session.query(ResearchEventLink.event_id, func.count())
+                .filter(*link_alive,
+                        ResearchEventLink.created_at >= start,
+                        ResearchEventLink.created_at < end)
+                .group_by(ResearchEventLink.event_id).all()}
+
+    today_map = _count_created_between(today_start, today_end)
+    yday_map = _count_created_between(yday_start, today_start)
+    badge_counts: dict[int, int] = {}
+    badge_ids = list(badge_map.keys())
+    for i in range(0, len(badge_ids), 500):     # IN 子句分批,防超参数上限
+        chunk = badge_ids[i:i + 500]
+        if not event_ids:
+            break
+        for eid, cnt in (session.query(ResearchEventLink.event_id, func.count())
+                         .filter(*link_alive, ResearchEventLink.news_id.in_(chunk))
+                         .group_by(ResearchEventLink.event_id).all()):
+            badge_counts[int(eid)] = badge_counts.get(int(eid), 0) + int(cnt)
     out = []
-    for e in query.all():
-        rows = _event_links(session, e.id)
-        last_ts = rows[0][1].timestamp if rows else None
+    for e in events:
+        evidence_count, last_ts = agg.get(int(e.id), (0, None))
         out.append({
             "id": e.id, "name": e.name, "status": e.status,
             # display_no 是人看的号(各类型自排);id 仍是程序内部唯一标识
@@ -301,12 +338,10 @@ def list_events(session: Session, status: str | None = None, q: str | None = Non
             "coins": _event_coins(session, e.id) if e.event_type == "crypto" else [],
             "gate_keywords": e.gate_keywords, "created_from": e.created_from,
             "merged_into_id": e.merged_into_id, "closed_reason": e.closed_reason,
-            "evidence_count": len(rows),
-            "today_new": sum(1 for l, _ in rows
-                             if l.created_at and today_start <= l.created_at < today_end),
-            "yesterday_new": sum(1 for l, _ in rows
-                                 if l.created_at and yday_start <= l.created_at < today_start),
-            "badge_count": sum(1 for _, n in rows if int(n.id) in badge_map),
+            "evidence_count": evidence_count,
+            "today_new": today_map.get(int(e.id), 0),
+            "yesterday_new": yday_map.get(int(e.id), 0),
+            "badge_count": badge_counts.get(int(e.id), 0),
             "market_count": int(market_counts.get(int(e.id), 0)),
             "last_evidence_at": last_ts,
             # 卡片显示用北京时间(ui-redesign §6.1):last_evidence_at 是 naive UTC,直接切会差 8 小时
@@ -331,31 +366,28 @@ def event_timeline(session: Session, event_id: int, now: datetime | None = None,
     if days is not None:
         cutoff = now - timedelta(days=days)
         rows = [(l, n) for l, n in rows if n.timestamp and n.timestamp >= cutoff]
+    # 未评分(NULL)在设了分数门槛时出局:它是"评分失败"不是"0 分",不该混进筛选结果
+    if min_score is not None:
+        rows = [(l, n) for l, n in rows
+                if n.llm_importance is not None and n.llm_importance >= min_score]
     badge_map = _driver_badge_map(session)
     obs_symbol = config.EVENT_OBS_SYMBOLS[0]
-    snaps: list = []
-    if rows:
-        times = [n.timestamp for _, n in rows]
+
+    def _load_snaps(subset) -> list:
+        if not subset:
+            return []
+        times = [n.timestamp for _, n in subset]
         # spec §8.1:一次批量捞时间范围快照。跨年老事件此范围会变大,届时换 per-news 小查询即可。
-        snaps = (session.query(PriceSnapshot.timestamp, PriceSnapshot.price)
-                 .filter(PriceSnapshot.symbol == obs_symbol,
-                         PriceSnapshot.timestamp >= min(times) - timedelta(minutes=OBS_BASELINE_TOLERANCE_MINUTES),
-                         PriceSnapshot.timestamp <= max(times) + timedelta(minutes=config.EVENT_OBS_REACTION_MINUTES))
-                 .order_by(PriceSnapshot.timestamp.asc()).all())
-    items = []
-    for link, n in rows:
-        # 未评分(NULL)在设了分数门槛时出局:它是"评分失败"不是"0 分",不该混进筛选结果
-        if min_score is not None and (n.llm_importance is None or n.llm_importance < min_score):
-            continue
-        obs = observed_reaction_from_rows(snaps, n.timestamp, now=now)
-        if min_abs_move is not None:
-            if obs.get("status") != "ok" or obs.get("net_pct") is None:
-                continue                                   # pending/no_data 一律排除
-            if abs(obs["net_pct"]) < min_abs_move:
-                continue
-        items.append({
+        return (session.query(PriceSnapshot.timestamp, PriceSnapshot.price)
+                .filter(PriceSnapshot.symbol == obs_symbol,
+                        PriceSnapshot.timestamp >= min(times) - timedelta(minutes=OBS_BASELINE_TOLERANCE_MINUTES),
+                        PriceSnapshot.timestamp <= max(times) + timedelta(minutes=config.EVENT_OBS_REACTION_MINUTES))
+                .order_by(PriceSnapshot.timestamp.asc()).all())
+
+    def _item(link, n, snaps) -> dict:
+        return {
             "news": to_news_schema(n).model_dump(),
-            "obs": obs,
+            "obs": observed_reaction_from_rows(snaps, n.timestamp, now=now),
             "obs_symbol": obs_symbol,
             "driver_badge": badge_map.get(int(n.id)),
             # 评分失手=分数闸本该拦却被人确认挂上(打分校准素材,spec §8.3)。
@@ -367,12 +399,35 @@ def event_timeline(session: Session, event_id: int, now: datetime | None = None,
             "link": {"id": link.id, "link_source": link.link_source,
                      "auto_event_id": link.auto_event_id, "confidence": link.confidence,
                      "prompt_version": link.prompt_version, "detached": link.detached},
-        })
-    total = len(items)
+        }
+
     page = max(1, int(page or 1))
-    if page_size is not None:
-        page_size = max(1, int(page_size))
-        items = items[(page - 1) * page_size: page * page_size]
+    if min_abs_move is None:
+        # 快路径(2026-08-30 性能):波动筛选没开时,分页不依赖观测值——先切页,
+        # 只对本页算观测/序列化。旧实现对全量证据(大事件 500+)先算完再切,页页都付全款。
+        total = len(rows)
+        page_rows = rows
+        if page_size is not None:
+            page_size = max(1, int(page_size))
+            page_rows = rows[(page - 1) * page_size: page * page_size]
+        snaps = _load_snaps(page_rows)
+        items = [_item(link, n, snaps) for link, n in page_rows]
+    else:
+        # 慢路径:观测值参与筛选,总数取决于每条的读数,只能全量算(行为与旧版一致)
+        snaps = _load_snaps(rows)
+        items = []
+        for link, n in rows:
+            entry = _item(link, n, snaps)
+            obs = entry["obs"]
+            if obs.get("status") != "ok" or obs.get("net_pct") is None:
+                continue                                   # pending/no_data 一律排除
+            if abs(obs["net_pct"]) < min_abs_move:
+                continue
+            items.append(entry)
+        total = len(items)
+        if page_size is not None:
+            page_size = max(1, int(page_size))
+            items = items[(page - 1) * page_size: page * page_size]
     # 回扫队列按本事件所属的线统计:加密页不该显示宏观的积压(两条线各跑各的挂接)
     pending_relink = (session.query(NewsItem)
                       .filter(NewsItem.tagged_at.isnot(None),

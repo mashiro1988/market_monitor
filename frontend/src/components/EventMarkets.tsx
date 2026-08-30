@@ -68,6 +68,21 @@ export function EventMarkets({ eventId, eventType }: {
     },
     onError: () => setActionError("摘下失败")
   });
+  // 筛档位(2026-08-30):分桶类市场只保留想看的档;空列表=清除筛选(全保留)。
+  // 采集端同时少采,下轮起被剔的档不再产生新快照。
+  const [editingFilter, setEditingFilter] = useState<number | null>(null);
+  const [draftIds, setDraftIds] = useState<string[]>([]);
+  const saveFilter = useMutation({
+    mutationFn: ({ trackedId, ids, total }: { trackedId: number; ids: string[]; total: number }) =>
+      api.updatePredictionTracked(trackedId, { market_filter: ids.length === total ? [] : ids }),
+    onSuccess: () => {
+      setActionError("");
+      setEditingFilter(null);
+      void qc.invalidateQueries({ queryKey: ["event-markets", eventId] });
+      void qc.invalidateQueries({ queryKey: ["prediction-tracked"] });
+    },
+    onError: (err) => setActionError(apiErrorText(err, "保存档位失败"))
+  });
 
   if (markets.isLoading) return <LoadingState label="加载关联市场" />;
   if (markets.isError) return <ErrorState error={markets.error} />;
@@ -106,6 +121,20 @@ export function EventMarkets({ eventId, eventType }: {
             <span className="rp-title">{item.display_name || item.slug}</span>
             {linkBadges(item).map((b, i) => <span key={i} className={b.cls}>{b.text}</span>)}
             <span style={{ flex: 1 }} />
+            {item.all_markets.length > 1 && (
+              <button type="button" className="link-button"
+                      title="分桶类市场只保留想看的档位(同时停采其余档)"
+                      onClick={() => {
+                        if (editingFilter === item.link_id) {
+                          setEditingFilter(null);
+                        } else {
+                          setEditingFilter(item.link_id);
+                          setDraftIds(item.market_filter ?? item.all_markets.map((m) => m.market_id));
+                        }
+                      }}>
+                筛档位({item.markets.length}/{item.all_markets.length})
+              </button>
+            )}
             <button type="button" className="link-button danger"
                     disabled={detach.isPending}
                     onClick={() => {
@@ -115,6 +144,34 @@ export function EventMarkets({ eventId, eventType }: {
               摘下
             </button>
           </div>
+          {editingFilter === item.link_id && (
+            <div className="panel" style={{ margin: "8px 0" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", padding: "6px 0" }}>
+                {item.all_markets.map((m) => (
+                  <label key={m.market_id} style={{ display: "flex", alignItems: "center",
+                                                    gap: 4, cursor: "pointer" }}>
+                    <input type="checkbox" checked={draftIds.includes(m.market_id)}
+                           onChange={(ev) => setDraftIds(ev.target.checked
+                             ? [...draftIds, m.market_id]
+                             : draftIds.filter((x) => x !== m.market_id))} />
+                    <span className="muted">{m.question}</span>
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" className="link-button"
+                        onClick={() => setDraftIds(item.all_markets.map((m) => m.market_id))}>
+                  全选
+                </button>
+                <Button kind="primary" disabled={saveFilter.isPending || draftIds.length === 0}
+                        onClick={() => saveFilter.mutate({ trackedId: item.tracked_id,
+                                                           ids: draftIds,
+                                                           total: item.all_markets.length })}>
+                  {saveFilter.isPending ? "保存中…" : `保存(留 ${draftIds.length} 档)`}
+                </Button>
+              </div>
+            </div>
+          )}
           {item.waiting_first_scan
             ? <div className="muted">等待首轮采集(最长 1 小时)…</div>
             : (

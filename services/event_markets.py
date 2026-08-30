@@ -14,7 +14,7 @@ import config
 from models.event_market import ResearchEventMarket
 from models.prediction import PredictionMarket
 from models.research import ResearchEvent
-from models.tracked_market import TrackedMarket
+from models.tracked_market import TrackedMarket, market_filter_list
 from schemas.predictions import PredictionMarketSummary
 from services import prediction_service
 
@@ -106,9 +106,17 @@ def list_event_markets(session: Session, event_id: int) -> list[dict]:
         by_market: dict[str, list[PredictionMarket]] = defaultdict(list)
         for row in latest:
             by_market[row.market_id].append(row)
+        # 筛档位(2026-08-30):卡片只画保留档;all_markets 列全部子市场供编辑器勾选
+        allowed = market_filter_list(tracked.market_filter)
+        all_markets = sorted(
+            ({"market_id": market_id, "question": outcomes[0].question}
+             for market_id, outcomes in by_market.items()),
+            key=lambda m: m["question"])
         summaries: list[PredictionMarketSummary] = []
         newest = None
         for market_id, outcomes in by_market.items():
+            if allowed is not None and market_id not in allowed:
+                continue
             ordered = sorted(outcomes, key=lambda item: item.outcome)
             summaries.append(PredictionMarketSummary(
                 market_id=market_id,
@@ -131,7 +139,10 @@ def list_event_markets(session: Session, event_id: int) -> list[dict]:
             "market": tracked.market or "macro", "enabled": bool(tracked.enabled),
             "link_source": link.link_source, "confidence": link.confidence,
             "settled": settled,
-            "waiting_first_scan": not summaries,   # 新挂市场首轮采集前的占位标记
+            # 占位=一条快照都没有;筛选筛空不算"等待首轮采集"
+            "waiting_first_scan": not by_market,
             "markets": summaries,
+            "market_filter": allowed,
+            "all_markets": all_markets,
         })
     return items

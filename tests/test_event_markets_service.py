@@ -109,3 +109,23 @@ def test_links_for_tracked_returns_briefs(session):
     briefs = event_markets.links_for_tracked(session, [t.id])
     assert briefs[t.id][0] == {"link_id": link.id, "event_id": e.id,
                                "display_no": 1, "name": "俄乌停火"}
+
+
+def test_market_filter_limits_cards_but_lists_all(session):
+    """筛档位(2026-08-30):卡片只画保留档,all_markets 仍列全部子市场供编辑器勾选。"""
+    import json
+    e = _event(session)
+    t = _tracked(session, "fed-buckets")
+    t.market_filter = json.dumps(["m-keep"])
+    session.commit()
+    event_markets.attach_market(session, e.id, t.id)
+    now = utc_now_naive()
+    for market_id, q in [("m-keep", "keep?"), ("m-drop", "drop?")]:
+        session.add(PredictionMarket(timestamp=now, market_id=market_id, question=q,
+                                     outcome="Yes", probability=0.5, origin="slug:fed-buckets"))
+    session.commit()
+    item = event_markets.list_event_markets(session, e.id)[0]
+    assert [m.market_id for m in item["markets"]] == ["m-keep"]
+    assert item["market_filter"] == ["m-keep"]
+    assert {a["market_id"] for a in item["all_markets"]} == {"m-keep", "m-drop"}
+    assert item["waiting_first_scan"] is False

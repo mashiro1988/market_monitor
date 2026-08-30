@@ -325,10 +325,17 @@ export type EventMarketItem = {
   settled: boolean;
   waiting_first_scan: boolean;
   markets: PredictionMarketSummary[];
+  market_filter: string[] | null;
+  all_markets: EventSubMarket[];
 };
 
 export type EventMarketsResponse = {
   items: EventMarketItem[];
+};
+
+export type EventSubMarket = {
+  market_id: string;
+  question: string;
 };
 
 export type LinkBrief = {
@@ -870,12 +877,14 @@ export type TrackedMarketSchema = {
   notes: string | null;
   market: string;
   events: TrackedEventBrief[];
+  market_filter: string[] | null;
 };
 
 export type TrackedMarketUpdate = {
   enabled?: boolean | null;
   display_name?: string | null;
   notes?: string | null;
+  market_filter?: string[] | null;
 };
 
 export type AlertLog = AlertLogSchema;

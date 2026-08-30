@@ -64,6 +64,8 @@ class TrackedMarketSchema(BaseModel):
     notes: str | None = None
     market: str = "macro"
     events: list[TrackedEventBrief] = []
+    # 档位筛选(2026-08-30):保留的子市场 market_id;None=全保留
+    market_filter: list[str] | None = None
 
 
 class TrackedMarketCreate(BaseModel):
@@ -79,6 +81,14 @@ class TrackedMarketUpdate(BaseModel):
     enabled: bool | None = None
     display_name: str | None = None
     notes: str | None = None
+    # 档位筛选:传列表=设置;空列表=清除(全保留);不传=不动
+    market_filter: list[str] | None = None
+
+
+class EventSubMarket(BaseModel):
+    """筛档位编辑器的选项:该跟踪项旗下出现过的子市场(2026-08-30)。"""
+    market_id: str
+    question: str = ""
 
 
 class EventMarketItem(BaseModel):
@@ -94,6 +104,8 @@ class EventMarketItem(BaseModel):
     settled: bool = False
     waiting_first_scan: bool = False
     markets: list[PredictionMarketSummary] = []
+    market_filter: list[str] | None = None       # 保留档;None=全保留
+    all_markets: list[EventSubMarket] = []       # 全部子市场(编辑器选项)
 
 
 class EventMarketsResponse(BaseModel):

@@ -71,3 +71,24 @@ def test_attribute_override_bypasses_db(db_with_tracked):
 
     assert client.slug_calls == ["override-slug"]
     assert len(records) == 2
+
+
+def test_market_filter_keeps_only_selected_submarkets(db_with_tracked):
+    """档位筛选(2026-08-30):event slug 展开的多子市场,只采集 market_filter 里的。"""
+    import json
+    s = db_with_tracked()
+    row = s.query(TrackedMarket).filter_by(identifier="enabled-slug").one()
+    row.market_filter = json.dumps(["cond_keep"])
+    s.commit(); s.close()
+
+    class MultiClient(FakeClient):
+        def get_markets_by_slug(self, slug):
+            self.slug_calls.append(slug)
+            return [
+                {**_make_market("keep?", 500_000, slug=slug), "conditionId": "cond_keep"},
+                {**_make_market("drop?", 500_000, slug=slug), "conditionId": "cond_drop"},
+            ]
+
+    source = PolymarketSource(client=MultiClient())
+    records = source.fetch()
+    assert {r.market_id for r in records} == {"cond_keep"}

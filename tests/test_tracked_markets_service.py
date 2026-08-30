@@ -117,3 +117,18 @@ def test_tracked_schema_carries_line_and_event_briefs(session):
     assert [r.identifier for r in rows] == ["crypto-slug"]
     assert rows[0].events[0].name == "测试事件"
     assert prediction_service.list_tracked_markets(session, market="macro") == []
+
+
+def test_update_market_filter_set_keep_and_clear(session):
+    """档位筛选 PATCH 语义(2026-08-30):传列表=设置;空列表=清除(全保留);不传=不动。"""
+    created = prediction_service.create_tracked_market(
+        session, TrackedMarketCreate(kind="slug", identifier="buckets"))
+    updated = prediction_service.update_tracked_market(
+        session, created.id, TrackedMarketUpdate(market_filter=["a", "b"]))
+    assert updated.market_filter == ["a", "b"]
+    untouched = prediction_service.update_tracked_market(
+        session, created.id, TrackedMarketUpdate(enabled=False))
+    assert untouched.market_filter == ["a", "b"]
+    cleared = prediction_service.update_tracked_market(
+        session, created.id, TrackedMarketUpdate(market_filter=[]))
+    assert cleared.market_filter is None
