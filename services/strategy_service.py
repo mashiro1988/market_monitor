@@ -253,3 +253,144 @@ def run_daily_check(*, db=None, symbol: str = DEFAULT_SYMBOL, channel=None) -> l
     finally:
         if own:
             db.close()
+
+
+# ---------- overview 与计算器（设计稿 §4 / §2.7） ----------
+
+def _live_price(db, symbol: str) -> tuple[float | None, datetime | None]:
+    """横幅现价：5m 管道最新价（instId 前缀 → PriceSnapshot symbol "BASE/USDT"）。"""
+    base = symbol.split("-")[0]
+    row = (
+        db.query(PriceSnapshot.price, PriceSnapshot.timestamp)
+        .filter(PriceSnapshot.symbol == f"{base}/USDT")
+        .order_by(PriceSnapshot.timestamp.desc())
+        .first()
+    )
+    return (row[0], row[1]) if row else (None, None)
+
+
+def get_overview(db, *, symbol: str = DEFAULT_SYMBOL) -> dict:
+    """页面主接口：横幅 + 图 + 批次读数。拉取失败降级 data_stale=True（设计稿 §4）。"""
+    settings = get_settings(db)
+    state = db.get(StrategySymbolState, symbol)
+    positions = open_positions(db, symbol)
+    live, live_at = _live_price(db, symbol)
+    base = {
+        "symbol": symbol,
+        "generated_at": _utc_now().isoformat(),
+        "data_stale": False,
+        "live_price": live,
+        "live_price_at": live_at.isoformat() if live_at else None,
+        "settings": {
+            "capital": settings.capital, "risk_budget_pct": settings.risk_budget_pct,
+            "x_soft": settings.x_soft, "x_hard": settings.x_hard,
+            "ewma_alpha": settings.ewma_alpha,
+            "vol_update_threshold": settings.vol_update_threshold,
+        },
+        "reentry": (
+            {"level": state.reentry_level,
+             "breached_at": state.reentry_breached_at.isoformat() if state.reentry_breached_at else None}
+            if state and state.reentry_level is not None else None
+        ),
+    }
+    empty_chart = {"days": [], "soft_line": [], "hard_current": None,
+                   "cost_lines": [], "anchor_point": None, "entry_markers": []}
+    try:
+        candles = fetch_daily_candles(symbol)
+    except Exception as exc:
+        logger.warning(f"[strategy] overview 拉取 {symbol} 失败: {exc}")
+        candles = []
+    closes = [c.close for c in candles]
+    vols = eng.ewma_vol_series(closes, alpha=settings.ewma_alpha) if len(closes) >= 2 else []
+    vol_latest = vols[-1] if vols else None
+    v_used = state.v_used if state and state.v_used is not None else vol_latest
+    if not candles or v_used is None:
+        return {**base, "data_stale": True, "vol_latest": vol_latest, "v_used": v_used,
+                "verdict": "no_data", "budget_usd": settings.capital * settings.risk_budget_pct,
+                "total_occupy_usd": 0.0, "batches": [], "chart": empty_chart}
+
+    batches = []
+    total_occupy = 0.0
+    any_breach = False
+    for pos in positions:
+        st = _batch_state_for(pos, candles, v_used, settings)
+        total_occupy += st.occupy_usd
+        any_breach = any_breach or st.breached
+        batches.append({
+            "id": pos.id, "batch_label": pos.batch_label,
+            "entry_at": pos.entry_at.isoformat(), "entry_price": pos.entry_price,
+            "quantity": pos.quantity, "forecast": pos.forecast, "note": pos.note,
+            "anchor_high": st.anchor_high, "soft_stop": st.soft_stop, "hard_stop": st.hard_stop,
+            "breached": st.breached, "locked": st.locked,
+            "occupy_usd": st.occupy_usd, "distance_pct": st.distance_pct,
+            "pnl_usd": pos.quantity * (closes[-1] - pos.entry_price),
+        })
+
+    # 图：从最早批次入场前 5 根起截窗；软止损历史 = 闩锁重放近似（设计稿 §2.3 注）
+    chart_days = candles
+    soft_line: list[float | None] = [None] * len(chart_days)
+    entry_markers = []
+    anchor_point = None
+    if positions:
+        first_entry = min(p.entry_at for p in positions)
+        first_idx = next((i for i, c in enumerate(candles) if c.close_time > first_entry), len(candles))
+        start_idx = max(0, first_idx - 5)
+        chart_days = candles[start_idx:]
+        replay_used = eng.walk_latch(vols, threshold=settings.vol_update_threshold) if vols else []
+        soft_line = []
+        for i, c in enumerate(chart_days):
+            gi = start_idx + i
+            vu = replay_used[gi - 1] if 1 <= gi <= len(replay_used) else v_used
+            stops = [
+                eng.batch_state(entry_price=p.entry_price, entry_at=p.entry_at, quantity=p.quantity,
+                                candles=candles[: gi + 1], v_used=vu,
+                                x_soft=settings.x_soft, x_hard=settings.x_hard).soft_stop
+                for p in positions if c.close_time > p.entry_at
+            ]
+            soft_line.append(max(stops) if stops else None)
+        for p in positions:
+            marker_candle = next((c for c in chart_days if c.close_time > p.entry_at), None)
+            entry_markers.append({
+                "date": (marker_candle.date if marker_candle else chart_days[-1].date).strftime("%m-%d"),
+                "label": p.batch_label, "value": p.entry_price,
+            })
+        top = max(batches, key=lambda b: b["anchor_high"])
+        anchor_candles = [c for c in chart_days if c.close == top["anchor_high"]]
+        if anchor_candles:
+            anchor_point = {"date": anchor_candles[-1].date.strftime("%m-%d"), "value": top["anchor_high"]}
+
+    budget_usd = settings.capital * settings.risk_budget_pct
+    verdict = "no_position" if not positions else ("breach" if any_breach else "hold")
+    return {
+        **base,
+        "vol_latest": vol_latest, "v_used": v_used,
+        "verdict": verdict, "budget_usd": budget_usd,
+        "total_occupy_usd": total_occupy, "batches": batches,
+        "chart": {
+            "days": [{"date": c.date.strftime("%m-%d"), "close": c.close} for c in chart_days],
+            "soft_line": soft_line,
+            "hard_current": min((b["hard_stop"] for b in batches), default=None),
+            "cost_lines": [{"label": b["batch_label"], "value": b["entry_price"]} for b in batches],
+            "anchor_point": anchor_point,
+            "entry_markers": entry_markers,
+        },
+    }
+
+
+def simulate(db, *, price: float, forecast: int, vol: float | None = None,
+             budget_pct: float | None = None, symbol: str = DEFAULT_SYMBOL) -> dict:
+    """建仓计算器：vol/budget 缺省时用在用值与参数表值。"""
+    settings = get_settings(db)
+    if vol is None:
+        state = db.get(StrategySymbolState, symbol)
+        vol = state.v_used if state and state.v_used is not None else None
+    if vol is None:
+        candles = fetch_daily_candles(symbol)
+        vols = eng.ewma_vol_series([c.close for c in candles], alpha=settings.ewma_alpha)
+        vol = vols[-1]
+    pct = budget_pct if budget_pct is not None else settings.risk_budget_pct
+    budget_usd = settings.capital * pct
+    sim = eng.simulate_entry(price=price, forecast=forecast, budget_usd=budget_usd,
+                             vol=vol, x_soft=settings.x_soft)
+    return {**sim, "vol": vol, "budget_usd": budget_usd,
+            "leverage": sim["notional_usd"] / settings.capital if settings.capital else None}

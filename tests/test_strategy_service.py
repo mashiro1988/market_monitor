@@ -135,3 +135,23 @@ def test_vol_update_with_overbudget_suggests_reduce(db, monkeypatch):
     _run(db, monkeypatch, base + [0.75], ch)
     kinds = [e.kind for e in db.query(StrategyEvent).all()]
     assert "vol_update" in kinds and "reduce_suggest" in kinds
+
+
+def test_overview_shape_and_stale_fallback(db, monkeypatch):
+    _seed_b1(db, entry_price=0.743, qty=23590.0, entry_at=datetime(2026, 8, 26, 23, 33))
+    monkeypatch.setattr(svc, "fetch_daily_candles",
+                        lambda symbol: _candles([0.70, 0.7518, 0.7323], start=datetime(2026, 8, 25)))
+    ov = svc.get_overview(db, symbol="VIRTUAL-USDT-SWAP")
+    assert ov["verdict"] == "hold"
+    b1 = ov["batches"][0]
+    assert b1["soft_stop"] == pytest.approx(0.7518 * (1 - 4 * ov["v_used"]))
+    assert ov["chart"]["days"][-1]["close"] == pytest.approx(0.7323)
+    assert len(ov["chart"]["soft_line"]) == len(ov["chart"]["days"])
+    assert ov["data_stale"] is False
+
+    # 拉取失败 => data_stale=True 且不抛
+    def boom(symbol):
+        raise RuntimeError("okx down")
+    monkeypatch.setattr(svc, "fetch_daily_candles", boom)
+    ov2 = svc.get_overview(db, symbol="VIRTUAL-USDT-SWAP")
+    assert ov2["data_stale"] is True and ov2["batches"] == []
