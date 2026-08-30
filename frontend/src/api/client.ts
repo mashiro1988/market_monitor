@@ -250,5 +250,36 @@ export const api = {
     request<{ ok: boolean }>(`/research/event-markets/${linkId}/detach`, {
       method: "POST",
       body: JSON.stringify({ reason: reason ?? null })
-    })
+    }),
+  // ---------- 持仓策略（/api/strategy/*） ----------
+  strategyOverview: (symbol?: string) =>
+    request<import("./types").StrategyOverview>(`/strategy/overview${buildQuery({ symbol })}`),
+  strategyEvents: (params: { symbol?: string; limit?: number } = {}) =>
+    request<import("./types").StrategyEventSchema[]>(`/strategy/events${buildQuery(params)}`),
+  strategyPositions: () => request<import("./types").StrategyPositionSchema[]>("/strategy/positions"),
+  strategyPositionCreate: (payload: import("./types").StrategyPositionCreate) =>
+    request<import("./types").StrategyPositionSchema>("/strategy/positions", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  strategyPositionUpdate: (id: number, payload: import("./types").StrategyPositionUpdate) =>
+    request<import("./types").StrategyPositionSchema>(`/strategy/positions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  strategyPositionDelete: (id: number) =>
+    request<{ ok: boolean }>(`/strategy/positions/${id}`, { method: "DELETE" }),
+  strategySettings: () => request<import("./types").StrategySettingsSchema>("/strategy/settings"),
+  strategySettingsUpdate: (payload: import("./types").StrategySettingsSchema) =>
+    request<import("./types").StrategySettingsSchema>("/strategy/settings", {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }),
+  strategySimulate: (payload: import("./types").StrategySimulateRequest) =>
+    request<import("./types").StrategySimulateResult>("/strategy/simulate", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  strategyRunCheck: () =>
+    request<import("./types").StrategyRunCheckResult>("/strategy/run-check", { method: "POST" })
 };
