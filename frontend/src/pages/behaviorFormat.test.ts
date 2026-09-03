@@ -37,6 +37,8 @@ describe("buildDailyRows", () => {
       sentUpNet: 0.9, sentDownNet: -1.4, sentNetAmp: -0.5,
       sentUpRatio: 14, sentDownRatio: 29,
       strongNet: -1, sumNet: -1.46, sentRatioNet: -15,
+      // 宏观净幅：强段 1.55−0.6=0.95，情绪 0.9−1.4=−0.5 → 宏观 1.45；弱段 = −1.46−0.95 = −2.41
+      strongAmpNet: 0.95, macroAmpNet: 1.45, weakAmpNet: -2.41, macroShare: -99, macroSharePlot: -99,
     });
     expect(rows[0].upSumStrong).toBe(1.55);
     expect(rows[0].upSumWeak).toBeCloseTo(0.86, 4);
@@ -60,6 +62,27 @@ describe("buildDailyRows", () => {
     expect(rows[0].strongNet).toBe(0);
     expect(rows[0].sumNet).toBe(0.5);
     expect(rows[0].sentRatioNet).toBeNull();
+    expect(rows[0].strongAmpNet).toBe(0.5);
+    expect(rows[0].macroAmpNet).toBe(0.5);
+    expect(rows[0].weakAmpNet).toBe(0);
+    expect(rows[0].macroShare).toBe(100);
+  });
+
+  it("blanks macro share on flat days and clamps the plotted share", () => {
+    const day = (up: number, down: number, upStrong: number, downStrong: number) => ({
+      bj_date: "2026-09-01", day_type: "weekday", live: true, counts: {}, composition: {},
+      up_net_sum: up, down_net_sum: down, up_net_sum_strong: upStrong, down_net_sum_strong: downStrong,
+      sent_up: 0, sent_down: 0, sent_up_net_sum: 0, sent_down_net_sum: 0,
+      computed_at: tf("2026-09-01T10:00:00", "2026-09-01 18:00:00"),
+    });
+    const flat = buildDailyRows({ symbol: "BTC/USDT", days: [day(0.3, 0, 0.3, 0)] } as any)[0];
+    expect(flat.macroAmpNet).toBe(0.3);
+    expect(flat.macroShare).toBeNull();          // 总净幅 0.3 < 0.5 下限
+    expect(flat.macroSharePlot).toBeNull();
+    const spike = buildDailyRows({ symbol: "BTC/USDT", days: [day(4.0, -3.5, 4.0, 0)] } as any)[0];
+    expect(spike.macroShare).toBe(800);          // 宏观 4.0 / 总 0.5
+    expect(spike.macroSharePlot).toBe(200);      // 作图钳位
+    expect(spike.weakAmpNet).toBe(-3.5);
   });
 });
 

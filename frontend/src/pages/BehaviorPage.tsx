@@ -2,6 +2,7 @@
 // 证据与动作（段明细/S 曲线/三类标注=人工审核）都在新闻标注页（工作台）。
 // 2026-09-03：净差线改读右侧副轴（独立比例尺，两轴对称让零线重合），有涨跌方向的六幅图全部配线；
 // 回溯 14 → 30 个北京日。设计稿：docs/superpowers/specs/2026-09-03-behavior-net-line-scale-design.md
+// 同日第二轮（§6）：新增"新闻+共振净幅差 + 宏观贡献占比"图——占比过半读作宏观主导的行情。
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -18,7 +19,7 @@ import {
 import { api } from "../api/client";
 import { PageHeader } from "../components/Controls";
 import { EmptyState, ErrorState, LoadingState } from "../components/StateViews";
-import { buildDailyRows, symmetricAxis } from "./behaviorFormat";
+import { buildDailyRows, MACRO_SHARE_FLOOR, symmetricAxis, type DailyRow } from "./behaviorFormat";
 
 const SYMBOL = "BTC/USDT";
 const DAYS = 30;
@@ -40,6 +41,27 @@ const MARGIN_NO_NET = { top: 4, right: 48, left: 0, bottom: 0 };   // 无右轴�
 const BAR_AXIS = { width: 34, tick: { fontSize: 12 } };
 const NET_AXIS = { yAxisId: "net", orientation: "right" as const, width: 40, tick: { fontSize: 12, fill: TEXT } };
 const NET_LINE = { yAxisId: "net", isAnimationActive: false, stroke: TEXT, strokeWidth: 2, dot: false };
+// 宏观占比线走同一条右轴位置，但刻度/线用新闻蓝，提示"这是占比不是净差"
+const SHARE_AXIS = { yAxisId: "net", orientation: "right" as const, width: 46, tick: { fontSize: 12, fill: C_ND },
+  tickFormatter: (v: number) => v + "%" };
+
+const fmtSigned = (v: number) => (v > 0 ? "+" : "") + v.toFixed(2);
+
+// 宏观净幅图的悬浮提示：把"总 = 宏观 + 情绪 + 弱段"的拆解一并给出，方便对账。
+function MacroTooltip({ active, payload }: { active?: boolean; payload?: { payload: DailyRow }[] }) {
+  if (!active || !payload?.length) return null;
+  const r = payload[0].payload;
+  return (
+    <div style={{ ...TOOLTIP_STYLE, padding: "8px 10px", fontSize: 12, lineHeight: 1.7 }}>
+      <div>{r.date}</div>
+      <div>总净幅差 {fmtSigned(r.sumNet)}%</div>
+      <div>= 宏观(新闻+共振) {fmtSigned(r.macroAmpNet)}% + 情绪 {fmtSigned(r.sentNetAmp)}% + 弱段 {fmtSigned(r.weakAmpNet)}%</div>
+      <div style={{ color: C_ND }}>
+        宏观占比 {r.macroShare == null ? "—（总净幅不足 " + MACRO_SHARE_FLOOR + "%，横盘不算）" : r.macroShare + "%"}
+      </div>
+    </div>
+  );
+}
 
 export function BehaviorPage() {
   const daily = useQuery({
@@ -62,6 +84,8 @@ export function BehaviorPage() {
     sentAmp: symmetricAxis(dailyRows.flatMap((r) => [r.sentUpNet, r.sentDownNet])),
     sentAmpNet: symmetricAxis(dailyRows.map((r) => r.sentNetAmp)),
     ratioNet: symmetricAxis(dailyRows.map((r) => r.sentRatioNet), true),
+    macro: symmetricAxis(dailyRows.map((r) => r.macroAmpNet)),
+    macroShare: symmetricAxis(dailyRows.map((r) => r.macroSharePlot)),
   }), [dailyRows]);
 
   return (
@@ -183,6 +207,21 @@ export function BehaviorPage() {
                 <Bar isAnimationActive={false} dataKey="sentUpNet" name="情绪涨净幅Σ" stackId="sn" fill={UP} opacity={0.65} />
                 <Bar isAnimationActive={false} dataKey="sentDownNet" name="情绪跌净幅Σ" stackId="sn" fill={DOWN} opacity={0.65} />
                 <Line {...NET_LINE} dataKey="sentNetAmp" name="净幅差" />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div className="mini-title">新闻+共振 净幅差（%）= 强段净幅差 − 情绪净幅差 · 蓝线=宏观贡献占比（右轴，过半=宏观主导；总净幅&lt;{MACRO_SHARE_FLOOR}% 空）</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <ComposedChart data={dailyRows} stackOffset="sign" margin={MARGIN}>
+                <CartesianGrid strokeDasharray="2 4" vertical={false} />
+                <XAxis dataKey="date" hide />
+                <YAxis {...BAR_AXIS} {...ax.macro} />
+                <YAxis {...SHARE_AXIS} {...ax.macroShare} />
+                <Tooltip content={<MacroTooltip />} />
+                <ReferenceLine y={0} stroke={INK} />
+                <ReferenceLine yAxisId="net" y={50} stroke={C_ND} strokeDasharray="4 4" label={{ value: "50%", position: "insideRight", fill: C_ND, fontSize: 11 }} />
+                <Bar isAnimationActive={false} dataKey={(r: DailyRow) => Math.max(0, r.macroAmpNet)} name="宏观净幅(涨)" stackId="m" fill={UP} opacity={0.65} />
+                <Bar isAnimationActive={false} dataKey={(r: DailyRow) => Math.min(0, r.macroAmpNet)} name="宏观净幅(跌)" stackId="m" fill={DOWN} opacity={0.65} />
+                <Line yAxisId="net" isAnimationActive={false} dataKey="macroSharePlot" name="宏观占比%" stroke={C_ND} strokeWidth={2} dot={false} />
               </ComposedChart>
             </ResponsiveContainer>
             <div className="mini-title">情绪·技术面 占比 %（上=涨 下=跌 · 分母&lt;5 空）+ 占比差线</div>
