@@ -7,6 +7,8 @@ import {
   medianOf,
   readWindowBands,
   stripBlocks,
+  symmetricAxis,
+  symmetricDomain,
   tierName,
 } from "./behaviorFormat";
 
@@ -34,6 +36,7 @@ describe("buildDailyRows", () => {
       sentUp: 1, sentDown: 2, sentNetCount: -1,
       sentUpNet: 0.9, sentDownNet: -1.4, sentNetAmp: -0.5,
       sentUpRatio: 14, sentDownRatio: 29,
+      strongNet: -1, sumNet: -1.46, sentRatioNet: -15,
     });
     expect(rows[0].upSumStrong).toBe(1.55);
     expect(rows[0].upSumWeak).toBeCloseTo(0.86, 4);
@@ -54,6 +57,37 @@ describe("buildDailyRows", () => {
     } as any);
     expect(rows[0].upSumWeak).toBe(0);
     expect(rows[0].downSumWeakNeg).toBe(0);
+    expect(rows[0].strongNet).toBe(0);
+    expect(rows[0].sumNet).toBe(0.5);
+    expect(rows[0].sentRatioNet).toBeNull();
+  });
+});
+
+describe("symmetricDomain", () => {
+  it("falls back to a unit domain when there is no data", () => {
+    expect(symmetricDomain([], true)).toEqual([-2, 2]);
+    expect(symmetricDomain([0, null, undefined])).toEqual([-1, 1]);
+  });
+
+  it("rounds integer axes up to an even bound so ±m/2 ticks stay whole", () => {
+    expect(symmetricDomain([3, -5, 2], true)).toEqual([-6, 6]);
+    expect(symmetricDomain([-4, 1], true)).toEqual([-4, 4]);
+    expect(symmetricDomain([null, 1], true)).toEqual([-2, 2]);
+  });
+
+  it("rounds float axes up to a nice 1/1.5/2/3/4/5/6/8/10 × 10^k bound", () => {
+    expect(symmetricDomain([3.87, -1.2])).toEqual([-4, 4]);
+    expect(symmetricDomain([12.3])).toEqual([-15, 15]);
+    expect(symmetricDomain([-0.13])).toEqual([-0.15, 0.15]);
+    expect(symmetricDomain([10])).toEqual([-10, 10]);
+  });
+});
+
+describe("symmetricAxis", () => {
+  it("always ticks zero and mirrors ±m/2, ±m around it", () => {
+    expect(symmetricAxis([3, -1], true)).toEqual({ domain: [-4, 4], ticks: [-4, -2, 0, 2, 4] });
+    expect(symmetricAxis([12.3])).toEqual({ domain: [-15, 15], ticks: [-15, -7.5, 0, 7.5, 15] });
+    expect(symmetricAxis([-0.13])).toEqual({ domain: [-0.15, 0.15], ticks: [-0.15, -0.075, 0, 0.075, 0.15] });
   });
 });
 
