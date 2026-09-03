@@ -40,7 +40,19 @@ export type DailyRow = {
   strongNet: number;                 // 强段(0.5+0.8档)涨−跌段数（第二幅）
   sumNet: number;                    // 涨Σ − |跌Σ|（第三幅）
   sentRatioNet: number | null;       // 情绪涨占比 − 跌占比（第七幅；分母<5 → null，线断开）
+  // 2026-09-03 第二轮：宏观(新闻+共振)净幅与贡献占比（设计稿 §6）
+  strongAmpNet: number;              // 强段(0.5档+)涨Σ − |跌Σ|
+  macroAmpNet: number;               // 强段净幅差 − 情绪净幅差 = 新闻驱动+纯共振(+当日未定案段)的净幅差
+  weakAmpNet: number;                // 弱段(0.3档)净幅差 = 总 − 强；恒等式 总 = 宏观 + 情绪 + 弱段
+  macroShare: number | null;         // 宏观净幅差 / 当日总净幅差 ×100（|总| < MACRO_SHARE_FLOOR → null）
+  macroSharePlot: number | null;     // 作图用：钳位到 ±MACRO_SHARE_CAP，原值看 macroShare
 };
+
+// 宏观贡献占比：分母（当日总净幅差，含 0.3 档弱段）小于此值的日子视为横盘，不算占比；
+// 占比是带符号的贡献率，可为负（宏观与全日方向相反）或超 100%（宏观推力被情绪/弱段抵消一部分），
+// 作图钳位到 ±CAP 防止极端值把轴撑爆。
+export const MACRO_SHARE_FLOOR = 0.5;
+export const MACRO_SHARE_CAP = 200;
 
 export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
   return resp.days.map((d) => {
@@ -58,6 +70,14 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
     const sentDownRatio = comp >= 5 ? Math.round(((d.sent_down ?? 0) / comp) * 100) : null;
     const strongUp = (d.counts["0.5"]?.up ?? 0) + (d.counts["0.8"]?.up ?? 0);
     const strongDown = (d.counts["0.5"]?.down ?? 0) + (d.counts["0.8"]?.down ?? 0);
+    const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+    const upSumStrong = Math.abs(d.up_net_sum_strong ?? 0);
+    const downSumStrongNeg = -Math.abs(d.down_net_sum_strong ?? 0);
+    const sentNetAmp = r4(Math.abs(d.sent_up_net_sum ?? 0) - Math.abs(d.sent_down_net_sum ?? 0));
+    const sumNet = r4(Math.abs(d.up_net_sum ?? 0) - Math.abs(d.down_net_sum ?? 0));
+    const strongAmpNet = r4(upSumStrong + downSumStrongNeg);
+    const macroAmpNet = r4(strongAmpNet - sentNetAmp);
+    const macroShare = Math.abs(sumNet) >= MACRO_SHARE_FLOOR ? Math.round((macroAmpNet / sumNet) * 100) : null;
     return {
       date: d.bj_date.slice(5),
       weekend: d.day_type === "weekend",
@@ -76,9 +96,9 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       sentRatio: comp >= 5 ? Math.round((three.sentiment_tech / comp) * 100) : null,
       downSumNeg: -Math.abs(d.down_net_sum ?? 0),
       upSum: Math.abs(d.up_net_sum ?? 0),
-      upSumStrong: Math.abs(d.up_net_sum_strong ?? 0),
+      upSumStrong,
       upSumWeak: Math.max(0, Math.abs(d.up_net_sum ?? 0) - Math.abs(d.up_net_sum_strong ?? 0)),
-      downSumStrongNeg: -Math.abs(d.down_net_sum_strong ?? 0),
+      downSumStrongNeg,
       downSumWeakNeg: Math.min(0, Math.abs(d.down_net_sum_strong ?? 0) - Math.abs(d.down_net_sum ?? 0)),
       t05Up: d.counts["0.5"]?.up ?? 0,
       t05Down: d.counts["0.5"]?.down ?? 0,
@@ -89,13 +109,18 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       sentNetCount: (d.sent_up ?? 0) - (d.sent_down ?? 0),
       sentUpNet: Math.abs(d.sent_up_net_sum ?? 0),
       sentDownNet: -Math.abs(d.sent_down_net_sum ?? 0),
-      sentNetAmp: Math.round((Math.abs(d.sent_up_net_sum ?? 0) - Math.abs(d.sent_down_net_sum ?? 0)) * 1e4) / 1e4,
+      sentNetAmp,
       sentUpRatio,
       sentDownRatio,
       strongNet: strongUp - strongDown,
-      sumNet: Math.round((Math.abs(d.up_net_sum ?? 0) - Math.abs(d.down_net_sum ?? 0)) * 1e4) / 1e4,
+      sumNet,
       // 用四舍五入后的占比相减，与占比柱读数对账一致（原始比值相减会差 1 个百分点）
       sentRatioNet: sentUpRatio != null && sentDownRatio != null ? sentUpRatio - sentDownRatio : null,
+      strongAmpNet,
+      macroAmpNet,
+      weakAmpNet: r4(sumNet - strongAmpNet),
+      macroShare,
+      macroSharePlot: macroShare == null ? null : Math.max(-MACRO_SHARE_CAP, Math.min(MACRO_SHARE_CAP, macroShare)),
     };
   });
 }
