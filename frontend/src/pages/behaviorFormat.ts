@@ -36,6 +36,10 @@ export type DailyRow = {
   sentNetAmp: number;                // 情绪涨跌净幅差
   sentUpRatio: number | null;        // 情绪涨段占构成段 %（分母<5 → null）
   sentDownRatio: number | null;
+  // 2026-09-03 每图配净差线（设计稿 docs/superpowers/specs/2026-09-03-behavior-net-line-scale-design.md）
+  strongNet: number;                 // 强段(0.5+0.8档)涨−跌段数（第二幅）
+  sumNet: number;                    // 涨Σ − |跌Σ|（第三幅）
+  sentRatioNet: number | null;       // 情绪涨占比 − 跌占比（第七幅；分母<5 → null，线断开）
 };
 
 export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
@@ -50,6 +54,10 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
     const three = mergedComposition(d.composition);
     const comp = three.news_driven + three.pure_resonance + three.sentiment_tech;
     const noRef = d.composition["no_ref"] ?? 0;
+    const sentUpRatio = comp >= 5 ? Math.round(((d.sent_up ?? 0) / comp) * 100) : null;
+    const sentDownRatio = comp >= 5 ? Math.round(((d.sent_down ?? 0) / comp) * 100) : null;
+    const strongUp = (d.counts["0.5"]?.up ?? 0) + (d.counts["0.8"]?.up ?? 0);
+    const strongDown = (d.counts["0.5"]?.down ?? 0) + (d.counts["0.8"]?.down ?? 0);
     return {
       date: d.bj_date.slice(5),
       weekend: d.day_type === "weekend",
@@ -82,10 +90,44 @@ export function buildDailyRows(resp: BehaviorDailyResponse): DailyRow[] {
       sentUpNet: Math.abs(d.sent_up_net_sum ?? 0),
       sentDownNet: -Math.abs(d.sent_down_net_sum ?? 0),
       sentNetAmp: Math.round((Math.abs(d.sent_up_net_sum ?? 0) - Math.abs(d.sent_down_net_sum ?? 0)) * 1e4) / 1e4,
-      sentUpRatio: comp >= 5 ? Math.round(((d.sent_up ?? 0) / comp) * 100) : null,
-      sentDownRatio: comp >= 5 ? Math.round(((d.sent_down ?? 0) / comp) * 100) : null,
+      sentUpRatio,
+      sentDownRatio,
+      strongNet: strongUp - strongDown,
+      sumNet: Math.round((Math.abs(d.up_net_sum ?? 0) - Math.abs(d.down_net_sum ?? 0)) * 1e4) / 1e4,
+      // 用四舍五入后的占比相减，与占比柱读数对账一致（原始比值相减会差 1 个百分点）
+      sentRatioNet: sentUpRatio != null && sentDownRatio != null ? sentUpRatio - sentDownRatio : null,
     };
   });
+}
+
+// 对称值域（2026-09-03 双轴）：[-m, +m]，m = 数据最大绝对值向上取到"整刻度"。
+// 柱轴与净差线轴各自对称，两条零线才会重合。integer=true（段数）取到偶数，让 ±m/2 刻度也是整数；
+// 否则取 1/1.5/2/3/4/5/6/8/10 × 10^k 中不小于最大值的那个。
+const NICE_STEPS = [1, 1.5, 2, 3, 4, 5, 6, 8, 10];
+export function symmetricDomain(values: (number | null | undefined)[], integer = false): [number, number] {
+  let maxAbs = 0;
+  for (const v of values) if (v != null && Number.isFinite(v)) maxAbs = Math.max(maxAbs, Math.abs(v));
+  if (maxAbs === 0) return integer ? [-2, 2] : [-1, 1];
+  let m: number;
+  if (integer) {
+    m = Math.ceil(maxAbs);
+    if (m % 2) m += 1;
+  } else {
+    const k = 10 ** Math.floor(Math.log10(maxAbs));
+    m = Number(((NICE_STEPS.find((step) => step * k >= maxAbs) ?? 10) * k).toPrecision(3));
+  }
+  return [-m, m];
+}
+
+// 对称轴 props：值域 + 五个对称刻度（±m、±m/2、0）。recharts 对固定值域自己挑刻度时从下限起按"整步"
+// 递增（如 [-15, 15] 步 8 → -15/-7/1/9），零线会没有标签、上下也不对称，所以刻度显式给。
+export function symmetricAxis(
+  values: (number | null | undefined)[], integer = false,
+): { domain: [number, number]; ticks: number[] } {
+  const domain = symmetricDomain(values, integer);
+  const m = domain[1];
+  const half = Number((m / 2).toPrecision(4));
+  return { domain, ticks: [-m, -half, 0, half, m] };
 }
 
 export function fmtS(v: number | null | undefined): string {
